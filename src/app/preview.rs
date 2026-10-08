@@ -220,6 +220,14 @@ fn ui_preview() {
         "frontend",
         Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0)),
     );
+    // Panel de agente (Claude Code) para ver su logo en la cabecera. // claude-panel
+    let ctx = harness.ctx.clone();
+    harness.state_mut().workspaces[0].open_agent(
+        &ctx,
+        "claude",
+        false,
+        Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0)),
+    );
     settle(&mut harness);
     save(&mut harness, &out, "1-workspace");
 

@@ -292,24 +292,6 @@ impl App {
             .ok()
             .and_then(|r| r.get(&self.workspaces[i].project.path).copied());
         let ws = &mut self.workspaces[i];
-        // El proyecto ya se ve en la barra lateral: aquí solo la rama, recortada si no cabe.
-        if let Some(branch) = ws.branch() {
-            let room = (pill.min.x - 12.0 - left).max(0.0);
-            if room > 40.0 {
-                ui.scope(|ui| {
-                    ui.set_max_width(room);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(format!("{}  {branch}", icon::GIT_BRANCH))
-                                .size(12.5)
-                                .color(theme::TEXT_2),
-                        )
-                        .truncate(),
-                    )
-                    .on_hover_text(&branch);
-                });
-            }
-        }
         let right_start = ui.max_rect().max.x;
         let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if theme::icon_button(ui, icon::BRAIN, tr!("Memoria del proyecto (⌘⇧M)")).clicked()

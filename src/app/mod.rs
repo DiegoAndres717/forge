@@ -1109,7 +1109,11 @@ impl eframe::App for App {
         // Manito sobre cualquier control clicable (casillas, selectores, filas…) si nadie
         // eligió otro cursor; no en lo arrastrable (terminal, divisores, barra superior).
         let clickable = ctx.viewport(|v| {
-            v.interact_widgets.hovered.iter().copied().collect::<Vec<_>>()
+            v.interact_widgets
+                .hovered
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()
         });
         if ctx.output(|o| o.cursor_icon) == egui::CursorIcon::Default
             && clickable.into_iter().any(|id| {

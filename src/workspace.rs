@@ -146,6 +146,11 @@ impl Default for GuardView {
     }
 }
 
+/// Salida mínima de un agente para considerar que trabajó (un redibujo de su barra de
+/// estado o un spinner escribe mucho menos).
+// ponytail: umbral fijo; si un agente da falsos avisos, medirlo por agente.
+const AGENT_WORK_BYTES: u64 = 3_000;
+
 /// Aviso de un proyecto que no está a la vista (punto en la barra lateral).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Attention {
@@ -227,6 +232,8 @@ pub struct Workspace {
     seen: Instant,
     /// Procesos fallidos que el usuario ya vio.
     seen_failures: Vec<String>,
+    /// Bytes que había escrito cada terminal la última vez que se vio el proyecto.
+    seen_output: HashMap<PanelId, u64>,
     /// Avisos ya notificados desde la última vez que se vio el proyecto (uno por aviso).
     pub notified: Vec<Attention>,
     /// Último aviso visto: se mantiene hasta entrar al proyecto (sin parpadeos si el
@@ -273,6 +280,7 @@ impl Workspace {
             dormant: None,
             seen: Instant::now(),
             seen_failures: Vec::new(),
+            seen_output: HashMap::new(),
             notified: Vec::new(),
             sticky: None,
         }
@@ -331,6 +339,14 @@ impl Workspace {
         self.notified.clear();
         self.sticky = None;
         self.seen_failures = self.failed_processes();
+        self.seen_output = self
+            .panels
+            .iter()
+            .filter_map(|(id, p)| match &p.content {
+                Content::Shell(t) => Some((*id, t.output_bytes())),
+                Content::Process(_) => None,
+            })
+            .collect();
     }
 
     fn failed_processes(&self) -> Vec<String> {
@@ -380,14 +396,17 @@ impl Workspace {
         if blocked {
             return Some(Attention::Blocked);
         }
-        // Agente que escribió mientras no se miraba y lleva unos segundos quieto.
-        self.panels.values().find_map(|p| {
+        // Agente que trabajó mientras no se miraba (escribió una respuesta, no solo un
+        // redibujo de su pantalla) y lleva unos segundos quieto.
+        self.panels.iter().find_map(|(id, p)| {
             let agent = p.agent.as_ref()?;
             let Content::Shell(t) = &p.content else {
                 return None;
             };
             let last = t.last_output()?;
-            (last > self.seen && last.elapsed() > Duration::from_secs(4)).then(|| {
+            let written = t.output_bytes() - self.seen_output.get(id).copied().unwrap_or(0);
+            let worked = written > AGENT_WORK_BYTES && last > self.seen;
+            (worked && last.elapsed() > Duration::from_secs(4)).then(|| {
                 let spec = self.project.agents.iter().find(|s| &s.id == agent);
                 Attention::Agent(spec.map_or(agent.clone(), |s| s.name.clone()))
             })
@@ -1027,6 +1046,7 @@ impl Workspace {
         use crate::theme::{self, icon};
         let mut actions = Vec::new();
         let focused = id == self.focus;
+        let branch = self.branch();
         let key = self.project.path.clone();
         let painter = ui.painter_at(rect);
         painter.rect_filled(
@@ -1107,6 +1127,28 @@ impl Workspace {
             (Some(m), _) => {
                 painter.circle_filled(icon_pos, 4.0, tone_color(m.describe().1));
             }
+            (None, Some(agent))
+                if self
+                    .project
+                    .agents
+                    .iter()
+                    .find(|s| &s.id == agent)
+                    .is_some_and(|s| matches!(s.program(), "claude" | "codex" | "opencode")) =>
+            {
+                let program = self
+                    .project
+                    .agents
+                    .iter()
+                    .find(|s| &s.id == agent)
+                    .map(|s| s.program().to_string())
+                    .unwrap_or_default();
+                theme::agent_logo(
+                    ui,
+                    &program,
+                    Rect::from_center_size(icon_pos, Vec2::splat(16.0)),
+                    !focused,
+                );
+            }
             (None, Some(_)) => {
                 painter.text(
                     icon_pos,
@@ -1130,6 +1172,27 @@ impl Workspace {
                 );
             }
         };
+        // Rama de Git a la derecha, junto a los botones (se omite si no cabe).
+        if let Some(branch) = branch {
+            let text = format!("{}  {branch}", icon::GIT_BRANCH);
+            let galley = painter.layout_no_wrap(text, FontId::proportional(11.5), theme::TEXT_4);
+            let max = (right - rect.min.x - 32.0) * 0.45;
+            if max > 60.0 {
+                let width = galley.size().x.min(max);
+                let at = Rect::from_min_max(
+                    egui::pos2(right - 8.0 - width, rect.min.y),
+                    egui::pos2(right - 8.0, rect.max.y),
+                );
+                painter.with_clip_rect(at).galley(
+                    egui::pos2(at.min.x, rect.center().y - galley.size().y / 2.0),
+                    galley,
+                    theme::TEXT_4,
+                );
+                ui.interact(at, egui::Id::new(("branch", &key, id)), Sense::hover())
+                    .on_hover_text(&branch);
+                right = at.min.x - 6.0;
+            }
+        }
         let label_rect = Rect::from_min_max(
             egui::pos2(rect.min.x + 32.0, rect.min.y),
             egui::pos2(right - 4.0, rect.max.y),

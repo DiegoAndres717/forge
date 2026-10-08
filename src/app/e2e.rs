@@ -468,7 +468,7 @@ fn agent_that_finishes_in_the_background_lights_the_project() {
     // Agente de prueba: trabaja un momento (escribe) y se queda esperando.
     std::fs::write(
         dir.join(".forge/agents.toml"),
-        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 1; echo listo; sleep 60\"\n",
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 1; seq 1 2000; sleep 60\"\n",
     )
     .unwrap();
     let mut h = app(dir);
@@ -532,4 +532,32 @@ fn clickable_controls_show_the_pointing_hand() {
             "{label}"
         );
     }
+}
+
+#[test]
+fn an_agent_that_only_redraws_does_not_raise_an_alert() {
+    let dir = project("redraw");
+    // Espera y luego redibuja un poco (como la barra de estado de Claude mientras espera).
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 5; printf 'x'; sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::OpenAgent("fake".into(), false), area);
+    // Con el proyecto a la vista mientras arranca el shell.
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.key_press_modifiers(CMD_SHIFT, Key::H);
+    while start.elapsed() < Duration::from_secs(11) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert_eq!(ws(h.state()).attention(), None);
 }

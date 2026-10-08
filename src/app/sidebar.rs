@@ -348,7 +348,7 @@ impl App {
                     egui::pos2(row.rect.min.x + 17.0, row.rect.center().y),
                     Vec2::splat(16.0),
                 );
-                agent_logo(ui, agent.program(), at, !installed);
+                theme::agent_logo(ui, agent.program(), at, !installed);
             }
             let row = row.on_hover_text(tip);
             if row.clicked() && installed {
@@ -561,53 +561,4 @@ impl App {
             });
         }
     }
-}
-
-/// Logo del agente en el hueco del icono de la fila (atenuado si no está instalado).
-fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
-    let tint = if dim {
-        Color32::from_gray(110)
-    } else {
-        Color32::WHITE
-    };
-    let png: &[u8] = match program {
-        "claude" => include_bytes!("../../assets/agents/claude.png"),
-        "opencode" => include_bytes!("../../assets/agents/opencode.png"),
-        _ => {
-            // Codex: la marca de OpenAI (nudo de seis trazos) sobre fondo negro.
-            let painter = ui.painter();
-            painter.rect_filled(rect, 4.0, Color32::BLACK);
-            let (c, r) = (rect.center(), rect.width() * 0.3);
-            for k in 0..6 {
-                let a = std::f32::consts::FRAC_PI_3 * k as f32;
-                let p = |angle: f32, radius: f32| c + radius * Vec2::angled(angle);
-                painter.line_segment(
-                    [p(a, r), p(a + std::f32::consts::FRAC_PI_3 * 1.6, r * 0.55)],
-                    egui::Stroke::new(1.4, tint),
-                );
-            }
-            return;
-        }
-    };
-    let id = egui::Id::new(("agent-logo", program));
-    let texture = ui
-        .ctx()
-        .memory_mut(|m| m.data.get_temp::<egui::TextureHandle>(id));
-    let texture = texture.unwrap_or_else(|| {
-        let icon = eframe::icon_data::from_png_bytes(png).unwrap_or_default();
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [icon.width as usize, icon.height as usize],
-            &icon.rgba,
-        );
-        let texture = ui
-            .ctx()
-            .load_texture(id.value().to_string(), image, Default::default());
-        ui.ctx()
-            .memory_mut(|m| m.data.insert_temp(id, texture.clone()));
-        texture
-    });
-    egui::Image::new((texture.id(), rect.size()))
-        .corner_radius(4.0)
-        .tint(tint)
-        .paint_at(ui, rect);
 }

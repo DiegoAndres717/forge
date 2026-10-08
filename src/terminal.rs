@@ -115,6 +115,8 @@ pub struct Terminal {
     exit_code: Option<u32>,
     /// Última vez que el programa escribió algo (avisos de actividad en segundo plano).
     last_output: Arc<Mutex<Option<std::time::Instant>>>,
+    /// Bytes escritos por el programa desde que arrancó.
+    output_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
@@ -185,6 +187,8 @@ impl Terminal {
         let last_output = Arc::new(Mutex::new(None));
         let (t, e, c, u) = (term.clone(), exited.clone(), ctx.clone(), urls.clone());
         let activity = last_output.clone();
+        let output_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let bytes = output_bytes.clone();
         std::thread::spawn(move || {
             let mut parser: Processor = Processor::new();
             let mut buf = [0u8; 64 * 1024];
@@ -192,6 +196,7 @@ impl Terminal {
             while let Ok(n @ 1..) = reader.read(&mut buf) {
                 parser.advance(&mut *t.lock().unwrap(), &buf[..n]);
                 *activity.lock().unwrap() = Some(std::time::Instant::now());
+                bytes.fetch_add(n as u64, Ordering::Relaxed);
                 for url in scanner.feed(&buf[..n]) {
                     let mut urls = u.lock().unwrap();
                     if !urls.contains(&url) && urls.len() < 8 {
@@ -228,7 +233,12 @@ impl Terminal {
             urls,
             exit_code: None,
             last_output,
+            output_bytes,
         })
+    }
+
+    pub fn output_bytes(&self) -> u64 {
+        self.output_bytes.load(Ordering::Relaxed)
     }
 
     pub fn last_output(&self) -> Option<std::time::Instant> {
@@ -668,15 +678,13 @@ impl Terminal {
         }
 
         // URL bajo el puntero con ⌘ (la de la manito); el ⌘-clic abre esta misma.
-        let hover_url = hover
-            .filter(|_| mods.mac_cmd && over)
-            .and_then(|p| {
-                let (line, col, _) = self.cell_at(p, rect, m);
-                url_at_point(
-                    &term,
-                    viewport_to_point(offset, Point::new(line, Column(col))),
-                )
-            });
+        let hover_url = hover.filter(|_| mods.mac_cmd && over).and_then(|p| {
+            let (line, col, _) = self.cell_at(p, rect, m);
+            url_at_point(
+                &term,
+                viewport_to_point(offset, Point::new(line, Column(col))),
+            )
+        });
 
         let mut outgoing = Vec::new();
         for event in &events {
@@ -686,7 +694,9 @@ impl Terminal {
                     button,
                     pressed,
                     modifiers,
-                } if (over && rect.contains(pos) && !self.overlays.iter().any(|o| o.contains(pos)))
+                } if (over
+                    && rect.contains(pos)
+                    && !self.overlays.iter().any(|o| o.contains(pos)))
                     || !pressed =>
                 {
                     let (line, col, side) = self.cell_at(pos, rect, m);
