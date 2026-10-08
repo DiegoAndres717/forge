@@ -431,6 +431,12 @@ impl App {
         );
 
         // Ventana.
+        add(
+            icon::GEAR,
+            tr!("Ajustes…").into(),
+            "⌘,",
+            cmd(UiCmd::OpenSettings),
+        );
         // Idioma: cada opción en su propio idioma, para encontrarla en cualquiera de los dos.
         {
             use forge_core::i18n::{Lang, lang};

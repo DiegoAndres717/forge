@@ -31,6 +31,7 @@ mod ideas_panel;
 mod memory_panel;
 mod notify;
 mod palette;
+mod settings;
 mod sidebar;
 
 use guard_panel::*;
@@ -72,6 +73,7 @@ pub enum Action {
     ToggleMemory,
     ToggleIdeas,
     Palette,
+    Settings,
     /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
     NextRecent,
 }
@@ -125,6 +127,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::M, true, false) => Action::ToggleMemory,
         (Key::I, true, false) => Action::ToggleIdeas,
         (Key::K, false, false) => Action::Palette,
+        (Key::Comma, false, false) => Action::Settings,
         _ => return None,
     })
 }
@@ -136,6 +139,10 @@ enum UiCmd {
     Home,
     Activate(usize),
     Close(usize),
+    /// Abre en el editor un archivo de `.forge/` del proyecto activo.
+    EditFile(&'static str),
+    /// Abre la ventana de Ajustes.
+    OpenSettings,
     /// Cambia el idioma de la interfaz (se guarda para la próxima vez).
     SetLang(forge_core::i18n::Lang),
     /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
@@ -229,6 +236,10 @@ pub struct App {
     notifications: bool,
     /// Proyecto de la notificación en la que el usuario hizo clic.
     notification_click: Arc<Mutex<Option<PathBuf>>>,
+    /// Ventana de Ajustes (⌘,) abierta.
+    settings_open: bool,
+    /// Notificaciones activadas en Ajustes.
+    notifications_enabled: bool,
 }
 
 impl App {
@@ -243,6 +254,8 @@ impl App {
             .and_then(|p| Store::open(&p));
         let mut app = Self::with_store(ctx, settings, error, open, store);
         app.notifications = true; // solo la app real (los tests no notifican)
+        app.notifications_enabled =
+            app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
         app
     }
 
@@ -269,6 +282,8 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            settings_open: false,
+            notifications_enabled: true,
             notifications: false,
             notification_click: Arc::default(),
             mru: Vec::new(),
@@ -472,6 +487,7 @@ impl App {
             Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
             Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
+            Action::Settings => self.settings_open = !self.settings_open,
             Action::NextRecent => {
                 if self.mru.len() < 2 {
                     return;
@@ -500,6 +516,22 @@ impl App {
             UiCmd::Home => self.active = None,
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
+            UiCmd::OpenSettings => self.settings_open = true,
+            UiCmd::EditFile(name) => {
+                let Some(i) = self.active else { return };
+                let file = self.workspaces[i].project.path.join(".forge").join(name);
+                if !file.exists() {
+                    let _ = std::fs::create_dir_all(file.parent().unwrap_or(&file));
+                    let _ = std::fs::write(&file, "");
+                }
+                if let Err(e) = std::process::Command::new("open")
+                    .arg("-t")
+                    .arg(&file)
+                    .spawn()
+                {
+                    self.error = Some(e.to_string());
+                }
+            }
             UiCmd::SetLang(lang) => {
                 forge_core::i18n::set_lang(lang);
                 self.db(|s| s.set_setting("language", lang.code()));
@@ -1023,7 +1055,13 @@ impl eframe::App for App {
                     self.mru.insert(0, path);
                 }
                 let ws = &mut self.workspaces[i];
-                ws.ui(ui, area, &m, &ws_actions, self.palette.is_none());
+                ws.ui(
+                    ui,
+                    area,
+                    &m,
+                    &ws_actions,
+                    self.palette.is_none() && !self.settings_open,
+                );
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
                 }
@@ -1062,6 +1100,11 @@ impl eframe::App for App {
         }
         self.error_banner(ui, area);
         self.approvals_ui(&ctx);
+        let mut from_settings = Vec::new();
+        self.settings_ui(&ctx, &mut from_settings);
+        for cmd in from_settings {
+            self.apply(&ctx, cmd, area);
+        }
         // Con la paleta abierta, el resto de la ventana se atenúa (la paleta va encima).
         if self.palette.is_some() {
             ui.painter()

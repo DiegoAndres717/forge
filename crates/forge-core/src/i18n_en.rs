@@ -1074,4 +1074,25 @@ pub const EN: &[(&str, &str)] = &[
     ("Anterior (⇧↩)", "Previous (⇧↩)"),
     ("Siguiente (↩)", "Next (↩)"),
     ("Cerrar (Esc)", "Close (Esc)"),
+    ("Ajustes", "Settings"),
+    ("Ajustes…", "Settings…"),
+    ("General", "General"),
+    ("Idioma", "Language"),
+    ("Notificaciones", "Notifications"),
+    (
+        "Avisar cuando un agente termina, un proceso falla o Guard bloquea",
+        "Notify when an agent finishes, a process fails or Guard blocks",
+    ),
+    ("Terminal", "Terminal"),
+    ("Tamaño de letra", "Font size"),
+    ("Tecla Option", "Option key"),
+    (
+        "Como Meta (atajos de terminal: ⌥B, ⌥F…)",
+        "As Meta (terminal shortcuts: ⌥B, ⌥F…)",
+    ),
+    (
+        "Fuentes propias y más opciones: ~/.config/forge/config.toml",
+        "Custom fonts and more options: ~/.config/forge/config.toml",
+    ),
+    ("Proyecto: {name}", "Project: {name}"),
 ];

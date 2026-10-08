@@ -13,7 +13,9 @@ impl App {
             }
             ws.notified = attention.clone();
             let Some(attention) = attention else { continue };
-            if focused && self.active == Some(i) || !self.notifications {
+            if focused && self.active == Some(i)
+                || !(self.notifications && self.notifications_enabled)
+            {
                 continue;
             }
             let text = match &attention {

@@ -22,14 +22,18 @@ const SF_PRO: &str = "/System/Library/Fonts/SFNS.ttf";
 const SYMBOLS: &str = "/System/Library/Fonts/Apple Symbols.ttf";
 
 /// `~/.config/forge/config.toml`
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
     font_size: f32,
     /// Fuente monoespaciada (.ttf/.otf/.ttc). Por defecto Menlo.
+    #[serde(skip_serializing_if = "Option::is_none")]
     font: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     font_bold: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     font_italic: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     font_bold_italic: Option<PathBuf>,
     /// Option (⌥) envía ESC+tecla en vez de caracteres especiales (∂, ƒ...).
     option_as_meta: bool,
@@ -53,6 +57,16 @@ fn config_path() -> Option<PathBuf> {
 }
 
 /// Lee la configuración; si es inválida devuelve los valores por defecto y el error.
+/// Guarda los ajustes en `~/.config/forge/config.toml` (los cambia la ventana de Ajustes).
+pub fn save_settings(settings: &Settings) -> Result<(), String> {
+    let path = config_path().ok_or_else(|| "no se encontró $HOME".to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let text = toml::to_string(settings).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn load_settings() -> (Settings, Option<String>) {
     let Some(path) = config_path() else {
         return (Settings::default(), None);

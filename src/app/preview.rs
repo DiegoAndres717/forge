@@ -287,6 +287,10 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].ideas.dirty = true;
     settle(&mut harness);
     save(&mut harness, &out, "8-ideas");
+    harness.state_mut().settings_open = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "11-ajustes");
+    harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 
     harness.state_mut().active = None;

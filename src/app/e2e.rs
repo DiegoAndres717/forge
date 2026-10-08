@@ -505,3 +505,15 @@ fn cmd_f_opens_terminal_search_and_esc_closes_it() {
     h.run_steps(3);
     assert!(!search(&h), "Esc la cierra");
 }
+
+#[test]
+fn cmd_comma_opens_settings() {
+    let mut h = app(project("settings"));
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    assert!(h.state().settings_open, "⌘, abre Ajustes");
+    h.get_by_label("Tamaño de letra");
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(!h.state().settings_open, "Esc la cierra");
+}
