@@ -53,7 +53,7 @@ pub struct Report {
     pub error: Option<String>,
 }
 
-fn mark(level: Level) -> &'static str {
+pub(crate) fn mark(level: Level) -> &'static str {
     match level {
         Level::Pass => "✓",
         Level::Warn => "⚠",

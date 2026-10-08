@@ -108,6 +108,8 @@ pub struct GuardView {
     pub history: Option<Vec<(i64, forge_core::evidence::Report)>>,
     /// (gasto del mes, presupuesto) de modelos de pago.
     pub ai_spend: Option<(f64, f64)>,
+    /// Formulario del pull request (borrador editable antes de publicarlo con `gh`).
+    pub pr: Option<forge_core::pr::Draft>,
 }
 
 pub struct AllowForm {
@@ -133,6 +135,7 @@ impl Default for GuardView {
             stale_rx: None,
             history: None,
             ai_spend: None,
+            pr: None,
         }
     }
 }

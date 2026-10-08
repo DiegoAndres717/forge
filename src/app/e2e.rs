@@ -230,3 +230,49 @@ fn command_palette_runs_actions_by_fuzzy_name() {
     h.run_steps(2);
     assert!(h.state().palette.is_none());
 }
+
+#[test]
+fn pull_request_draft_after_guard_passes() {
+    let dir = project("pr");
+    // Rama con un commit nuevo frente a main (repositorio local, sin remoto: nada se publica).
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git commit -qm inicio && git switch -qc feat/vacunas \
+             && echo 'export const y = 2;' > y.ts && git add -A && git commit -qm 'Registrar vacunas por lote'",
+        ])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let mut h = app(dir.clone());
+    palette(&mut h, "validar pull request");
+    wait_until(&mut h, "Guard termina", |a| {
+        ws(a)
+            .guard
+            .run
+            .as_ref()
+            .is_some_and(|r| r.snapshot(|r| r.finished()))
+    });
+    h.run_steps(2);
+    assert_eq!(ws(h.state()).guard.stage, Stage::PullRequest);
+
+    h.get_by_label_contains("Crear PR").click();
+    h.run_steps(3);
+    let pr = ws(h.state()).guard.pr.clone().expect("formulario del PR");
+    assert_eq!(pr.base, "main");
+    assert_eq!(pr.title, "Registrar vacunas por lote");
+    assert!(pr.body.contains("## Validación"));
+
+    let panels = ws(h.state()).panel_count();
+    h.get_by_label("Crear en GitHub").click();
+    h.run_steps(3);
+    assert!(ws(h.state()).guard.pr.is_none());
+    assert_eq!(
+        ws(h.state()).panel_count(),
+        panels + 1,
+        "gh corre en un panel nuevo"
+    );
+    assert!(dir.join(".git/FORGE_PR_BODY.md").exists());
+}

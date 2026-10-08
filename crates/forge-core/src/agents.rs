@@ -320,7 +320,7 @@ pub fn detect(programs: &[String]) -> HashMap<String, Detection> {
     threads.into_iter().filter_map(|t| t.join().ok()).collect()
 }
 
-fn shell_quote(s: &str) -> String {
+pub(crate) fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 

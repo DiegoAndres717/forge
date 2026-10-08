@@ -7,6 +7,7 @@ pub mod guard;
 pub mod hooks;
 pub mod mcp;
 pub mod memory;
+pub mod pr;
 pub mod project;
 pub mod reviewers;
 pub mod router;

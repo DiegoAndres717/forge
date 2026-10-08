@@ -163,6 +163,9 @@ enum UiCmd {
     GuardExport(Option<i64>),
     HooksInstall,
     HooksUninstall,
+    /// Abre (true) o cierra el formulario del pull request.
+    PrForm(bool),
+    PrCreate,
 }
 
 pub struct App {
@@ -521,7 +524,9 @@ impl App {
             | UiCmd::GuardAllow
             | UiCmd::GuardExport(_)
             | UiCmd::HooksInstall
-            | UiCmd::HooksUninstall => {
+            | UiCmd::HooksUninstall
+            | UiCmd::PrForm(_)
+            | UiCmd::PrCreate => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
                 let exceptions = self.db(|s| s.exceptions(&path)).unwrap_or_default();
@@ -543,6 +548,7 @@ impl App {
                     }
                     UiCmd::GuardRun => {
                         ws.guard.open = true;
+                        ws.guard.pr = None; // el borrador era de la validación anterior
                         match Rules::load(&ws.project.path) {
                             Err(e) => ws.guard.error = Some(e),
                             Ok(rules) => {
@@ -607,6 +613,39 @@ impl App {
                             reason: String::new(),
                             scope: guard::Scope::Commit,
                         });
+                    }
+                    UiCmd::PrForm(false) => ws.guard.pr = None,
+                    UiCmd::PrForm(true) => {
+                        let Some(run) = &ws.guard.run else { return };
+                        let report = run.snapshot(|r| r.report());
+                        let draft = Rules::load(&ws.project.path)
+                            .map(Option::unwrap_or_default)
+                            .and_then(|rules| {
+                                forge_core::pr::draft(&ws.project.path, &rules, &report)
+                            });
+                        match draft {
+                            Ok(d) => ws.guard.pr = Some(d),
+                            Err(e) => self.error = Some(e),
+                        }
+                    }
+                    UiCmd::PrCreate => {
+                        let Some(draft) = ws.guard.pr.take() else {
+                            return;
+                        };
+                        match forge_core::pr::command(&ws.project.path, &draft) {
+                            Ok(command) => {
+                                let command = SavedCommand {
+                                    name: "pull request".into(),
+                                    command,
+                                    working_directory: None,
+                                };
+                                ws.run_command(ctx, &command, area);
+                            }
+                            Err(e) => {
+                                ws.guard.pr = Some(draft); // se conserva lo escrito
+                                self.error = Some(e);
+                            }
+                        }
                     }
                     UiCmd::GuardAllow => {
                         let (Some(form), Some(run)) = (ws.guard.allow.take(), &ws.guard.run) else {

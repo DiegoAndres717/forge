@@ -413,11 +413,21 @@ impl App {
                         cmds.push(UiCmd::GuardCommit);
                     }
                 }
+                let can_pr = state.stage == Stage::PullRequest
+                    && matches!(verdict, guard::Verdict::Ready | guard::Verdict::Warnings)
+                    && state.finished()
+                    && !ws.guard.stale;
+                if can_pr
+                    && ws.guard.pr.is_none()
+                    && theme::primary(ui, format!("{}  Crear PR", icon::GIT_PULL_REQUEST)).clicked()
+                {
+                    cmds.push(UiCmd::PrForm(true));
+                }
                 if running {
                     if theme::secondary(ui, format!("{}  Cancelar", icon::STOP)).clicked() {
                         cmds.push(UiCmd::GuardCancel);
                     }
-                } else if can_commit {
+                } else if can_commit || can_pr {
                     if theme::secondary(ui, format!("{}  Repetir", icon::ARROW_CLOCKWISE)).clicked()
                     {
                         cmds.push(UiCmd::GuardRun);
@@ -455,6 +465,49 @@ impl App {
             }
         });
 
+        if let Some(pr) = &mut ws.guard.pr {
+            theme::card(&mut ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}  Pull request hacia {}",
+                        icon::GIT_PULL_REQUEST,
+                        pr.base
+                    ))
+                    .strong(),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut pr.title)
+                        .hint_text("Título del PR")
+                        .desired_width(f32::INFINITY),
+                );
+                ui.add(
+                    egui::TextEdit::multiline(&mut pr.body)
+                        .hint_text("Descripción")
+                        .desired_rows(10)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.checkbox(&mut pr.draft, "Crear como borrador");
+                ui.label(
+                    RichText::new("Se publica con gh pr create en un panel nuevo (si la rama no está subida, gh lo ofrece).")
+                        .size(11.0)
+                        .color(theme::TEXT_3),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !pr.title.trim().is_empty(),
+                            egui::Button::new("Crear en GitHub"),
+                        )
+                        .clicked()
+                    {
+                        cmds.push(UiCmd::PrCreate);
+                    }
+                    if theme::secondary(ui, "Cancelar").clicked() {
+                        cmds.push(UiCmd::PrForm(false));
+                    }
+                });
+            });
+        }
         if ws.guard.stale {
             egui::Frame::new()
                 .fill(Color32::from_rgb(0x3d, 0x33, 0x12))
