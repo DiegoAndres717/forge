@@ -226,7 +226,7 @@ impl App {
     }
 
     /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes.
-    pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+    pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui) {
         let start = self.traffic_end + 12.0;
         let strip = Rect::from_min_max(
             egui::pos2(start, 0.0),
@@ -247,8 +247,16 @@ impl App {
         if theme::icon_toggle(&mut ui, icon::SIDEBAR_SIMPLE, tip, self.sidebar).clicked() {
             self.sidebar = !self.sidebar;
         }
-        if theme::icon_button(&mut ui, icon::GEAR_SIX, tr!("Ajustes (⌘,)")).clicked() {
-            cmds.push(UiCmd::OpenSettings);
+        // Seleccionado mientras Ajustes está abierto; otro clic lo cierra.
+        if theme::icon_toggle(
+            &mut ui,
+            icon::GEAR_SIX,
+            tr!("Ajustes (⌘,)"),
+            self.settings_open,
+        )
+        .clicked()
+        {
+            self.settings_open = !self.settings_open;
         }
     }
 
@@ -294,7 +302,13 @@ impl App {
         let ws = &mut self.workspaces[i];
         let right_start = ui.max_rect().max.x;
         let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::icon_button(ui, icon::BRAIN, tr!("Memoria del proyecto (⌘⇧M)")).clicked()
+            if theme::icon_toggle(
+                ui,
+                icon::BRAIN,
+                tr!("Memoria del proyecto (⌘⇧M)"),
+                ws.memory.open,
+            )
+            .clicked()
             {
                 cmds.push(UiCmd::ToggleMemory);
             }

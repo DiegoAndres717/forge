@@ -1010,7 +1010,7 @@ impl eframe::App for App {
             self.sidebar(ui, side, &mut cmds);
         }
         self.toolbar(ui, toolbar, &mut cmds);
-        self.window_buttons(ui, &mut cmds);
+        self.window_buttons(ui);
         self.status_bar(ui, status);
         self.ram_tick(&ctx);
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).

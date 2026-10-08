@@ -513,9 +513,16 @@ fn cmd_comma_opens_settings() {
     h.run_steps(3);
     assert!(h.state().settings_open, "⌘, abre Ajustes");
     h.get_by_label("Tamaño de letra");
+    let gear_selected = |h: &Harness<'_, App>| {
+        use egui_kittest::kittest::NodeT;
+        h.get_by_label("Ajustes (⌘,)").accesskit_node().toggled()
+            == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(gear_selected(&h), "el botón ⚙ se ve seleccionado");
     h.key_press(Key::Escape);
     h.run_steps(3);
     assert!(!h.state().settings_open, "Esc la cierra");
+    assert!(!gear_selected(&h));
 }
 
 #[test]
