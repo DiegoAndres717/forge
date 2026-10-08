@@ -591,7 +591,10 @@ impl Workspace {
             .map(|e| e.canonicalize().unwrap_or(e));
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
-                Some(spec.with_events(&command, &forge.to_string_lossy()))
+                let plugin = crate::claude_plugin::PLUGIN_DIR
+                    .get()
+                    .map(|d| d.to_string_lossy());
+                Some(spec.with_events(&command, &forge.to_string_lossy(), plugin.as_deref()))
             }
             (_, typed, _) => typed,
         };
@@ -845,6 +848,15 @@ impl Workspace {
             .iter()
             .filter_map(|m| m.terminal.as_ref()?.pid());
         shells.chain(managed).collect()
+    }
+
+    /// Ninguna terminal escribió en `quiet` (tests: esperar a que arranquen los shells).
+    #[cfg(test)]
+    pub fn is_quiet(&self, quiet: Duration) -> bool {
+        self.panels.values().all(|p| match &p.content {
+            Content::Shell(t) => t.last_output().is_some_and(|at| at.elapsed() > quiet),
+            Content::Process(_) => true,
+        })
     }
 
     #[cfg(test)]

@@ -5,6 +5,13 @@ use super::*;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
+/// Los tests e2e abren shells de login reales (con el perfil del usuario): de uno en uno,
+/// para que la suite no dependa de cuánto aguanta la máquina con todos a la vez.
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 const CMD: Modifiers = Modifiers {
     alt: false,
     ctrl: false,
@@ -75,6 +82,7 @@ fn ws(app: &App) -> &Workspace {
 
 #[test]
 fn split_and_close_panels_with_shortcuts() {
+    let _serial = serial();
     let mut h = app(project("split"));
     assert_eq!(ws(h.state()).panel_count(), 1);
 
@@ -97,6 +105,7 @@ fn split_and_close_panels_with_shortcuts() {
 
 #[test]
 fn guard_validates_the_commit_from_the_panel() {
+    let _serial = serial();
     let mut h = app(project("guard"));
     h.key_press_modifiers(CMD, Key::G);
     h.run_steps(2);
@@ -125,6 +134,7 @@ fn guard_validates_the_commit_from_the_panel() {
 
 #[test]
 fn memory_note_created_from_the_panel_is_searchable() {
+    let _serial = serial();
     let dir = project("memory");
     let mut h = app(dir.clone());
     h.key_press_modifiers(CMD_SHIFT, Key::M);
@@ -155,6 +165,7 @@ fn memory_note_created_from_the_panel_is_searchable() {
 
 #[test]
 fn guard_blocks_a_commit_with_a_secret() {
+    let _serial = serial();
     let dir = project("secret");
     std::fs::write(
         dir.join("config.ts"),
@@ -211,6 +222,7 @@ fn palette(h: &mut Harness<'_, App>, query: &str) {
 
 #[test]
 fn command_palette_runs_actions_by_fuzzy_name() {
+    let _serial = serial();
     let mut h = app(project("palette"));
     // "divder" → "Dividir a la derecha".
     palette(&mut h, "divder");
@@ -233,6 +245,7 @@ fn command_palette_runs_actions_by_fuzzy_name() {
 
 #[test]
 fn pull_request_draft_after_guard_passes() {
+    let _serial = serial();
     let dir = project("pr");
     // Rama con un commit nuevo frente a main (repositorio local, sin remoto: nada se publica).
     let ok = std::process::Command::new("sh")
@@ -279,6 +292,7 @@ fn pull_request_draft_after_guard_passes() {
 
 #[test]
 fn dangerous_command_dialog_answers_the_terminal() {
+    let _serial = serial();
     let dir = project("approval");
     let approvals = dir.join(".approvals");
     std::fs::create_dir_all(&approvals).unwrap();
@@ -320,6 +334,7 @@ fn dangerous_command_dialog_answers_the_terminal() {
 
 #[test]
 fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
+    let _serial = serial();
     let dir = project("ideas");
     let mut h = app(dir.clone());
     h.key_press_modifiers(CMD_SHIFT, Key::I);
@@ -392,6 +407,7 @@ fn app_with(store: Store, open: Option<PathBuf>) -> Harness<'static, App> {
 
 #[test]
 fn only_the_active_project_starts_and_the_rest_sleep() {
+    let _serial = serial();
     let (a, b) = (project("sleep-a"), project("sleep-b"));
     // Dos proyectos abiertos al cerrar Forge la última vez; el activo era A.
     let store = Store::in_memory().unwrap();
@@ -439,6 +455,7 @@ fn only_the_active_project_starts_and_the_rest_sleep() {
 
 #[test]
 fn background_process_failure_lights_the_project() {
+    let _serial = serial();
     let dir = project("attention");
     std::fs::write(
         dir.join(".forge/project.toml"),
@@ -464,6 +481,7 @@ fn background_process_failure_lights_the_project() {
 
 #[test]
 fn agent_that_finishes_in_the_background_lights_the_project() {
+    let _serial = serial();
     let dir = project("agent");
     // Agente de prueba: trabaja un momento (escribe) y se queda esperando.
     std::fs::write(
@@ -492,6 +510,7 @@ fn agent_that_finishes_in_the_background_lights_the_project() {
 
 #[test]
 fn cmd_f_opens_terminal_search_and_esc_closes_it() {
+    let _serial = serial();
     let mut h = app(project("find"));
     let search = |h: &Harness<'_, App>| {
         h.query_by(|n| n.placeholder() == Some("Buscar en la terminal"))
@@ -508,6 +527,7 @@ fn cmd_f_opens_terminal_search_and_esc_closes_it() {
 
 #[test]
 fn cmd_comma_opens_settings() {
+    let _serial = serial();
     let mut h = app(project("settings"));
     h.key_press_modifiers(CMD, Key::Comma);
     h.run_steps(3);
@@ -527,6 +547,7 @@ fn cmd_comma_opens_settings() {
 
 #[test]
 fn clickable_controls_show_the_pointing_hand() {
+    let _serial = serial();
     let mut h = app(project("cursor"));
     h.key_press_modifiers(CMD, Key::Comma);
     h.run_steps(3);
@@ -543,6 +564,7 @@ fn clickable_controls_show_the_pointing_hand() {
 
 #[test]
 fn an_agent_that_only_redraws_does_not_raise_an_alert() {
+    let _serial = serial();
     let dir = project("redraw");
     // Espera y luego redibuja un poco (como la barra de estado de Claude mientras espera).
     std::fs::write(
@@ -555,14 +577,12 @@ fn an_agent_that_only_redraws_does_not_raise_an_alert() {
     let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
     h.state_mut()
         .apply(&ctx, UiCmd::OpenAgent("fake".into(), false), area);
-    // Con el proyecto a la vista mientras arranca el shell.
-    let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(3) {
-        h.run_steps(2);
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    // Con el proyecto a la vista hasta que el shell termina de arrancar (su salida de
+    // inicio, p. ej. fastfetch, no es trabajo del agente).
+    wait_until(&mut h, "el shell arranca", |a| ws(a).is_quiet(Duration::from_millis(1500)));
     h.key_press_modifiers(CMD_SHIFT, Key::H);
-    while start.elapsed() < Duration::from_secs(11) {
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(8) {
         h.run_steps(2);
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -571,6 +591,7 @@ fn an_agent_that_only_redraws_does_not_raise_an_alert() {
 
 #[test]
 fn git_panel_stages_unstages_and_commits() {
+    let _serial = serial();
     let mut h = app(project("git"));
     h.key_press_modifiers(CMD_SHIFT, Key::G);
     h.run_steps(2);
@@ -616,6 +637,7 @@ fn git_panel_stages_unstages_and_commits() {
 
 #[test]
 fn welcome_tour_runs_once_and_is_remembered() {
+    let _serial = serial();
     let mut h = app(project("welcome"));
     h.state_mut().welcome = Some(0); // como la primera vez en la app real
     h.run_steps(2);

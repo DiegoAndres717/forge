@@ -224,6 +224,7 @@ pub fn run(args: &[String]) -> i32 {
                 .map_err(|e| e.to_string())
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
+        (Some("status"), _) => status_json(&project),
         (Some("ideas"), action) => {
             ideas_cli(&out, &project, action.unwrap_or("list"), &pos[2..], args)
         }
@@ -819,6 +820,30 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
         ),
     );
     Ok(if healthy { 0 } else { 1 })
+}
+
+/// `forge status --json`: estado del proyecto para la banda del mod de Claude Code.
+fn status_json(project: &Path) -> Result<i32, String> {
+    let store = open_store()?;
+    let guard = match store
+        .validations(project, 1)?
+        .first()
+        .map(|(_, r)| r.verdict)
+    {
+        None => "not run",
+        Some(Verdict::Ready) => "ready",
+        Some(Verdict::Warnings) => "warnings",
+        Some(Verdict::Blocked) => "blocked",
+        Some(Verdict::NothingToCheck) => "no changes",
+        Some(Verdict::Pending | Verdict::Running) => "pending",
+    };
+    let status = serde_json::json!({
+        "guard": guard,
+        "ideas": store.open_ideas(Some(project))?,
+        "memories": store.count_memories(project)?,
+    });
+    println!("{status}");
+    Ok(0)
 }
 
 fn ideas_cli(

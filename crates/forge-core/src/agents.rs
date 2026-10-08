@@ -81,12 +81,22 @@ impl AgentSpec {
 
     /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code y
     /// `notify` en Codex, que llaman a `forge agent-event`. Otros agentes, sin cambios.
-    pub fn with_events(&self, command: &str, forge: &str) -> String {
+    /// `plugin`: carpeta del mod de Forge para Claude Code (subagentes, consumo, banda y
+    /// comandos); con él, el aviso de "terminó" lo manda el mod con un resumen.
+    pub fn with_events(&self, command: &str, forge: &str, plugin: Option<&str>) -> String {
         let flags = match self.mcp_style {
             Some(McpStyle::ClaudeJson) => {
                 let hook = |kind: &str| serde_json::json!([{"hooks": [{"type": "command", "command": format!("{} agent-event {kind}", quote(forge))}]}]);
-                let settings = serde_json::json!({"hooks": {"Stop": hook("stop"), "Notification": hook("waiting")}});
-                format!("--settings {}", quote(&settings.to_string()))
+                let mut hooks = serde_json::json!({"Notification": hook("waiting")});
+                if plugin.is_none() {
+                    hooks["Stop"] = hook("stop");
+                }
+                let settings = serde_json::json!({ "hooks": hooks });
+                let flags = format!("--settings {}", quote(&settings.to_string()));
+                match plugin {
+                    Some(dir) => format!("--plugin-dir {} {flags}", quote(dir)),
+                    None => flags,
+                }
             }
             Some(McpStyle::CodexConfig) => {
                 let notify =
@@ -414,7 +424,7 @@ mod tests {
     fn agents_get_their_event_hooks() {
         let agents = builtins();
         let get = |id: &str| agents.iter().find(|a| a.id == id).unwrap();
-        let claude = get("claude").with_events("claude --continue", "/A/forge");
+        let claude = get("claude").with_events("claude --continue", "/A/forge", None);
         assert!(
             claude.starts_with("claude --settings '{\"hooks\":{"),
             "{claude}"
@@ -426,15 +436,22 @@ mod tests {
         );
         assert!(claude.contains("agent-event waiting"));
         assert!(claude.ends_with(" --continue"));
-        let codex = get("codex").with_events("codex", "/A/forge");
+        let codex = get("codex").with_events("codex", "/A/forge", None);
         assert_eq!(
             codex,
             r#"codex -c 'notify=["/A/forge","agent-event","stop"]'"#
         );
         assert_eq!(
-            get("opencode").with_events("opencode", "/A/forge"),
+            get("opencode").with_events("opencode", "/A/forge", None),
             "opencode"
         );
+        // Con el mod: lo carga y el "terminó" queda a su cargo.
+        let with_mod = get("claude").with_events("claude", "/A/forge", Some("/P/mod"));
+        assert!(
+            with_mod.starts_with("claude --plugin-dir '/P/mod' --settings"),
+            "{with_mod}"
+        );
+        assert!(!with_mod.contains("agent-event stop"));
     }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {

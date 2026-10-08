@@ -121,6 +121,7 @@ impl Store {
         .map_err(err)?;
         crate::memory::init(&conn).map_err(err)?;
         crate::ideas::init(&conn).map_err(err)?;
+        crate::events::init(&conn).map_err(err)?;
         Ok(Self { conn })
     }
 

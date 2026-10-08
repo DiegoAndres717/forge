@@ -14,6 +14,20 @@ antes de cada commit, push o pull request.
   `git clean -f`, `docker system prune`, `DROP DATABASE`) piden autorización en la ventana,
   también cuando los lanza un agente.
 
+## Mod de Forge para Claude Code
+
+Cada Claude Code que Forge abre carga el mod de `claude-plugin/` (con `--plugin-dir`, sin
+instalar nada en tu Claude ni tocar el repo):
+
+- **Subagentes en modelos más baratos**: `forge:explorer` (Haiku) para buscar y leer código,
+  `forge:reviewer` (Sonnet) para tests y revisiones, `forge:architect` (Opus) para lo difícil;
+  el principal delega en ellos y mantiene su contexto y su caché.
+- **Consumo por modelo**: cada turno (subagentes incluidos) llega a Forge; se ve en Ajustes.
+- **Banda** encima del cuadro de texto: estado de Guard, ideas pendientes y tokens de la sesión.
+- **Comandos sin tokens**: `/ideas`, `/guard`, `/remember`.
+
+Comprobar el mod: `claude plugin validate claude-plugin` y `claude plugin test claude-plugin`.
+
 ## Instalar
 
 Requiere Rust estable (`brew install rustup`).

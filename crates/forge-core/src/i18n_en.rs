@@ -1167,4 +1167,13 @@ pub const EN: &[(&str, &str)] = &[
     ("Abrir proyecto…", "Open project…"),
     ("hoy", "today"),
     ("ayer", "yesterday"),
+    ("Uso de modelos (30 días)", "Model usage (30 days)"),
+    (
+        "{sub} de {turns} turnos por subagentes",
+        "{sub} of {turns} turns by subagents",
+    ),
+    (
+        "Claude Code abierto desde Forge delega búsquedas en Haiku y revisiones en Sonnet; aquí ves a dónde van los tokens.",
+        "Claude Code opened from Forge delegates searches to Haiku and reviews to Sonnet; this is where the tokens go.",
+    ),
 ];

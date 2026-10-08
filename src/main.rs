@@ -1,4 +1,5 @@
 mod app;
+mod claude_plugin;
 mod cli;
 mod layout;
 mod processes;
@@ -188,16 +189,23 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         // CLI sin ventana (la usan también los hooks de Git).
+        Some("agent-usage") => {
+            forge_core::events::record_usage();
+            return Ok(());
+        }
         Some("agent-event") => {
+            // Codex pasa su JSON como argumento; `--project …` (del mod) no lo es.
             forge_core::events::record(
                 args.get(1).map_or("stop", String::as_str),
-                args.get(2).map(String::as_str),
+                args.get(2)
+                    .map(String::as_str)
+                    .filter(|a| !a.starts_with("--")),
             );
             return Ok(());
         }
-        Some("guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory" | "ideas") => {
-            std::process::exit(cli::run(&args))
-        }
+        Some(
+            "guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory" | "ideas" | "status",
+        ) => std::process::exit(cli::run(&args)),
         Some("help" | "--help" | "-h") => {
             print!("{}", cli::usage());
             return Ok(());
@@ -249,10 +257,14 @@ fn main() -> eframe::Result {
             match installed {
                 Ok(env) => {
                     let _ = terminal::SHELL_ENV.set(env);
-                    if let Some(dir) = forge_core::store::Store::default_path()
-                        .and_then(|db| db.parent().map(|d| d.join("scrollback")))
+                    if let Some(base) = forge_core::store::Store::default_path()
+                        .and_then(|db| db.parent().map(|d| d.to_path_buf()))
                     {
-                        let _ = workspace::HISTORY_DIR.set(dir);
+                        let _ = workspace::HISTORY_DIR.set(base.join("scrollback"));
+                        // Mod de Forge para Claude Code (subagentes, consumo, banda, comandos).
+                        if let Ok(dir) = claude_plugin::install(&base) {
+                            let _ = claude_plugin::PLUGIN_DIR.set(dir);
+                        }
                     }
                 }
                 Err(e) => {

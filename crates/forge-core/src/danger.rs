@@ -415,6 +415,7 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
             approvals.to_string_lossy().into_owned(),
         ),
         ("FORGE_EVENTS".into(), events.to_string_lossy().into_owned()),
+        ("FORGE_BIN".into(), exe.to_string_lossy().into_owned()),
         ("FORGE_APP_PID".into(), std::process::id().to_string()),
     ]);
     let shell = std::env::var("SHELL").unwrap_or_default();

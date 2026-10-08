@@ -79,6 +79,43 @@ impl App {
                     );
                 });
 
+                // Tokens de Claude abierto desde Forge (subagentes incluidos), 30 días.
+                let usage = self
+                    .db(|s| s.agent_usage(None, store::now() - 30 * 86_400))
+                    .unwrap_or_default();
+                if !usage.is_empty() {
+                    ui.add_space(6.0);
+                    theme::section(ui, tr!("Uso de modelos (30 días)"));
+                    theme::card(ui, |ui| {
+                        let total: u64 = usage.iter().map(|u| u.total()).sum::<u64>().max(1);
+                        egui::Grid::new("settings-usage").num_columns(3).spacing([16.0, 6.0]).show(ui, |ui| {
+                            for u in &usage {
+                                ui.label(RichText::new(&u.model).strong());
+                                ui.label(format!(
+                                    "{} tokens · {}%",
+                                    short_tokens(u.total()),
+                                    u.total() * 100 / total
+                                ));
+                                ui.label(
+                                    RichText::new(tr!(
+                                        "{sub} de {turns} turnos por subagentes",
+                                        sub = u.subagent_turns,
+                                        turns = u.turns
+                                    ))
+                                    .size(11.5)
+                                    .color(theme::TEXT_3),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                        ui.label(
+                            RichText::new(tr!("Claude Code abierto desde Forge delega búsquedas en Haiku y revisiones en Sonnet; aquí ves a dónde van los tokens."))
+                                .size(11.0)
+                                .color(theme::TEXT_3),
+                        );
+                    });
+                }
+
                 if let Some(i) = self.active {
                     let ws = &self.workspaces[i];
                     ui.add_space(6.0);
@@ -121,5 +158,14 @@ impl App {
                 self.error = Some(e);
             }
         }
+    }
+}
+
+/// 1234567 → "1.2M", 45200 → "45k".
+fn short_tokens(n: u64) -> String {
+    match n {
+        1_000_000.. => format!("{:.1}M", n as f64 / 1_000_000.0),
+        1_000.. => format!("{}k", n / 1_000),
+        _ => n.to_string(),
     }
 }

@@ -1,0 +1,9 @@
+{
+  "name": "forge",
+  "version": "0.1.0",
+  "description": "Forge for Claude Code: cheaper subagents (Haiku explorer, Sonnet reviewer, Opus architect), per-model usage, project status band and /ideas /guard /remember commands",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Forge"
+  }
+}
