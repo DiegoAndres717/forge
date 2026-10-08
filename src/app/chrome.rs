@@ -77,6 +77,7 @@ impl App {
         );
         ui.add_space(6.0);
         egui::ScrollArea::vertical()
+            .id_salt("home-recent-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 egui::Frame::new()

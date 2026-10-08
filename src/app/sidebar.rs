@@ -41,6 +41,7 @@ impl App {
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(body));
         ui.spacing_mut().item_spacing.y = 1.0;
         egui::ScrollArea::vertical()
+            .id_salt("sidebar-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 theme::section(ui, "Workspaces");

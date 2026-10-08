@@ -154,9 +154,12 @@ impl App {
         let unstaged: Vec<&FileChange> = status.files.iter().filter(|f| f.is_unstaged()).collect();
 
         egui::ScrollArea::vertical()
+            .id_salt("git-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
+                // Hueco para la barra de scroll: los botones de la derecha no quedan debajo.
+                ui.set_max_width(ui.available_width() - 14.0);
                 // Preparados (lo que entra en el commit).
                 ui.horizontal(|ui| {
                     theme::section(ui, &tr!("Preparados ({n})", n = staged.len()));

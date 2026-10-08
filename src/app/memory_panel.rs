@@ -201,6 +201,7 @@ impl App {
             ui.label(RichText::new(text).color(Color32::from_gray(0x90)));
         }
         egui::ScrollArea::vertical()
+            .id_salt("memory-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 for m in &ws.memory.results {

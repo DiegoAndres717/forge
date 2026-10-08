@@ -600,6 +600,7 @@ impl App {
         // Controles.
         let footer = 96.0;
         egui::ScrollArea::vertical()
+            .id_salt("guard-scroll")
             .auto_shrink([false, true])
             .max_height((ui.available_height() - footer).max(80.0))
             .show(&mut ui, |ui| {

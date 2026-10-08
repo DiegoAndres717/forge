@@ -59,6 +59,7 @@ impl App {
             .color(theme::TEXT_3),
         );
         egui::ScrollArea::vertical()
+            .id_salt("ideas-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 Self::ideas_list(&mut ws.ideas, target, ui, cmds)
