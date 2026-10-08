@@ -339,6 +339,12 @@ impl App {
 
             // Paneles.
             add(
+                icon::MAGNIFYING_GLASS,
+                tr!("Buscar en la terminal").into(),
+                "⌘F",
+                act(Action::Ws(WsAction::Find)),
+            );
+            add(
                 icon::TERMINAL_WINDOW,
                 tr!("Nueva terminal").into(),
                 "⌘T",

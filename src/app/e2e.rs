@@ -489,3 +489,19 @@ fn agent_that_finishes_in_the_background_lights_the_project() {
         ))
     );
 }
+
+#[test]
+fn cmd_f_opens_terminal_search_and_esc_closes_it() {
+    let mut h = app(project("find"));
+    let search = |h: &Harness<'_, App>| {
+        h.query_by(|n| n.placeholder() == Some("Buscar en la terminal"))
+            .is_some()
+    };
+    assert!(!search(&h));
+    h.key_press_modifiers(CMD, Key::F);
+    h.run_steps(3);
+    assert!(search(&h), "⌘F abre la búsqueda");
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(!search(&h), "Esc la cierra");
+}

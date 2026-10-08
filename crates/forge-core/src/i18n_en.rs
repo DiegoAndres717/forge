@@ -1068,4 +1068,10 @@ pub const EN: &[(&str, &str)] = &[
     ("desconocido", "unknown"),
     ("{p0}  Repetir", "{p0}  Repeat"),
     ("Ir al final", "Jump to bottom"),
+    ("Buscar en la terminal", "Find in terminal"),
+    ("0 de 0", "0 of 0"),
+    ("{n} de {total}", "{n} of {total}"),
+    ("Anterior (⇧↩)", "Previous (⇧↩)"),
+    ("Siguiente (↩)", "Next (↩)"),
+    ("Cerrar (Esc)", "Close (Esc)"),
 ];

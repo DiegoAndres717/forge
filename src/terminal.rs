@@ -107,6 +107,8 @@ pub struct Terminal {
     mouse_down: Option<u8>,
     /// Barra de scroll y botón "Ir al final" (los clics ahí no seleccionan texto).
     overlays: Vec<Rect>,
+    /// Búsqueda abierta (⌘F).
+    search: Option<Box<Search>>,
     pub title: Option<String>,
     /// URLs locales vistas en la salida (p. ej. "http://localhost:5173/" de Vite).
     urls: Arc<Mutex<Vec<String>>>,
@@ -221,6 +223,7 @@ impl Terminal {
             had_focus: true,
             mouse_down: None,
             overlays: Vec::new(),
+            search: None,
             title: None,
             urls,
             exit_code: None,
@@ -308,14 +311,167 @@ impl Terminal {
         }
 
         let response = ui.interact(rect, id, Sense::click_and_drag());
-        if focused {
+        // Con la búsqueda abierta, el teclado es de su campo, no del programa.
+        if focused && self.search.is_none() {
             self.keyboard(&ctx, m);
         }
         self.mouse(&ctx, &response, rect, m);
         let painter = ui.painter_at(rect);
         paint(&self.term.lock().unwrap(), &painter, rect, focused, m);
+        self.search_ui(ui, rect, id, m);
         self.scroll_overlay(ui, rect, id);
         response
+    }
+
+    /// Abre (o vuelve a enfocar) la búsqueda en la salida de la terminal.
+    pub fn open_search(&mut self) {
+        let search = self.search.get_or_insert_with(Box::default);
+        search.focus = true;
+    }
+
+    /// Barra de búsqueda arriba a la derecha y resaltado de las coincidencias.
+    fn search_ui(&mut self, ui: &egui::Ui, rect: Rect, id: egui::Id, m: &Metrics) {
+        let Some(search) = self.search.as_mut() else {
+            return;
+        };
+        let ctx = ui.ctx().clone();
+        let (escape, enter, back) = ctx.input_mut(|i| {
+            (
+                i.consume_key(egui::Modifiers::NONE, Key::Escape),
+                i.consume_key(egui::Modifiers::NONE, Key::Enter),
+                i.consume_key(egui::Modifiers::SHIFT, Key::Enter),
+            )
+        });
+        if escape {
+            self.search = None;
+            return;
+        }
+        let mut term = self.term.lock().unwrap();
+        let mut changed = false;
+        let width = 300.0_f32.min(rect.width() - 16.0);
+        let pos = egui::pos2(rect.max.x - width - 18.0, rect.min.y + 6.0);
+        egui::Area::new(id.with("search"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(&ctx, |ui| {
+                egui::Frame::new()
+                    .fill(crate::theme::SURFACE)
+                    .stroke(egui::Stroke::new(1.0, crate::theme::SEPARATOR))
+                    .corner_radius(8.0)
+                    .inner_margin(egui::Margin::symmetric(8, 5))
+                    .show(ui, |ui| {
+                        ui.set_width(width - 16.0);
+                        ui.horizontal(|ui| {
+                            let edit = ui.add(
+                                egui::TextEdit::singleline(&mut search.query)
+                                    .hint_text(forge_core::tr!("Buscar en la terminal"))
+                                    .frame(egui::Frame::NONE)
+                                    .desired_width(width - 130.0),
+                            );
+                            if std::mem::take(&mut search.focus) || enter || back {
+                                edit.request_focus();
+                            }
+                            changed = edit.changed();
+                            let count = if search.query.is_empty() {
+                                String::new()
+                            } else if search.matches.is_empty() {
+                                forge_core::tr!("0 de 0").to_string()
+                            } else {
+                                forge_core::tr!(
+                                    "{n} de {total}",
+                                    n = search.current + 1,
+                                    total = search.matches.len()
+                                )
+                            };
+                            ui.label(
+                                egui::RichText::new(count)
+                                    .size(11.0)
+                                    .color(crate::theme::TEXT_3),
+                            );
+                            let small = |ui: &mut egui::Ui, glyph: &str, tip: &str| {
+                                crate::theme::icon_button_sized(
+                                    ui,
+                                    glyph,
+                                    tip,
+                                    20.0,
+                                    crate::theme::TEXT_2,
+                                )
+                                .clicked()
+                            };
+                            if small(
+                                ui,
+                                crate::theme::icon::CARET_UP,
+                                forge_core::tr!("Anterior (⇧↩)"),
+                            ) {
+                                search.step(-1);
+                                search.reveal = true;
+                            }
+                            if small(
+                                ui,
+                                crate::theme::icon::CARET_DOWN,
+                                forge_core::tr!("Siguiente (↩)"),
+                            ) {
+                                search.step(1);
+                                search.reveal = true;
+                            }
+                            if small(ui, crate::theme::icon::X, forge_core::tr!("Cerrar (Esc)")) {
+                                search.closed = true;
+                            }
+                        });
+                    });
+            });
+        if search.closed {
+            drop(term);
+            self.search = None;
+            return;
+        }
+        // Se busca de nuevo al escribir o si llegó salida nueva (cada pocos fotogramas).
+        let stamp = (term.grid().history_size(), term.grid().cursor.point.line.0);
+        if changed || search.stamp != Some(stamp) {
+            search.stamp = Some(stamp);
+            search.find(&term);
+            search.reveal = changed;
+        }
+        if enter {
+            search.step(1);
+            search.reveal = true;
+        }
+        if back {
+            search.step(-1);
+            search.reveal = true;
+        }
+        // Lleva la vista hasta la coincidencia actual.
+        if std::mem::take(&mut search.reveal)
+            && let Some(&(line, _, _)) = search.matches.get(search.current)
+        {
+            let screen = term.screen_lines() as i32;
+            let offset = term.grid().display_offset() as i32;
+            let visible = -offset..screen - offset;
+            if !visible.contains(&line) {
+                let target = (-line + screen / 2).clamp(0, term.grid().history_size() as i32);
+                term.scroll_display(Scroll::Delta(target - offset));
+            }
+        }
+        let offset = term.grid().display_offset() as i32;
+        let screen = term.screen_lines() as i32;
+        let painter = ui.painter_at(rect);
+        for (k, &(line, start, end)) in search.matches.iter().enumerate() {
+            let row = line + offset;
+            if !(0..screen).contains(&row) {
+                continue;
+            }
+            let r = Rect::from_min_size(
+                rect.min + Vec2::new(start as f32 * m.cell.x, row as f32 * m.cell.y),
+                Vec2::new((end - start) as f32 * m.cell.x, m.cell.y),
+            );
+            let color = if k == search.current {
+                Color32::from_rgba_unmultiplied(255, 159, 10, 150)
+            } else {
+                Color32::from_rgba_unmultiplied(255, 214, 10, 60)
+            };
+            painter.rect_filled(r, 2.0, color);
+        }
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
     }
 
     /// Barra de scroll (si hay historial) y botón para volver al final al haber subido.
@@ -1070,6 +1226,55 @@ fn indexed(i: u8) -> (u8, u8, u8) {
     }
 }
 
+/// Búsqueda en la salida (pantalla + historial), sin distinguir mayúsculas.
+#[derive(Default)]
+struct Search {
+    query: String,
+    /// (línea de la grilla, columna inicial, columna final); líneas negativas = historial.
+    matches: Vec<(i32, usize, usize)>,
+    current: usize,
+    focus: bool,
+    reveal: bool,
+    closed: bool,
+    /// Estado de la salida en la última búsqueda (para rehacerla si hay salida nueva).
+    stamp: Option<(usize, i32)>,
+}
+
+impl Search {
+    fn find<T>(&mut self, term: &Term<T>) {
+        self.matches.clear();
+        let needle: Vec<char> = self.query.to_lowercase().chars().collect();
+        if needle.is_empty() {
+            return;
+        }
+        let top = -(term.grid().history_size() as i32);
+        for line in top..term.screen_lines() as i32 {
+            let row = &term.grid()[alacritty_terminal::index::Line(line)];
+            let chars: Vec<char> = (0..term.columns())
+                .map(|c| row[Column(c)].c.to_lowercase().next().unwrap_or(' '))
+                .collect();
+            let mut col = 0;
+            while col + needle.len() <= chars.len() {
+                if chars[col..col + needle.len()] == needle[..] {
+                    self.matches.push((line, col, col + needle.len()));
+                    col += needle.len();
+                } else {
+                    col += 1;
+                }
+            }
+        }
+        // La más reciente (abajo) primero, como en otras terminales.
+        self.current = self.matches.len().saturating_sub(1);
+    }
+
+    fn step(&mut self, delta: isize) {
+        let n = self.matches.len() as isize;
+        if n > 0 {
+            self.current = (self.current as isize + delta).rem_euclid(n) as usize;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1284,6 +1489,35 @@ mod tests {
         assert_eq!(t.grid().display_offset(), 50);
         t.scroll_display(Scroll::Bottom);
         assert_eq!(t.grid().display_offset(), 0);
+    }
+
+    /// Busca en pantalla e historial: `seq 1 300` contiene "42" en 42, 142 y 242.
+    #[test]
+    fn search_finds_matches_in_scrollback() {
+        let ctx = egui::Context::default();
+        let term = Terminal::exec(
+            &ctx,
+            Path::new("/tmp"),
+            "seq 1 300; sleep 5",
+            &HashMap::new(),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut search = Search {
+            query: "42".into(),
+            ..Default::default()
+        };
+        loop {
+            search.find(&term.term.lock().unwrap());
+            if search.matches.len() == 3 {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "{:?}", search.matches);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(search.current, 2, "empieza por la más reciente");
+        search.step(1);
+        assert_eq!(search.current, 0, "da la vuelta");
     }
 
     #[test]

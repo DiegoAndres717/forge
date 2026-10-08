@@ -49,6 +49,8 @@ pub enum WsAction {
     ToggleMaximize,
     Focus(Toward),
     Cycle(isize),
+    /// ⌘F: buscar en la terminal enfocada.
+    Find,
 }
 
 enum Content {
@@ -855,6 +857,22 @@ impl Workspace {
                 self.split(ctx, rect.map_or(Dir::Row, layout::auto_dir));
             }
             WsAction::Close => self.close(self.focus),
+            WsAction::Find => {
+                let focus = self.focus;
+                let terminal = match self.panels.get_mut(&focus).map(|p| &mut p.content) {
+                    Some(Content::Shell(t)) => Some(t),
+                    Some(Content::Process(id)) => {
+                        let id = id.clone();
+                        self.processes
+                            .get_mut(&id)
+                            .and_then(|m| m.terminal.as_mut())
+                    }
+                    None => None,
+                };
+                if let Some(t) = terminal {
+                    t.open_search();
+                }
+            }
             WsAction::ToggleMaximize => {
                 self.maximized = match self.maximized {
                     None if self.panels.len() > 1 => Some(self.focus),

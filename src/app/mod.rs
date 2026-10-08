@@ -119,6 +119,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::H, true, false) => Action::Home,
         (Key::B, false, false) => Action::ToggleSidebar,
         (Key::G, false, false) => Action::ToggleGuard,
+        (Key::F, false, false) => Action::Ws(WsAction::Find),
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
         (Key::I, true, false) => Action::ToggleIdeas,
