@@ -105,6 +105,8 @@ pub struct Terminal {
     scroll_acc: f32,
     had_focus: bool,
     mouse_down: Option<u8>,
+    /// Barra de scroll y botón "Ir al final" (los clics ahí no seleccionan texto).
+    overlays: Vec<Rect>,
     pub title: Option<String>,
     /// URLs locales vistas en la salida (p. ej. "http://localhost:5173/" de Vite).
     urls: Arc<Mutex<Vec<String>>>,
@@ -218,6 +220,7 @@ impl Terminal {
             scroll_acc: 0.0,
             had_focus: true,
             mouse_down: None,
+            overlays: Vec::new(),
             title: None,
             urls,
             exit_code: None,
@@ -311,7 +314,77 @@ impl Terminal {
         self.mouse(&ctx, &response, rect, m);
         let painter = ui.painter_at(rect);
         paint(&self.term.lock().unwrap(), &painter, rect, focused, m);
+        self.scroll_overlay(ui, rect, id);
         response
+    }
+
+    /// Barra de scroll (si hay historial) y botón para volver al final al haber subido.
+    fn scroll_overlay(&mut self, ui: &egui::Ui, rect: Rect, id: egui::Id) {
+        self.overlays.clear();
+        let mut term = self.term.lock().unwrap();
+        let (history, offset) = (term.grid().history_size(), term.grid().display_offset());
+        if history == 0 {
+            return;
+        }
+        let screen = term.screen_lines();
+        let track = Rect::from_min_max(
+            egui::pos2(rect.max.x - 10.0, rect.min.y + 2.0),
+            egui::pos2(rect.max.x - 2.0, rect.max.y - 2.0),
+        );
+        let bar = ui.interact(track, id.with("scrollbar"), Sense::click_and_drag());
+        self.overlays.push(track);
+        // Arrastrar o hacer clic en la barra mueve la vista a esa altura.
+        let thumb_h = (track.height() * screen as f32 / (history + screen) as f32).max(24.0);
+        if let Some(p) = bar.interact_pointer_pos() {
+            let frac =
+                ((p.y - track.min.y - thumb_h / 2.0) / (track.height() - thumb_h)).clamp(0.0, 1.0);
+            let target = ((1.0 - frac) * history as f32).round() as i32;
+            term.scroll_display(Scroll::Delta(target - offset as i32));
+        }
+        let offset = term.grid().display_offset();
+        let frac = 1.0 - offset as f32 / history as f32;
+        let thumb = Rect::from_min_size(
+            egui::pos2(track.min.x, track.min.y + (track.height() - thumb_h) * frac),
+            Vec2::new(track.width(), thumb_h),
+        );
+        // Discreta: visible al pasar el ratón, al arrastrar o si no se está al final.
+        let active = bar.hovered() || bar.dragged();
+        if active || offset > 0 {
+            let alpha = if active { 150 } else { 70 };
+            ui.painter().rect_filled(
+                thumb.shrink2(Vec2::new(1.5, 0.0)),
+                3.0,
+                Color32::from_white_alpha(alpha),
+            );
+        }
+        if offset == 0 {
+            return;
+        }
+        // "Ir al final", abajo a la derecha.
+        let font = egui::FontId::proportional(12.0);
+        let label = format!("↓  {}", forge_core::tr!("Ir al final"));
+        let galley = ui.painter().layout_no_wrap(label, font, Color32::WHITE);
+        let size = galley.size() + Vec2::new(20.0, 10.0);
+        let button = Rect::from_min_size(rect.max - size - Vec2::new(18.0, 12.0), size);
+        let response = ui.interact(button, id.with("to-bottom"), Sense::click());
+        self.overlays.push(button);
+        let fill = if response.hovered() {
+            crate::theme::ACCENT
+        } else {
+            Color32::from_rgb(0x3a, 0x3a, 0x3c)
+        };
+        ui.painter().rect_filled(button, size.y / 2.0, fill);
+        ui.painter().galley(
+            button.center() - galley.size() / 2.0,
+            galley,
+            Color32::WHITE,
+        );
+        if response.clicked() {
+            term.scroll_display(Scroll::Bottom);
+        }
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
     }
 
     fn keyboard(&mut self, ctx: &egui::Context, m: &Metrics) {
@@ -455,7 +528,9 @@ impl Terminal {
                     button,
                     pressed,
                     modifiers,
-                } if rect.contains(pos) || !pressed => {
+                } if (rect.contains(pos) && !self.overlays.iter().any(|o| o.contains(pos)))
+                    || !pressed =>
+                {
                     let (line, col, side) = self.cell_at(pos, rect, m);
                     let code = match button {
                         PointerButton::Primary => 0,
@@ -1186,6 +1261,29 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "no apareció la línea");
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// Con historial se puede subir y volver al final (lo que hacen la barra y el botón).
+    #[test]
+    fn scrollback_up_and_back_to_bottom() {
+        let ctx = egui::Context::default();
+        let term = Terminal::exec(
+            &ctx,
+            Path::new("/tmp"),
+            "seq 1 300; sleep 5",
+            &HashMap::new(),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while term.term.lock().unwrap().grid().history_size() == 0 {
+            assert!(std::time::Instant::now() < deadline, "sin historial");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let mut t = term.term.lock().unwrap();
+        t.scroll_display(Scroll::Delta(50));
+        assert_eq!(t.grid().display_offset(), 50);
+        t.scroll_display(Scroll::Bottom);
+        assert_eq!(t.grid().display_offset(), 0);
     }
 
     #[test]

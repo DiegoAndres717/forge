@@ -1067,4 +1067,5 @@ pub const EN: &[(&str, &str)] = &[
     ("bloqueado", "blocked"),
     ("desconocido", "unknown"),
     ("{p0}  Repetir", "{p0}  Repeat"),
+    ("Ir al final", "Jump to bottom"),
 ];
