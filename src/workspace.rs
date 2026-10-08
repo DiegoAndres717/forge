@@ -110,6 +110,8 @@ pub struct GuardView {
     pub ai_spend: Option<(f64, f64)>,
     /// Formulario del pull request (borrador editable antes de publicarlo con `gh`).
     pub pr: Option<forge_core::pr::Draft>,
+    /// Terminó una validación mientras el proyecto no estaba a la vista.
+    pub unseen: bool,
 }
 
 pub struct AllowForm {
@@ -136,8 +138,20 @@ impl Default for GuardView {
             history: None,
             ai_spend: None,
             pr: None,
+            unseen: false,
         }
     }
+}
+
+/// Aviso de un proyecto que no está a la vista (punto en la barra lateral).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Attention {
+    /// Un agente trabajó y se quedó quieto: terminó o espera respuesta.
+    Agent(String),
+    /// Un proceso administrado falló.
+    Failed(String),
+    /// Guard bloqueó una validación.
+    Blocked,
 }
 
 /// Lista de ideas (de un proyecto, o la general en Inicio).
@@ -204,18 +218,31 @@ pub struct Workspace {
     branch: (Option<String>, Option<Instant>),
     /// Último error (p. ej. no se pudo abrir un shell); la app lo muestra y lo limpia.
     pub error: Option<String>,
+    /// Dormido: sin terminales ni procesos; guarda el estado para restaurarlo al despertar.
+    dormant: Option<Option<WorkspaceState>>,
+    /// Última vez que estuvo a la vista (para los avisos de actividad).
+    seen: Instant,
+    /// Procesos fallidos que el usuario ya vio.
+    seen_failures: Vec<String>,
 }
 
 impl Workspace {
     /// Abre el workspace: sesión guardada → layout predefinido → un panel en la raíz.
     /// Inicia los procesos `on-workspace-open` y los que estaban en marcha al cerrar.
     pub fn open(ctx: &egui::Context, project: Project, saved: Option<WorkspaceState>) -> Self {
+        let mut ws = Self::new(project);
+        ws.start(ctx, saved);
+        ws
+    }
+
+    /// Workspace vacío (sin paneles ni procesos en marcha).
+    fn new(project: Project) -> Self {
         let processes = Processes::new(
             &project.config.processes,
             project.root(),
             project.config.environment.clone(),
         );
-        let mut ws = Self {
+        Self {
             project,
             processes,
             guard: GuardView::default(),
@@ -235,7 +262,117 @@ impl Workspace {
             renaming: None,
             branch: (None, None),
             error: None,
-        };
+            dormant: None,
+            seen: Instant::now(),
+            seen_failures: Vec::new(),
+        }
+    }
+
+    /// Proyecto abierto pero dormido: aparece en la lista y no lanza nada hasta despertarlo.
+    pub fn asleep(project: Project, saved: Option<WorkspaceState>) -> Self {
+        let mut ws = Self::new(project);
+        ws.dormant = Some(saved);
+        ws
+    }
+
+    pub fn is_dormant(&self) -> bool {
+        self.dormant.is_some()
+    }
+
+    /// Despierta un proyecto dormido: restaura paneles y procesos como al abrirlo.
+    pub fn wake(&mut self, ctx: &egui::Context) {
+        if let Some(saved) = self.dormant.take() {
+            self.next_id = 0;
+            self.seen = Instant::now();
+            self.start(ctx, saved);
+        }
+    }
+
+    /// Cierra terminales y procesos (al soltarlos se matan) y conserva el layout.
+    pub fn sleep(&mut self) {
+        if self.is_dormant() {
+            return;
+        }
+        let state = self.state();
+        self.panels.clear();
+        self.maximized = None;
+        self.renaming = None;
+        self.processes = Processes::new(
+            &self.project.config.processes,
+            self.project.root(),
+            self.project.config.environment.clone(),
+        );
+        self.guard.run = None;
+        self.dormant = Some(Some(state));
+    }
+
+    /// Estado para guardar (el de antes de dormir si está dormido).
+    pub fn saved_state(&self) -> Option<WorkspaceState> {
+        match &self.dormant {
+            Some(saved) => saved.clone(),
+            None => Some(self.state()),
+        }
+    }
+
+    /// El usuario lo está viendo: se apagan sus avisos.
+    pub fn mark_seen(&mut self) {
+        self.seen = Instant::now();
+        self.guard.unseen = false;
+        self.seen_failures = self.failed_processes();
+    }
+
+    fn failed_processes(&self) -> Vec<String> {
+        self.processes
+            .list
+            .iter()
+            .filter(|m| {
+                matches!(m.status, crate::processes::Status::Failed(_))
+                    || matches!(m.status, crate::processes::Status::Exited { code } if code != 0)
+            })
+            .map(|m| m.def.id.clone())
+            .collect()
+    }
+
+    /// Aviso más importante desde la última vez que se vio el proyecto.
+    pub fn attention(&self) -> Option<Attention> {
+        if self.is_dormant() {
+            return None;
+        }
+        if let Some(id) = self
+            .failed_processes()
+            .into_iter()
+            .find(|id| !self.seen_failures.contains(id))
+        {
+            let name = self
+                .processes
+                .get(&id)
+                .map_or(id.clone(), |m| m.def.label().to_string());
+            return Some(Attention::Failed(name));
+        }
+        let blocked = self.guard.unseen
+            && self.guard.run.as_ref().is_some_and(|r| {
+                r.snapshot(|r| r.verdict()) == forge_core::guard::Verdict::Blocked
+            });
+        if blocked {
+            return Some(Attention::Blocked);
+        }
+        // Agente que escribió mientras no se miraba y lleva unos segundos quieto.
+        self.panels.values().find_map(|p| {
+            let agent = p.agent.as_ref()?;
+            let Content::Shell(t) = &p.content else {
+                return None;
+            };
+            let last = t.last_output()?;
+            (last > self.seen && last.elapsed() > Duration::from_secs(4)).then(|| {
+                let spec = self.project.agents.iter().find(|s| &s.id == agent);
+                Attention::Agent(spec.map_or(agent.clone(), |s| s.name.clone()))
+            })
+        })
+    }
+
+    /// Restaura la sesión guardada (o el layout por defecto) y arranca los procesos.
+    fn start(&mut self, ctx: &egui::Context, saved: Option<WorkspaceState>) {
+        let ws = self;
         let config = &ws.project.config.workspace;
         let (restore_panels, restore_processes) = (config.restore_panels, config.restore_processes);
         let mut start: Vec<String> = ws
@@ -260,7 +397,6 @@ impl Workspace {
                 ws.processes.start(ctx, &id);
             }
         }
-        ws
     }
 
     /// Aplica una configuración recargada del disco.

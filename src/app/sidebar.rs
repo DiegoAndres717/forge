@@ -1,7 +1,33 @@
 // Barra lateral: proyectos, Guard, memoria, agentes y procesos.
 use super::*;
 
+/// Con más proyectos que esto, la lista se compacta.
+const COMPACT_AFTER: usize = 6;
+
 impl App {
+    /// Proyectos a mostrar: todos, o (con muchos) el activo, los que tienen aviso y los
+    /// usados más recientemente hasta completar `COMPACT_AFTER`.
+    fn visible_workspaces(&self, attention: &[Option<crate::workspace::Attention>]) -> Vec<usize> {
+        let n = self.workspaces.len();
+        if n <= COMPACT_AFTER || self.show_all {
+            return (0..n).collect();
+        }
+        let by_path = |p: &PathBuf| self.workspaces.iter().position(|w| &w.project.path == p);
+        let mut out: Vec<usize> = self.active.into_iter().collect();
+        out.extend((0..n).filter(|i| attention[*i].is_some()));
+        out.extend(self.mru.iter().filter_map(by_path));
+        out.extend(0..n);
+        let mut seen = Vec::new();
+        for i in out {
+            let important = Some(i) == self.active || attention[i].is_some();
+            if !seen.contains(&i) && (important || seen.len() < COMPACT_AFTER) {
+                seen.push(i);
+            }
+        }
+        seen.sort_unstable(); // en el orden de siempre (⌘1…⌘9)
+        seen
+    }
+
     /// Barra lateral (estilo Finder/Xcode): workspaces arriba y, del proyecto activo,
     /// agentes, procesos, comandos y accesos a Guard, Memoria y configuración.
     pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
@@ -30,36 +56,90 @@ impl App {
                 {
                     cmds.push(UiCmd::Home);
                 }
+                let attention: Vec<_> = self.workspaces.iter().map(|w| w.attention()).collect();
+                let visible = self.visible_workspaces(&attention);
+                let ram = self.ram.lock().map(|r| r.clone()).unwrap_or_default();
                 for (i, ws) in self.workspaces.iter().enumerate() {
+                    if !visible.contains(&i) {
+                        continue;
+                    }
+                    let selected = self.active == Some(i);
+                    let dormant = ws.is_dormant();
                     let running = ws.processes.active_count();
                     let detail = match (running, i) {
+                        _ if attention[i].is_some() => String::new(),
+                        _ if dormant => "dormido".to_string(),
                         (n, _) if n > 0 => format!("{n} en marcha"),
                         (_, i) if i < 9 => format!("⌘{}", i + 1),
                         _ => String::new(),
                     };
-                    let selected = self.active == Some(i);
-                    let color = if selected {
-                        theme::ACCENT
-                    } else {
-                        theme::TEXT_2
+                    let (glyph, color) = match (selected, dormant) {
+                        (true, _) => (icon::FOLDER, theme::ACCENT),
+                        (_, true) => (icon::MOON, theme::TEXT_4),
+                        _ => (icon::FOLDER, theme::TEXT_2),
                     };
-                    let row = theme::row(
-                        ui,
-                        icon::FOLDER,
-                        color,
-                        &ws.project.name(),
-                        &detail,
-                        selected,
-                    )
-                    .on_hover_text(tilde(&ws.project.path));
+                    let mut tip = tilde(&ws.project.path);
+                    if let Some(bytes) = ram.get(&ws.project.path) {
+                        tip += &format!("\nMemoria: {}", human_bytes(*bytes));
+                    }
+                    if dormant {
+                        tip += "\nDormido: sus terminales y procesos arrancan al entrar.";
+                    }
+                    let row = theme::row(ui, glyph, color, &ws.project.name(), &detail, selected);
+                    // Aviso: punto de color a la derecha.
+                    if let Some(a) = &attention[i] {
+                        use crate::workspace::Attention;
+                        let (color, text) = match a {
+                            Attention::Agent(name) => {
+                                (theme::ORANGE, format!("{name} terminó o espera respuesta"))
+                            }
+                            Attention::Failed(name) => {
+                                (theme::RED, format!("El proceso {name} falló"))
+                            }
+                            Attention::Blocked => {
+                                (theme::RED, "Guard bloqueó la validación".to_string())
+                            }
+                        };
+                        ui.painter().circle_filled(
+                            egui::pos2(row.rect.max.x - 14.0, row.rect.center().y),
+                            4.0,
+                            color,
+                        );
+                        tip = format!("{text}\n{tip}");
+                    }
+                    let row = row.on_hover_text(tip);
                     if row.clicked() {
                         cmds.push(UiCmd::Activate(i));
                     }
                     row.context_menu(|ui| {
+                        if dormant {
+                            if ui.button(format!("{}  Despertar", icon::SUN)).clicked() {
+                                cmds.push(UiCmd::Activate(i));
+                            }
+                        } else if ui
+                            .button(format!("{}  Dormir (libera memoria)", icon::MOON))
+                            .clicked()
+                        {
+                            cmds.push(UiCmd::Sleep(i));
+                        }
                         if ui.button(format!("{}  Cerrar proyecto", icon::X)).clicked() {
                             cmds.push(UiCmd::Close(i));
                         }
                     });
+                }
+                let hidden = self.workspaces.len() - visible.len();
+                if hidden > 0 || self.show_all {
+                    let label = if self.show_all {
+                        "Mostrar menos".to_string()
+                    } else {
+                        format!("{hidden} más…")
+                    };
+                    if theme::row(ui, icon::DOTS_THREE, theme::TEXT_3, &label, "⌘K", false)
+                        .on_hover_text("Todos los proyectos abiertos (o búscalos con ⌘K)")
+                        .clicked()
+                    {
+                        self.show_all = !self.show_all;
+                    }
                 }
                 if theme::row(ui, icon::PLUS, theme::TEXT_3, "Abrir carpeta…", "⌘O", false)
                     .clicked()

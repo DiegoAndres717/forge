@@ -70,6 +70,8 @@ pub enum Action {
     ToggleMemory,
     ToggleIdeas,
     Palette,
+    /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
+    NextRecent,
 }
 
 /// Atajos globales (siempre con ⌘, nunca con Ctrl, para no robar teclas al shell).
@@ -131,6 +133,8 @@ enum UiCmd {
     Home,
     Activate(usize),
     Close(usize),
+    /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
+    Sleep(usize),
     OpenFolder,
     Open(PathBuf),
     Forget(PathBuf),
@@ -197,7 +201,8 @@ pub struct App {
     agents: Arc<Mutex<HashMap<String, agents::Detection>>>,
     detecting: Arc<AtomicBool>,
     /// Memoria (RSS) de los procesos del proyecto activo, refrescada en segundo plano.
-    ram: Arc<Mutex<Option<u64>>>,
+    /// RAM de cada proyecto despierto (terminales, agentes y procesos).
+    ram: Arc<Mutex<HashMap<PathBuf, u64>>>,
     ram_checked: Option<Instant>,
     /// Paleta de comandos (⌘K) abierta.
     palette: Option<palette::Palette>,
@@ -208,6 +213,12 @@ pub struct App {
     approval_seen: Option<String>,
     /// Ideas generales (sin proyecto), en Inicio.
     general: crate::workspace::IdeasView,
+    /// Proyectos de más a menos recientemente usados (⌃Tab).
+    mru: Vec<PathBuf>,
+    /// Último ⌃Tab: (posición en `mru`, cuándo) para seguir retrocediendo si se repite.
+    mru_cycle: Option<(usize, Instant)>,
+    /// Barra lateral con todos los proyectos (con muchos se compacta).
+    show_all: bool,
 }
 
 impl App {
@@ -246,6 +257,9 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            mru: Vec::new(),
+            mru_cycle: None,
+            show_all: false,
             general: crate::workspace::IdeasView {
                 dirty: true,
                 ..Default::default()
@@ -269,7 +283,8 @@ impl App {
         let open_before = app.db(|s| s.open_projects()).unwrap_or_default();
         for path in open_before {
             if path.is_dir() {
-                app.open_project(ctx, &path);
+                // Dormidos: solo se despierta el activo (y los demás al entrar en ellos).
+                app.open_project_as(ctx, &path, false);
             } else {
                 app.db(|s| s.set_closed(&path));
             }
@@ -294,6 +309,11 @@ impl App {
     }
 
     fn open_project(&mut self, ctx: &egui::Context, path: &Path) {
+        self.open_project_as(ctx, path, true);
+    }
+
+    /// Abre un proyecto; dormido (`awake = false`) solo aparece en la lista hasta usarlo.
+    fn open_project_as(&mut self, ctx: &egui::Context, path: &Path, awake: bool) {
         let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if let Some(i) = self.workspaces.iter().position(|w| w.project.path == path) {
             self.active = Some(i);
@@ -315,6 +335,10 @@ impl App {
         let saved = self.db(|s| s.workspace(&path)).flatten();
         let name = project.name();
         self.db(|s| s.touch(&path, &name));
+        if !awake {
+            self.workspaces.push(Workspace::asleep(project, saved));
+            return;
+        }
         self.workspaces.push(Workspace::open(ctx, project, saved));
         self.active = Some(self.workspaces.len() - 1);
         self.save();
@@ -366,10 +390,12 @@ impl App {
         let states: Vec<_> = self
             .workspaces
             .iter()
-            .map(|w| (w.project.path.clone(), w.state()))
+            .map(|w| (w.project.path.clone(), w.saved_state()))
             .collect();
         for (i, (path, state)) in states.iter().enumerate() {
-            self.db(|s| s.save_workspace(path, state, i));
+            if let Some(state) = state {
+                self.db(|s| s.save_workspace(path, state, i));
+            }
         }
         let active = self.active.map(|i| {
             self.workspaces[i]
@@ -432,6 +458,25 @@ impl App {
             Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
             Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
+            Action::NextRecent => {
+                let n = self.mru.len();
+                if n < 2 {
+                    return;
+                }
+                let pos = match self.mru_cycle {
+                    Some((p, at)) if at.elapsed() < Duration::from_millis(1200) => (p + 1) % n,
+                    _ => 1,
+                };
+                self.mru_cycle = Some((pos, Instant::now()));
+                let target = &self.mru[pos];
+                if let Some(i) = self
+                    .workspaces
+                    .iter()
+                    .position(|w| &w.project.path == target)
+                {
+                    cmds.push(UiCmd::Activate(i));
+                }
+            }
             Action::Palette => {
                 if self.palette.take().is_none() {
                     self.open_palette();
@@ -445,6 +490,15 @@ impl App {
             UiCmd::Home => self.active = None,
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
+            UiCmd::Sleep(i) => {
+                self.save();
+                if let Some(ws) = self.workspaces.get_mut(i) {
+                    ws.sleep();
+                }
+                if self.active == Some(i) {
+                    self.active = None;
+                }
+            }
             UiCmd::OpenFolder => self.pick_folder(ctx),
             UiCmd::Open(path) => self.open_project(ctx, &path),
             UiCmd::Forget(path) => {
@@ -833,6 +887,17 @@ impl eframe::App for App {
                     pressed,
                     modifiers,
                     ..
+                } if *key == Key::Tab && modifiers.ctrl && !modifiers.mac_cmd => {
+                    if *pressed {
+                        actions.push(Action::NextRecent);
+                    }
+                    false
+                }
+                egui::Event::Key {
+                    key,
+                    pressed,
+                    modifiers,
+                    ..
                 } => match shortcut(*key, *modifiers) {
                     Some(action) => {
                         if *pressed {
@@ -922,11 +987,19 @@ impl eframe::App for App {
             Some(i) => {
                 let m = metrics(&ctx, &self.settings);
                 let ws = &mut self.workspaces[i];
+                ws.wake(&ctx);
+                ws.mark_seen();
+                let path = ws.project.path.clone();
+                if self.mru.first() != Some(&path) {
+                    self.mru.retain(|p| p != &path);
+                    self.mru.insert(0, path);
+                }
+                let ws = &mut self.workspaces[i];
                 ws.ui(ui, area, &m, &ws_actions, self.palette.is_none());
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
                 }
-                if ws.is_empty() {
+                if ws.is_empty() && !ws.is_dormant() {
                     cmds.push(UiCmd::Close(i));
                 }
             }

@@ -128,10 +128,10 @@ impl App {
 
         for (i, ws) in self.workspaces.iter().enumerate() {
             if Some(i) != self.active {
-                let hint = if i < 9 {
-                    format!("⌘{}", i + 1)
-                } else {
-                    String::new()
+                let hint = match i {
+                    _ if ws.is_dormant() => "dormido".to_string(),
+                    0..9 => format!("⌘{}", i + 1),
+                    _ => String::new(),
                 };
                 add(
                     icon::FOLDER,
@@ -366,6 +366,14 @@ impl App {
                 "⌘⇧W",
                 act(Action::CloseProject),
             );
+            if let Some(i) = self.active {
+                add(
+                    icon::MOON,
+                    "Dormir proyecto (libera memoria)".into(),
+                    "",
+                    cmd(UiCmd::Sleep(i)),
+                );
+            }
         }
 
         // Ideas: del proyecto activo o, en Inicio, la lista general.

@@ -109,6 +109,8 @@ pub struct Terminal {
     /// URLs locales vistas en la salida (p. ej. "http://localhost:5173/" de Vite).
     urls: Arc<Mutex<Vec<String>>>,
     exit_code: Option<u32>,
+    /// Última vez que el programa escribió algo (avisos de actividad en segundo plano).
+    last_output: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 /// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
@@ -176,13 +178,16 @@ impl Terminal {
         // ponytail: un hilo bloqueante por PTY; tokio si los paneles se cuentan por cientos.
         let mut reader = pair.master.try_clone_reader()?;
         let urls = Arc::new(Mutex::new(Vec::new()));
+        let last_output = Arc::new(Mutex::new(None));
         let (t, e, c, u) = (term.clone(), exited.clone(), ctx.clone(), urls.clone());
+        let activity = last_output.clone();
         std::thread::spawn(move || {
             let mut parser: Processor = Processor::new();
             let mut buf = [0u8; 64 * 1024];
             let mut scanner = UrlScanner::default();
             while let Ok(n @ 1..) = reader.read(&mut buf) {
                 parser.advance(&mut *t.lock().unwrap(), &buf[..n]);
+                *activity.lock().unwrap() = Some(std::time::Instant::now());
                 for url in scanner.feed(&buf[..n]) {
                     let mut urls = u.lock().unwrap();
                     if !urls.contains(&url) && urls.len() < 8 {
@@ -216,7 +221,12 @@ impl Terminal {
             title: None,
             urls,
             exit_code: None,
+            last_output,
         })
+    }
+
+    pub fn last_output(&self) -> Option<std::time::Instant> {
+        *self.last_output.lock().unwrap()
     }
 
     pub fn exited(&self) -> bool {

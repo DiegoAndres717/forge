@@ -224,6 +224,11 @@ impl App {
             );
             return;
         };
+        let bytes = self
+            .ram
+            .lock()
+            .ok()
+            .and_then(|r| r.get(&self.workspaces[i].project.path).copied());
         let ws = &mut self.workspaces[i];
         ui.label(
             RichText::new(ws.project.name())
@@ -283,7 +288,7 @@ impl App {
             if theme::icon_button(ui, icon::TERMINAL_WINDOW, "Nueva terminal (⌘T)").clicked() {
                 cmds.push(UiCmd::Ws(WsAction::NewTerminal));
             }
-            if let Some(bytes) = *self.ram.lock().unwrap() {
+            if let Some(bytes) = bytes {
                 ui.add_space(8.0);
                 ui.label(
                     RichText::new(format!("{}  {}", icon::MEMORY, human_bytes(bytes)))
@@ -306,9 +311,9 @@ impl App {
             egui::Stroke::new(1.0, theme::SEPARATOR),
         );
         let hints = if self.active.is_some() {
-            "⌘K Acciones    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
+            "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
         } else {
-            "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌘B Barra lateral"
+            "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral"
         };
         ui.painter().text(
             egui::pos2(rect.min.x + 12.0, rect.center().y),
@@ -344,22 +349,29 @@ impl App {
     }
 
     /// Mide en segundo plano la RAM de los procesos del proyecto activo.
+    /// RAM de cada proyecto despierto, cada 5 s en segundo plano.
     pub(super) fn ram_tick(&mut self, ctx: &egui::Context) {
-        let Some(i) = self.active else {
-            *self.ram.lock().unwrap() = None;
-            return;
-        };
         if self
             .ram_checked
-            .is_some_and(|t| t.elapsed() < Duration::from_secs(3))
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(5))
         {
             return;
         }
         self.ram_checked = Some(Instant::now());
-        let (pids, ram, ctx) = (self.workspaces[i].pids(), self.ram.clone(), ctx.clone());
+        let roots: Vec<(PathBuf, Vec<u32>)> = self
+            .workspaces
+            .iter()
+            .filter(|w| !w.is_dormant())
+            .map(|w| (w.project.path.clone(), w.pids()))
+            .collect();
+        let (ram, ctx) = (self.ram.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let bytes = processes::memory_usage(&pids);
-            *ram.lock().unwrap() = Some(bytes);
+            // ponytail: un `ps` por proyecto; con decenas despiertos, leer la tabla una vez.
+            let usage: HashMap<PathBuf, u64> = roots
+                .into_iter()
+                .map(|(path, pids)| (path, processes::memory_usage(&pids)))
+                .collect();
+            *ram.lock().unwrap() = usage;
             ctx.request_repaint();
         });
     }

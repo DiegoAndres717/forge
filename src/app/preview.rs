@@ -290,4 +290,24 @@ fn ui_preview() {
     harness.state_mut().active = None;
     settle(&mut harness);
     save(&mut harness, &out, "4-inicio");
+
+    // Muchos proyectos abiertos: lista compacta con dormidos.
+    let ctx = harness.ctx.clone();
+    for name in [
+        "ReparAppi",
+        "wabio",
+        "his-erp",
+        "mintiplay",
+        "zai-proxy",
+        "alexa-nova",
+        "tiendawa",
+        "landing",
+    ] {
+        let p = base.join(name);
+        std::fs::create_dir_all(&p).unwrap();
+        harness.state_mut().open_project_as(&ctx, &p, false);
+    }
+    harness.state_mut().active = Some(0);
+    settle(&mut harness);
+    save(&mut harness, &out, "9-muchos-proyectos");
 }

@@ -378,3 +378,108 @@ fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
     h.run_steps(3);
     assert_eq!(store(&h, None)[0].title, "App para talleres");
 }
+
+fn app_with(store: Store, open: Option<PathBuf>) -> Harness<'static, App> {
+    let mut harness = Harness::builder()
+        .with_size([1280.0, 800.0])
+        .build_eframe(move |cc| {
+            crate::install_fonts(&cc.egui_ctx, &Settings::default()).unwrap();
+            App::with_store(&cc.egui_ctx, Settings::default(), None, open, Ok(store))
+        });
+    harness.run_steps(3);
+    harness
+}
+
+#[test]
+fn only_the_active_project_starts_and_the_rest_sleep() {
+    let (a, b) = (project("sleep-a"), project("sleep-b"));
+    // Dos proyectos abiertos al cerrar Forge la última vez; el activo era A.
+    let store = Store::in_memory().unwrap();
+    for p in [&a, &b] {
+        store
+            .touch(p, p.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+    }
+    store.set_setting("active", &a.to_string_lossy()).unwrap();
+    let mut h = app_with(store, None);
+    h.run_steps(3);
+    let state = h.state();
+    assert_eq!(state.workspaces.len(), 2);
+    assert!(!state.workspaces[0].is_dormant() && state.workspaces[0].panel_count() == 1);
+    assert!(
+        state.workspaces[1].is_dormant(),
+        "B no arranca hasta entrar"
+    );
+    assert_eq!(state.workspaces[1].panel_count(), 0);
+
+    // ⌘2 entra en B y lo despierta.
+    h.key_press_modifiers(CMD, Key::Num2);
+    h.run_steps(3);
+    assert_eq!(h.state().active, Some(1));
+    assert!(!h.state().workspaces[1].is_dormant());
+    assert_eq!(h.state().workspaces[1].panel_count(), 1);
+
+    // ⌃Tab vuelve al anterior.
+    h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
+    h.run_steps(3);
+    assert_eq!(h.state().active, Some(0));
+
+    // Dormir A desde la paleta: cierra sus terminales y conserva el layout.
+    palette(&mut h, "dormir proyecto");
+    assert!(h.state().workspaces[0].is_dormant());
+    assert_eq!(h.state().active, None);
+    assert!(h.state().workspaces[0].saved_state().is_some());
+}
+
+#[test]
+fn background_process_failure_lights_the_project() {
+    let dir = project("attention");
+    std::fs::write(
+        dir.join(".forge/project.toml"),
+        "[[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"sleep 1; exit 3\"\nrestart = \"on-workspace-open\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    assert_eq!(ws(h.state()).attention(), None);
+    h.key_press_modifiers(CMD_SHIFT, Key::H); // se sale del proyecto antes de que falle
+    h.run_steps(2);
+    wait_until(&mut h, "aviso del proceso fallido", |a| {
+        ws(a).attention().is_some()
+    });
+    assert_eq!(
+        ws(h.state()).attention(),
+        Some(crate::workspace::Attention::Failed("API".into()))
+    );
+    // Al entrar se apaga.
+    h.key_press_modifiers(CMD, Key::Num1);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).attention(), None);
+}
+
+#[test]
+fn agent_that_finishes_in_the_background_lights_the_project() {
+    let dir = project("agent");
+    // Agente de prueba: trabaja un momento (escribe) y se queda esperando.
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 1; echo listo; sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    let ctx = h.ctx.clone();
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::OpenAgent("fake".into(), false),
+        Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0)),
+    );
+    h.run_steps(2);
+    h.key_press_modifiers(CMD_SHIFT, Key::H);
+    h.run_steps(2);
+    wait_until(&mut h, "aviso del agente", |a| ws(a).attention().is_some());
+    assert_eq!(
+        ws(h.state()).attention(),
+        Some(crate::workspace::Attention::Agent(
+            "Agente de prueba".into()
+        ))
+    );
+}
