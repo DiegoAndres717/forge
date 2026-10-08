@@ -591,10 +591,8 @@ impl Workspace {
             .map(|e| e.canonicalize().unwrap_or(e));
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
-                let plugin = crate::claude_plugin::PLUGIN_DIR
-                    .get()
-                    .map(|d| d.to_string_lossy());
-                Some(spec.with_events(&command, &forge.to_string_lossy(), plugin.as_deref()))
+                let has_mod = crate::claude_plugin::PLUGIN_DIR.get().is_some();
+                Some(spec.with_events(&command, &forge.to_string_lossy(), has_mod))
             }
             (_, typed, _) => typed,
         };

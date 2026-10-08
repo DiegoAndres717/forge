@@ -579,7 +579,9 @@ fn an_agent_that_only_redraws_does_not_raise_an_alert() {
         .apply(&ctx, UiCmd::OpenAgent("fake".into(), false), area);
     // Con el proyecto a la vista hasta que el shell termina de arrancar (su salida de
     // inicio, p. ej. fastfetch, no es trabajo del agente).
-    wait_until(&mut h, "el shell arranca", |a| ws(a).is_quiet(Duration::from_millis(1500)));
+    wait_until(&mut h, "el shell arranca", |a| {
+        ws(a).is_quiet(Duration::from_millis(1500))
+    });
     h.key_press_modifiers(CMD_SHIFT, Key::H);
     let start = Instant::now();
     while start.elapsed() < Duration::from_secs(8) {

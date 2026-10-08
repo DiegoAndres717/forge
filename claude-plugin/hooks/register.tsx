@@ -1,5 +1,6 @@
-// Forge for Claude Code. Loaded by Forge into every Claude session it opens
-// (--plugin-dir), so nothing is installed globally and the repository stays clean.
+// Forge for Claude Code. Loaded into every Claude started in a Forge terminal (Forge
+// sets CLAUDE_CODE_PLUGIN_DIRS there), whether typed by hand or opened from the sidebar;
+// nothing is installed globally and the repository stays clean.
 //
 // - A team of subagents on cheaper models, and a standing instruction to delegate to
 //   them: the main session keeps its context and its prompt cache, the heavy reading
@@ -134,10 +135,16 @@ export const register: Register = on => {
     // Forge, which notifies while it is in the background.
     if (!e.agentId && e.reason === 'answer' && e.answer.trim()) {
       const summary = e.answer.split('\n').find(line => line.trim())?.trim().slice(0, 140) ?? ''
-      void forge($, ['agent-event', 'stop'], JSON.stringify({ message: summary }))
+      void forge($, ['agent-event', 'stop'], JSON.stringify({ message: summary, origin: 'Claude Code' }))
       void refreshBand($)
     }
     return result
+  })
+
+  // Claude needs the user (a permission prompt, waiting for input): tell Forge.
+  on('classic.Notification', async ($, e, next) => {
+    void forge($, ['agent-event', 'waiting'], JSON.stringify({ message: e.message, origin: 'Claude Code' }))
+    return next(e)
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

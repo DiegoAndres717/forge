@@ -16,8 +16,10 @@ antes de cada commit, push o pull request.
 
 ## Mod de Forge para Claude Code
 
-Cada Claude Code que Forge abre carga el mod de `claude-plugin/` (con `--plugin-dir`, sin
-instalar nada en tu Claude ni tocar el repo):
+Cualquier `claude` que se ejecute en una terminal de Forge (escrito a mano, `claude --resume`,
+`claude -c`, o abierto desde la barra lateral) carga el mod de `claude-plugin/`: Forge pone
+`CLAUDE_CODE_PLUGIN_DIRS` en sus terminales. No se instala nada en tu Claude ni se toca el repo;
+fuera de Forge, Claude queda como siempre.
 
 - **Subagentes en modelos más baratos**: `forge:explorer` (Haiku) para buscar y leer código,
   `forge:reviewer` (Sonnet) para tests y revisiones, `forge:architect` (Opus) para lo difícil;

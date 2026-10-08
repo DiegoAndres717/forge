@@ -255,17 +255,22 @@ fn main() -> eframe::Result {
                     forge_core::danger::install(&base, &exe).map_err(|e| e.to_string())
                 });
             match installed {
-                Ok(env) => {
-                    let _ = terminal::SHELL_ENV.set(env);
+                Ok(mut env) => {
                     if let Some(base) = forge_core::store::Store::default_path()
                         .and_then(|db| db.parent().map(|d| d.to_path_buf()))
                     {
                         let _ = workspace::HISTORY_DIR.set(base.join("scrollback"));
-                        // Mod de Forge para Claude Code (subagentes, consumo, banda, comandos).
+                        // Mod de Forge para Claude Code: cualquier `claude` de una terminal de
+                        // Forge lo carga (escrito a mano o abierto desde la barra lateral).
                         if let Ok(dir) = claude_plugin::install(&base) {
+                            env.insert(
+                                "CLAUDE_CODE_PLUGIN_DIRS".into(),
+                                dir.to_string_lossy().into_owned(),
+                            );
                             let _ = claude_plugin::PLUGIN_DIR.set(dir);
                         }
                     }
+                    let _ = terminal::SHELL_ENV.set(env);
                 }
                 Err(e) => {
                     error.get_or_insert(format!("sin control de comandos peligrosos: {e}"));

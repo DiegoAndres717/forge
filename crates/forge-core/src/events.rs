@@ -151,11 +151,17 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
             .take(64 * 1024)
             .read_to_string(&mut payload);
     }
-    let message = serde_json::from_str::<serde_json::Value>(&payload)
-        .ok()
-        .and_then(|v| v["message"].as_str().map(str::to_string))
-        .filter(|m| !m.trim().is_empty());
-    let name = std::env::var("FORGE_ORIGIN").unwrap_or_else(|_| "Agente".into());
+    let json = serde_json::from_str::<serde_json::Value>(&payload).ok();
+    let field = |key: &str| {
+        json.as_ref()
+            .and_then(|v| v[key].as_str().map(str::to_string))
+            .filter(|m| !m.trim().is_empty())
+    };
+    let message = field("message");
+    // El mod de Claude Code dice quién es (un `claude` escrito a mano no tiene FORGE_ORIGIN).
+    let name = field("origin")
+        .or_else(|| std::env::var("FORGE_ORIGIN").ok())
+        .unwrap_or_else(|| "Agente".into());
     let text = match (kind, message) {
         ("waiting", Some(message)) => message,
         ("waiting", None) => crate::tr!("{name} espera tu respuesta", name = name),
