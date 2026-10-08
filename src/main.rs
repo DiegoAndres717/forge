@@ -249,6 +249,11 @@ fn main() -> eframe::Result {
             match installed {
                 Ok(env) => {
                     let _ = terminal::SHELL_ENV.set(env);
+                    if let Some(dir) = forge_core::store::Store::default_path()
+                        .and_then(|db| db.parent().map(|d| d.join("scrollback")))
+                    {
+                        let _ = workspace::HISTORY_DIR.set(dir);
+                    }
                 }
                 Err(e) => {
                     error.get_or_insert(format!("sin control de comandos peligrosos: {e}"));

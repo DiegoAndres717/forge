@@ -443,6 +443,9 @@ impl App {
 
     fn save(&mut self) {
         self.last_save = Instant::now();
+        for ws in &mut self.workspaces {
+            ws.save_history();
+        }
         let states: Vec<_> = self
             .workspaces
             .iter()

@@ -164,6 +164,12 @@ pub enum Attention {
     Event(String),
 }
 
+/// Carpeta del historial de las terminales (solo la app real; en tests no se guarda).
+pub static HISTORY_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Líneas de historial que se guardan por terminal.
+const HISTORY_LINES: usize = 1000;
+
 /// Datos del panel de Git (se leen en segundo plano).
 pub type GitData = (
     forge_core::git::Status,
@@ -261,6 +267,8 @@ pub struct Workspace {
     seen_failures: Vec<String>,
     /// Bytes que había escrito cada terminal la última vez que se vio el proyecto.
     seen_output: HashMap<PanelId, u64>,
+    /// Bytes de cada terminal cuando se guardó su historial (para no reescribirlo igual).
+    history_saved: HashMap<PanelId, u64>,
     /// Avisos ya notificados desde la última vez que se vio el proyecto (uno por aviso).
     pub notified: Vec<Attention>,
     /// Último aviso visto: se mantiene hasta entrar al proyecto (sin parpadeos si el
@@ -312,6 +320,7 @@ impl Workspace {
             seen: Instant::now(),
             seen_failures: Vec::new(),
             seen_output: HashMap::new(),
+            history_saved: HashMap::new(),
             notified: Vec::new(),
             sticky: None,
         }
@@ -343,6 +352,7 @@ impl Workspace {
             return;
         }
         let state = self.state();
+        self.save_history();
         self.panels.clear();
         self.maximized = None;
         self.renaming = None;
@@ -353,6 +363,47 @@ impl Workspace {
         );
         self.guard.run = None;
         self.dormant = Some(Some(state));
+    }
+
+    /// Archivo del historial de un panel: carpeta de Forge + proyecto + panel.
+    fn history_file(&self, id: PanelId) -> Option<PathBuf> {
+        // FNV-1a: nombre estable por proyecto sin dependencias.
+        let hash = self
+            .project
+            .path
+            .to_string_lossy()
+            .bytes()
+            .fold(0xcbf29ce484222325_u64, |h, b| {
+                (h ^ b as u64).wrapping_mul(0x100000001b3)
+            });
+        HISTORY_DIR
+            .get()
+            .map(|d| d.join(format!("{hash:016x}-{id}.txt")))
+    }
+
+    /// Guarda el historial de las terminales que escribieron algo desde la última vez.
+    pub fn save_history(&mut self) {
+        let Some(dir) = HISTORY_DIR.get() else { return };
+        let _ = std::fs::create_dir_all(dir);
+        let ids: Vec<PanelId> = self.panels.keys().copied().collect();
+        for id in ids {
+            let Some(Panel {
+                content: Content::Shell(t),
+                ..
+            }) = self.panels.get(&id)
+            else {
+                continue;
+            };
+            let bytes = t.output_bytes();
+            if self.history_saved.get(&id) == Some(&bytes) {
+                continue;
+            }
+            if let (Some(text), Some(file)) = (t.history_text(HISTORY_LINES), self.history_file(id))
+            {
+                let _ = std::fs::write(file, text);
+            }
+            self.history_saved.insert(id, bytes);
+        }
     }
 
     /// Estado para guardar (el de antes de dormir si está dormido).
@@ -666,6 +717,21 @@ impl Workspace {
             }
             if !self.spawn_panel(ctx, id, panel) {
                 self.layout.remove(id);
+                continue;
+            }
+            // Lo que mostraba la terminal antes de cerrar Forge.
+            let saved = self
+                .history_file(id)
+                .and_then(|f| std::fs::read_to_string(f).ok());
+            if let (
+                Some(text),
+                Some(Panel {
+                    content: Content::Shell(t),
+                    ..
+                }),
+            ) = (saved.filter(|t| !t.is_empty()), self.panels.get_mut(&id))
+            {
+                t.prefill(&text, tr!("sesión anterior"));
             }
         }
         self.focus = if self.panels.contains_key(&state.focus) {
@@ -907,6 +973,9 @@ impl Workspace {
     }
 
     fn close(&mut self, id: PanelId) {
+        if let Some(file) = self.history_file(id) {
+            let _ = std::fs::remove_file(file);
+        }
         self.layout.remove(id);
         self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
         if self.maximized == Some(id) {
@@ -1341,6 +1410,41 @@ mod tests {
 
     /// Criterio de las Fases 3 y 4: cerrar y reabrir recupera layout, nombres, comandos,
     /// carpetas, paneles de logs y procesos en marcha.
+    /// El historial guardado de un panel reaparece al restaurar y se borra al cerrarlo.
+    #[test]
+    fn panel_history_is_restored_and_removed_on_close() {
+        let base = std::env::temp_dir().join(format!("forge-hist-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("proyecto/.forge")).unwrap();
+        let dir = base.join("proyecto").canonicalize().unwrap();
+        // Única prueba que fija la carpeta (OnceLock global del proceso de tests).
+        let _ = HISTORY_DIR.set(base.join("scrollback"));
+        let ctx = egui::Context::default();
+        let ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), None);
+        let state = ws.state();
+        let id = ws.layout.ids()[0];
+        let file = ws.history_file(id).unwrap();
+        drop(ws);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(&file, "npm run build\nlinea guardada").unwrap();
+
+        let mut ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), Some(state));
+        let Some(Panel {
+            content: Content::Shell(t),
+            ..
+        }) = ws.panels.get(&id)
+        else {
+            panic!("sin terminal");
+        };
+        let text = t.history_text(100).unwrap();
+        assert!(
+            text.contains("linea guardada") && text.contains("sesión anterior"),
+            "{text}"
+        );
+        ws.close(id);
+        assert!(!file.exists(), "cerrar el panel borra su historial");
+    }
+
     #[test]
     fn layout_survives_restart() {
         let dir = std::env::temp_dir().join(format!("forge-ws-{}", std::process::id()));

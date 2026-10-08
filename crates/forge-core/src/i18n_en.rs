@@ -1133,4 +1133,5 @@ pub const EN: &[(&str, &str)] = &[
     ("Preparar", "Stage"),
     ("Descartar cambios", "Discard changes"),
     ("Git: mostrar u ocultar", "Git: show or hide"),
+    ("sesión anterior", "previous session"),
 ];

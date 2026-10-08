@@ -237,6 +237,47 @@ impl Terminal {
         })
     }
 
+    /// Historial y pantalla como texto, hasta la línea anterior al cursor (para mostrarlo
+    /// al reabrir Forge). `None` si un programa ocupa la pantalla completa (vim, la
+    /// interfaz de Claude…): ese contenido no es historial.
+    pub fn history_text(&self, max_lines: usize) -> Option<String> {
+        let t = self.term.lock().unwrap();
+        if t.mode().contains(TermMode::ALT_SCREEN) {
+            return None;
+        }
+        let top = -(t.grid().history_size() as i32);
+        let cursor = t.grid().cursor.point.line.0;
+        let mut lines: Vec<String> = (top..cursor)
+            .map(|l| {
+                let row = &t.grid()[alacritty_terminal::index::Line(l)];
+                (0..t.columns())
+                    .map(|c| &row[Column(c)])
+                    .filter(|cell| !cell.flags.contains(Flags::WIDE_CHAR_SPACER))
+                    .map(|cell| cell.c)
+                    .collect::<String>()
+                    .trim_end()
+                    .to_string()
+            })
+            .collect();
+        while lines.last().is_some_and(|l| l.is_empty()) {
+            lines.pop();
+        }
+        let start = lines.len().saturating_sub(max_lines);
+        Some(lines[start..].join("\n"))
+    }
+
+    /// Escribe el historial de la sesión anterior (atenuado) antes de lo que muestre el shell.
+    pub fn prefill(&mut self, text: &str, label: &str) {
+        let mut bytes = String::from("\x1b[2m");
+        for line in text.lines() {
+            bytes.push_str(line);
+            bytes.push_str("\r\n");
+        }
+        bytes.push_str(&format!("\x1b[0;90m── {label} ──\x1b[0m\r\n"));
+        let mut parser: Processor = Processor::new();
+        parser.advance(&mut *self.term.lock().unwrap(), bytes.as_bytes());
+    }
+
     pub fn output_bytes(&self) -> u64 {
         self.output_bytes.load(Ordering::Relaxed)
     }
@@ -1530,6 +1571,41 @@ mod tests {
         assert_eq!(search.current, 2, "empieza por la más reciente");
         search.step(1);
         assert_eq!(search.current, 0, "da la vuelta");
+    }
+
+    /// Lo que mostraba una terminal se guarda como texto y reaparece en otra al reabrir.
+    #[test]
+    fn history_survives_into_a_new_terminal() {
+        let ctx = egui::Context::default();
+        let old = Terminal::exec(
+            &ctx,
+            Path::new("/tmp"),
+            "seq 1 80; echo 'fin ✓'; sleep 5",
+            &HashMap::new(),
+        )
+        .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let text = loop {
+            let text = old.history_text(1000).unwrap();
+            if text.contains("fin ✓") {
+                break text;
+            }
+            assert!(std::time::Instant::now() < deadline, "{text}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert!(
+            text.contains("1\n2\n3\n"),
+            "incluye el historial, no solo la pantalla"
+        );
+        assert!(old.history_text(10).unwrap().lines().count() <= 10);
+
+        let mut new = Terminal::exec(&ctx, Path::new("/tmp"), "sleep 5", &HashMap::new()).unwrap();
+        new.prefill(&text, "sesión anterior");
+        let restored = new.history_text(1000).unwrap();
+        assert!(
+            restored.contains("fin ✓") && restored.contains("── sesión anterior ──"),
+            "{restored}"
+        );
     }
 
     #[test]
