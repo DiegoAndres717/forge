@@ -423,6 +423,12 @@ fn only_the_active_project_starts_and_the_rest_sleep() {
     h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
     h.run_steps(3);
     assert_eq!(h.state().active, Some(0));
+    // Repetido (soltando Ctrl entre medias) alterna siempre, sin pulsaciones perdidas.
+    for expected in [1, 0, 1, 0] {
+        h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
+        h.run_steps(2);
+        assert_eq!(h.state().active, Some(expected));
+    }
 
     // Dormir A desde la paleta: cierra sus terminales y conserva el layout.
     palette(&mut h, "dormir proyecto");

@@ -218,8 +218,9 @@ pub struct App {
     general: crate::workspace::IdeasView,
     /// Proyectos de más a menos recientemente usados (⌃Tab).
     mru: Vec<PathBuf>,
-    /// Último ⌃Tab: (posición en `mru`, cuándo) para seguir retrocediendo si se repite.
-    mru_cycle: Option<(usize, Instant)>,
+    /// ⌃Tab con Ctrl aún pulsado: (orden de proyectos al empezar, posición actual).
+    /// Al soltar Ctrl se olvida: el siguiente ⌃Tab vuelve a alternar con el anterior.
+    mru_cycle: Option<(Vec<PathBuf>, usize)>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
 }
@@ -462,20 +463,16 @@ impl App {
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
             Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
             Action::NextRecent => {
-                let n = self.mru.len();
-                if n < 2 {
+                if self.mru.len() < 2 {
                     return;
                 }
-                let pos = match self.mru_cycle {
-                    Some((p, at)) if at.elapsed() < Duration::from_millis(1200) => (p + 1) % n,
-                    _ => 1,
-                };
-                self.mru_cycle = Some((pos, Instant::now()));
-                let target = &self.mru[pos];
+                let (order, pos) = self.mru_cycle.get_or_insert_with(|| (self.mru.clone(), 0));
+                *pos = (*pos + 1) % order.len();
+                let target = order[*pos].clone();
                 if let Some(i) = self
                     .workspaces
                     .iter()
-                    .position(|w| &w.project.path == target)
+                    .position(|w| w.project.path == target)
                 {
                     cmds.push(UiCmd::Activate(i));
                 }
@@ -926,6 +923,9 @@ impl eframe::App for App {
             });
             actions
         });
+        if !ctx.input(|i| i.modifiers.ctrl) {
+            self.mru_cycle = None;
+        }
         let mut ws_actions = Vec::new();
         for action in actions {
             self.handle_action(action, &mut cmds, &mut ws_actions);
