@@ -170,6 +170,35 @@ fn ui_preview() {
                 "usuario",
             )
             .unwrap();
+        store
+            .add_idea(Some(&project), "Exportar vacunas a Excel", "", "usuario")
+            .unwrap();
+        let b = store
+            .add_idea(
+                Some(&project),
+                "Notificar vacunas vencidas",
+                "Push al celular y correo al veterinario.",
+                "claude-code",
+            )
+            .unwrap();
+        store
+            .add_idea(Some(&project), "Modo offline para el campo", "", "codex")
+            .unwrap();
+        let c = store
+            .add_idea(Some(&project), "Filtro por lote", "", "usuario")
+            .unwrap();
+        store
+            .update_idea(Some(&project), b, Some("doing"), None, None, "claude-code")
+            .unwrap();
+        store
+            .update_idea(Some(&project), c, Some("done"), None, None, "claude-code")
+            .unwrap();
+        store
+            .add_idea(None, "App para talleres de motos", "", "usuario")
+            .unwrap();
+        store
+            .add_idea(None, "Probar Zed como editor", "", "usuario")
+            .unwrap();
     }
 
     let project_arg = project.clone();
@@ -250,6 +279,13 @@ fn ui_preview() {
     save(&mut harness, &out, "7-autorizacion");
     forge_core::danger::answer(&approvals, "1-1", false).unwrap();
     settle(&mut harness);
+
+    harness.state_mut().workspaces[0].ideas.open = true;
+    harness.state_mut().workspaces[0].ideas.show_done = true;
+    harness.state_mut().workspaces[0].ideas.dirty = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "8-ideas");
+    harness.state_mut().workspaces[0].ideas.open = false;
 
     harness.state_mut().active = None;
     settle(&mut harness);

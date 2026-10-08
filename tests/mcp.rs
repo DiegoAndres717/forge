@@ -59,6 +59,10 @@ fn mcp_server_shares_memory_between_clients() {
             "memory_save",
             "memory_list",
             "memory_delete",
+            "ideas_list",
+            "idea_add",
+            "idea_update",
+            "idea_delete",
             "project_context"
         ]
     );
@@ -87,6 +91,37 @@ fn mcp_server_shares_memory_between_clients() {
         context.contains("Proyecto Bovinapp") && context.contains("Vacunación por lotes"),
         "{context}"
     );
+    // Ideas: el agente anota, la empieza y la tacha.
+    let mut call = |id: u64, name: &str, arguments: Value| -> String {
+        let r = request(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}})).unwrap();
+        assert_eq!(r["result"]["isError"], false, "{r}");
+        r["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(
+        call(6, "idea_add", json!({"title": "Exportar vacunas a Excel"})),
+        "Anotada como idea #1."
+    );
+    call(
+        7,
+        "idea_add",
+        json!({"title": "App para talleres", "scope": "general"}),
+    );
+    call(8, "idea_update", json!({"id": 1, "status": "doing"}));
+    assert!(
+        call(9, "ideas_list", json!({})).contains("#1 ◐ Exportar vacunas a Excel (claude-code)")
+    );
+    assert!(call(10, "project_context", json!({})).contains("Ideas pendientes"));
+    call(11, "idea_update", json!({"id": 1, "status": "done"}));
+    assert_eq!(
+        call(12, "ideas_list", json!({})),
+        "No hay ideas pendientes."
+    );
+    assert!(call(13, "ideas_list", json!({"include_done": true})).contains("#1 ✓"));
+    assert!(call(14, "ideas_list", json!({"scope": "general"})).contains("App para talleres"));
+
     drop(stdin);
     assert!(
         child.wait().unwrap().success(),
@@ -122,4 +157,18 @@ fn mcp_server_shares_memory_between_clients() {
         "{}",
         String::from_utf8_lossy(&add.stderr)
     );
+
+    // La CLI ve las ideas del agente (y la lista general aparte).
+    let ideas = |extra: &[&str]| {
+        let mut args = vec!["ideas", "list", "--project", &project_arg];
+        args.extend(extra);
+        let out = Command::new(FORGE)
+            .args(&args)
+            .env("FORGE_DB", &db)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    assert!(ideas(&["--all"]).contains("#1 ✓ Exportar vacunas a Excel"));
+    assert!(ideas(&["--general"]).contains("App para talleres"));
 }

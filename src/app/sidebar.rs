@@ -111,6 +111,24 @@ impl App {
                 } else {
                     String::new()
                 };
+                let open = if ws.ideas.open_count > 0 {
+                    ws.ideas.open_count.to_string()
+                } else {
+                    String::new()
+                };
+                if theme::row(
+                    ui,
+                    icon::LIGHTBULB,
+                    theme::YELLOW,
+                    "Ideas",
+                    &open,
+                    ws.ideas.open,
+                )
+                .on_hover_text("⌘⇧I")
+                .clicked()
+                {
+                    cmds.push(UiCmd::ToggleIdeas);
+                }
                 if theme::row(
                     ui,
                     icon::BRAIN,

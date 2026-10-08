@@ -140,6 +140,25 @@ impl Default for GuardView {
     }
 }
 
+/// Lista de ideas (de un proyecto, o la general en Inicio).
+#[derive(Default)]
+pub struct IdeasView {
+    pub open: bool,
+    pub items: Vec<forge_core::ideas::Idea>,
+    /// Sin hacer (contador de la barra lateral).
+    pub open_count: i64,
+    pub show_done: bool,
+    /// Campo "Nueva idea…".
+    pub input: String,
+    /// Dar el foco al campo (al abrir con ⌘K → "Nueva idea").
+    pub focus: bool,
+    /// Idea en edición: (id, título, nota).
+    pub editing: Option<(i64, String, String)>,
+    pub dirty: bool,
+    /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
+    pub loaded: Option<Instant>,
+}
+
 /// Panel de memoria del proyecto (⌘⇧M).
 #[derive(Default)]
 pub struct MemoryView {
@@ -175,6 +194,7 @@ pub struct Workspace {
     pub processes: Processes,
     pub guard: GuardView,
     pub memory: MemoryView,
+    pub ideas: IdeasView,
     panels: HashMap<PanelId, Panel>,
     layout: Node,
     focus: PanelId,
@@ -200,6 +220,10 @@ impl Workspace {
             processes,
             guard: GuardView::default(),
             memory: MemoryView {
+                dirty: true,
+                ..Default::default()
+            },
+            ideas: IdeasView {
                 dirty: true,
                 ..Default::default()
             },

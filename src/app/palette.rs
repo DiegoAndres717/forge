@@ -290,6 +290,12 @@ impl App {
                 "",
                 cmd(UiCmd::NewNote),
             );
+            add(
+                icon::LIGHTBULB,
+                "Ideas: mostrar u ocultar".into(),
+                "⌘⇧I",
+                cmd(UiCmd::ToggleIdeas),
+            );
 
             // Paneles.
             add(
@@ -361,6 +367,14 @@ impl App {
                 act(Action::CloseProject),
             );
         }
+
+        // Ideas: del proyecto activo o, en Inicio, la lista general.
+        add(
+            icon::LIGHTBULB,
+            "Nueva idea".into(),
+            "",
+            cmd(UiCmd::NewIdea),
+        );
 
         // Ventana.
         add(

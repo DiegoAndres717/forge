@@ -317,3 +317,64 @@ fn dangerous_command_dialog_answers_the_terminal() {
         "el diálogo se cierra"
     );
 }
+
+#[test]
+fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
+    let dir = project("ideas");
+    let mut h = app(dir.clone());
+    h.key_press_modifiers(CMD_SHIFT, Key::I);
+    h.run_steps(2);
+    assert!(ws(h.state()).ideas.open, "⌘⇧I abre Ideas");
+
+    let input = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Nueva idea")));
+    input.focus();
+    input.type_text("Exportar vacunas a Excel");
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    let store = |h: &Harness<'_, App>, p: Option<&Path>| {
+        h.state()
+            .store
+            .as_ref()
+            .unwrap()
+            .list_ideas(p, true)
+            .unwrap()
+    };
+    let ideas = store(&h, Some(&dir));
+    assert_eq!(ideas[0].title, "Exportar vacunas a Excel");
+    assert_eq!(ideas[0].source, "usuario");
+
+    // Un agente anota otra por MCP: aparece sola en el panel.
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .add_idea(Some(&dir), "Notificar vencidas", "", "claude-code")
+        .unwrap();
+    wait_until(&mut h, "la idea del agente aparece", |a| {
+        ws(a).ideas.items.len() == 2
+    });
+    h.run_steps(2);
+    h.get_by_label("Notificar vencidas");
+
+    h.get_by_label("Marcar como hecha: Exportar vacunas a Excel")
+        .click();
+    h.run_steps(3);
+    assert!(
+        store(&h, Some(&dir))
+            .iter()
+            .any(|i| i.title == "Exportar vacunas a Excel" && i.done())
+    );
+    h.get_by_label_contains("Mostrar hechas (1)");
+
+    // Lista general en Inicio.
+    h.key_press_modifiers(CMD_SHIFT, Key::H);
+    h.run_steps(3);
+    let input = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Nueva idea")));
+    input.focus();
+    input.type_text("App para talleres");
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(store(&h, None)[0].title, "App para talleres");
+}

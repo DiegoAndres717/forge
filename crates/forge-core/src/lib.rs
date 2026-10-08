@@ -6,6 +6,7 @@ pub mod danger;
 pub mod evidence;
 pub mod guard;
 pub mod hooks;
+pub mod ideas;
 pub mod mcp;
 pub mod memory;
 pub mod pr;

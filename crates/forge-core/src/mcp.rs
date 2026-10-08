@@ -5,6 +5,7 @@ use std::path::Path;
 
 use serde_json::{Value, json};
 
+use crate::ideas;
 use crate::memory::{self, KINDS};
 use crate::store::Store;
 
@@ -15,7 +16,7 @@ fn tools() -> Value {
     json!([
         {
             "name": "memory_search",
-            "description": "Busca en la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones, tareas). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió.",
+            "description": "Busca en la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -28,7 +29,7 @@ fn tools() -> Value {
         },
         {
             "name": "memory_save",
-            "description": "Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención, una tarea pendiente.",
+            "description": "Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa idea_add.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -52,6 +53,54 @@ fn tools() -> Value {
             "name": "memory_delete",
             "description": "Borra una memoria que ya no es cierta (por id).",
             "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}
+        },
+        {
+            "name": "ideas_list",
+            "description": "Lista de ideas y pendientes del proyecto (o la lista general con scope=general): en curso, pendientes y, si se pide, las hechas. Consúltala al empezar a trabajar o cuando el usuario pregunte qué falta.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "include_done": {"type": "boolean", "description": "Incluir las ya hechas"},
+                    "scope": {"type": "string", "enum": ["project", "general"]}
+                }
+            }
+        },
+        {
+            "name": "idea_add",
+            "description": "Anota una idea o pendiente para no perderla (propia o del usuario). Úsala cuando surja algo para hacer después, en vez de dejarlo solo en la conversación.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Qué hacer, en una línea"},
+                    "note": {"type": "string", "description": "Detalle o criterio de terminado (opcional)"},
+                    "scope": {"type": "string", "enum": ["project", "general"], "description": "general = no es de este proyecto"}
+                },
+                "required": ["title"]
+            }
+        },
+        {
+            "name": "idea_update",
+            "description": "Cambia una idea: márcala doing al empezarla y done al terminarla (queda tachada), o corrige título y nota.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "status": {"type": "string", "enum": ["pending", "doing", "done"]},
+                    "title": {"type": "string"},
+                    "note": {"type": "string"},
+                    "scope": {"type": "string", "enum": ["project", "general"]}
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "idea_delete",
+            "description": "Borra una idea descartada (por id). Si se hizo, mejor márcala done.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"id": {"type": "integer"}, "scope": {"type": "string", "enum": ["project", "general"]}},
+                "required": ["id"]
+            }
         },
         {
             "name": "project_context",
@@ -92,7 +141,7 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras."
+                    "instructions": "Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Las cosas por hacer van en la lista de ideas (ideas_list, idea_add, idea_update): márcalas doing al empezar y done al terminar."
                 }))
             }
             "ping" => Ok(json!({})),
@@ -113,6 +162,7 @@ impl<'a> Server<'a> {
         let text = |s: String, error: bool| json!({"content": [{"type": "text", "text": s}], "isError": error});
         let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
         let kind = args["kind"].as_str();
+        let list = (args["scope"].as_str() != Some("general")).then_some(self.project);
         let result = match tool {
             "memory_search" => self
                 .store
@@ -144,6 +194,59 @@ impl<'a> Server<'a> {
                         format!("Memoria #{id} borrada.")
                     } else {
                         format!("No existe la memoria #{id}.")
+                    }
+                }),
+                None => Err("falta `id`".into()),
+            },
+            "ideas_list" => self
+                .store
+                .list_ideas(list, args["include_done"].as_bool().unwrap_or(false))
+                .map(|ideas| {
+                    if ideas.is_empty() {
+                        "No hay ideas pendientes.".into()
+                    } else {
+                        ideas
+                            .iter()
+                            .map(ideas::render)
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    }
+                }),
+            "idea_add" => self
+                .store
+                .add_idea(
+                    list,
+                    args["title"].as_str().unwrap_or_default(),
+                    args["note"].as_str().unwrap_or_default(),
+                    &self.client,
+                )
+                .map(|id| format!("Anotada como idea #{id}.")),
+            "idea_update" => match args["id"].as_i64() {
+                Some(id) => self
+                    .store
+                    .update_idea(
+                        list,
+                        id,
+                        args["status"].as_str(),
+                        args["title"].as_str(),
+                        args["note"].as_str(),
+                        &self.client,
+                    )
+                    .map(|ok| {
+                        if ok {
+                            format!("Idea #{id} actualizada.")
+                        } else {
+                            format!("No existe la idea #{id} en esta lista.")
+                        }
+                    }),
+                None => Err("falta `id`".into()),
+            },
+            "idea_delete" => match args["id"].as_i64() {
+                Some(id) => self.store.delete_idea(list, id).map(|ok| {
+                    if ok {
+                        format!("Idea #{id} borrada.")
+                    } else {
+                        format!("No existe la idea #{id} en esta lista.")
                     }
                 }),
                 None => Err("falta `id`".into()),
@@ -224,21 +327,24 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         .list_memories(project, None, 40)
         .unwrap_or_default()
         .into_iter()
-        .filter(|m| {
-            matches!(
-                m.kind.as_str(),
-                "decision" | "architecture" | "convention" | "task"
-            )
-        })
+        .filter(|m| matches!(m.kind.as_str(), "decision" | "architecture" | "convention"))
         .take(12)
         .map(|m| format!("  #{} [{}] {}", m.id, memory::kind_label(&m.kind), m.title))
         .collect();
     if !important.is_empty() {
         out.push(
-            "Memoria (decisiones, arquitectura, convenciones, tareas; detalle con memory_search):"
-                .into(),
+            "Memoria (decisiones, arquitectura, convenciones; detalle con memory_search):".into(),
         );
         out.extend(important);
+    }
+    let open = store.list_ideas(Some(project), false).unwrap_or_default();
+    if !open.is_empty() {
+        out.push("Ideas pendientes (ideas_list para el detalle):".into());
+        out.extend(
+            open.iter()
+                .take(12)
+                .map(|i| format!("  {}", ideas::render(i).lines().next().unwrap_or_default())),
+        );
     }
     out.join("\n")
 }

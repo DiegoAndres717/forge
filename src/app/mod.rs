@@ -26,11 +26,13 @@ const GUARD_WIDTH: f32 = 440.0;
 mod approvals;
 mod chrome;
 mod guard_panel;
+mod ideas_panel;
 mod memory_panel;
 mod palette;
 mod sidebar;
 
 use guard_panel::*;
+use ideas_panel::IdeasTarget;
 
 /// "2.1.293 (Claude Code)" → "2.1.293"; "codex-cli 0.159.2" → "0.159.2".
 fn short_version(v: &str) -> String {
@@ -66,6 +68,7 @@ pub enum Action {
     ToggleGuard,
     OpenDefaultAgent,
     ToggleMemory,
+    ToggleIdeas,
     Palette,
 }
 
@@ -115,6 +118,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::G, false, false) => Action::ToggleGuard,
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
+        (Key::I, true, false) => Action::ToggleIdeas,
         (Key::K, false, false) => Action::Palette,
         _ => return None,
     })
@@ -143,6 +147,15 @@ enum UiCmd {
     StopAll,
     ToggleGuard,
     ToggleMemory,
+    ToggleIdeas,
+    /// Abre Ideas con el foco en "Nueva idea…" (la general si no hay proyecto activo).
+    NewIdea,
+    IdeaAdd(IdeasTarget),
+    IdeaSet(IdeasTarget, i64, &'static str),
+    /// Abre (Some) o cierra (None) la edición de una idea.
+    IdeaEdit(IdeasTarget, Option<i64>),
+    IdeaSave(IdeasTarget),
+    IdeaDelete(IdeasTarget, i64),
     MemorySave,
     /// Abre la memoria con el formulario de nota nueva.
     NewNote,
@@ -193,6 +206,8 @@ pub struct App {
     approvals_dir: Option<PathBuf>,
     /// Última solicitud por la que se trajo la ventana al frente.
     approval_seen: Option<String>,
+    /// Ideas generales (sin proyecto), en Inicio.
+    general: crate::workspace::IdeasView,
 }
 
 impl App {
@@ -231,6 +246,10 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            general: crate::workspace::IdeasView {
+                dirty: true,
+                ..Default::default()
+            },
             approvals: Arc::default(),
             approvals_dir: None,
             approval_seen: None,
@@ -412,6 +431,7 @@ impl App {
             Action::ToggleGuard => cmds.push(UiCmd::ToggleGuard),
             Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
+            Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
             Action::Palette => {
                 if self.palette.take().is_none() {
                     self.open_palette();
@@ -441,6 +461,25 @@ impl App {
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
+            UiCmd::ToggleIdeas | UiCmd::NewIdea => match self.active {
+                Some(i) => {
+                    let ws = &mut self.workspaces[i];
+                    let new = matches!(cmd, UiCmd::NewIdea);
+                    ws.ideas.open = new || !ws.ideas.open;
+                    ws.ideas.focus = new;
+                    ws.ideas.dirty = true;
+                    if ws.ideas.open {
+                        ws.guard.open = false;
+                        ws.memory.open = false;
+                    }
+                }
+                None => self.general.focus = true,
+            },
+            UiCmd::IdeaAdd(_)
+            | UiCmd::IdeaSet(..)
+            | UiCmd::IdeaEdit(..)
+            | UiCmd::IdeaSave(_)
+            | UiCmd::IdeaDelete(..) => self.apply_idea(cmd),
             UiCmd::ToggleMemory | UiCmd::NewNote | UiCmd::MemorySave | UiCmd::MemoryDelete(_) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
@@ -451,6 +490,7 @@ impl App {
                         ws.memory.dirty = true;
                         if ws.memory.open {
                             ws.guard.open = false;
+                            ws.ideas.open = false;
                         }
                     }
                     UiCmd::NewNote => {
@@ -458,6 +498,7 @@ impl App {
                         ws.memory.open = true;
                         ws.memory.dirty = true;
                         ws.guard.open = false;
+                        ws.ideas.open = false;
                         ws.memory.form = Some(NoteForm {
                             kind: "decision".into(),
                             ..Default::default()
@@ -553,6 +594,7 @@ impl App {
                         ws.guard.open = !ws.guard.open;
                         if ws.guard.open {
                             ws.memory.open = false;
+                            ws.ideas.open = false;
                         }
                     }
                     UiCmd::GuardStage(stage) => ws.guard.stage = stage,
@@ -848,12 +890,14 @@ impl eframe::App for App {
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).
         if let Some(i) = self.active {
             let ws = &mut self.workspaces[i];
-            if ws.guard.open || ws.memory.open {
+            if ws.guard.open || ws.memory.open || ws.ideas.open {
                 let (rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
                 if ws.guard.open {
                     Self::guard_ui(ws, ui, drawer, &mut cmds);
-                } else {
+                } else if ws.memory.open {
                     Self::memory_ui(ws, ui, drawer, &mut cmds);
+                } else {
+                    Self::ideas_ui(ws, Some(i), ui, drawer, &mut cmds);
                 }
                 area = rest;
             }
@@ -870,6 +914,9 @@ impl eframe::App for App {
         }
 
         self.guard_tick(&ctx);
+        self.ideas_tick();
+        // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
+        ctx.request_repaint_after(Duration::from_secs(2));
 
         match self.active {
             Some(i) => {

@@ -170,7 +170,7 @@ fn main() -> eframe::Result {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         // CLI sin ventana (la usan también los hooks de Git).
-        Some("guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory") => {
+        Some("guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory" | "ideas") => {
             std::process::exit(cli::run(&args))
         }
         Some("help" | "--help" | "-h") => {

@@ -7,14 +7,13 @@ use serde::Serialize;
 
 use crate::store::{Store, now};
 
-/// Tipos de memoria (plan §16): (id, etiqueta).
-pub const KINDS: [(&str, &str); 7] = [
+/// Tipos de memoria (plan §16): (id, etiqueta). Las tareas pendientes son ideas (`ideas`).
+pub const KINDS: [(&str, &str); 6] = [
     ("decision", "Decisión"),
     ("architecture", "Arquitectura"),
     ("error", "Error resuelto"),
     ("command", "Comando útil"),
     ("convention", "Convención"),
-    ("task", "Tarea pendiente"),
     ("note", "Nota"),
 ];
 

@@ -33,6 +33,9 @@ Uso:
   forge memory search <texto> [--kind k]   busca en la memoria del proyecto
   forge memory add <tipo> \"título\" \"texto\" [--tags a,b]
   forge memory list [--kind k] · forge memory delete <id>
+  forge ideas [--all] [--general]          ideas y pendientes (fuera del repositorio)
+  forge ideas add \"título\" [\"nota\"] [--general]
+  forge ideas done|doing|pending|delete <id> [--general]
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -179,6 +182,9 @@ pub fn run(args: &[String]) -> i32 {
                 .map_err(|e| e.to_string())
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
+        (Some("ideas"), action) => {
+            ideas_cli(&out, &project, action.unwrap_or("list"), &pos[2..], args)
+        }
         (Some("ai"), Some("init")) => forge_core::router::write_template(&project).map(|_| {
             out.line(&format!(
                 "Creado {}",
@@ -743,6 +749,60 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
         ),
     );
     Ok(if healthy { 0 } else { 1 })
+}
+
+fn ideas_cli(
+    out: &Out,
+    project: &Path,
+    action: &str,
+    rest: &[&str],
+    args: &[String],
+) -> Result<i32, String> {
+    let store = open_store()?;
+    let list = (!args.iter().any(|a| a == "--general")).then_some(project);
+    let id = || -> Result<i64, String> {
+        rest.first()
+            .and_then(|i| i.trim_start_matches('#').parse().ok())
+            .ok_or_else(|| format!("uso: forge ideas {action} <id>"))
+    };
+    match action {
+        "list" => {
+            let ideas = store.list_ideas(list, args.iter().any(|a| a == "--all"))?;
+            if ideas.is_empty() {
+                out.line("No hay ideas pendientes.");
+            }
+            for idea in ideas {
+                out.line(&forge_core::ideas::render(&idea));
+            }
+        }
+        "add" => {
+            let [title, note @ ..] = rest else {
+                return Err("uso: forge ideas add \"título\" [\"nota\"]".into());
+            };
+            let id = store.add_idea(list, title, &note.join(" "), "usuario")?;
+            out.line(&format!("Anotada como idea #{id}."));
+        }
+        "done" | "doing" | "pending" => {
+            let id = id()?;
+            if !store.update_idea(list, id, Some(action), None, None, "usuario")? {
+                return Err(format!("no existe la idea #{id} en esta lista"));
+            }
+            out.line(&format!("Idea #{id}: {action}."));
+        }
+        "delete" => {
+            let id = id()?;
+            if !store.delete_idea(list, id)? {
+                return Err(format!("no existe la idea #{id} en esta lista"));
+            }
+            out.line(&format!("Idea #{id} borrada."));
+        }
+        _ => {
+            return Err(format!(
+                "acción desconocida \"{action}\": list, add, done, doing, pending o delete"
+            ));
+        }
+    }
+    Ok(0)
 }
 
 fn memory_cli(
