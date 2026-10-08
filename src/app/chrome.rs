@@ -281,7 +281,7 @@ impl App {
             egui::Stroke::new(1.0, theme::SEPARATOR),
         );
         let hints = if self.active.is_some() {
-            "⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
+            "⌘K Acciones    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
         } else {
             "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌘B Barra lateral"
         };

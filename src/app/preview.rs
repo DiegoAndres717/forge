@@ -216,6 +216,17 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "3-memoria");
 
+    harness.state_mut().workspaces[0].memory.open = false;
+    harness.state_mut().open_palette();
+    settle(&mut harness);
+    save(&mut harness, &out, "5-paleta");
+    if let Some(p) = harness.state_mut().palette.as_mut() {
+        p.query = "guard".into();
+    }
+    settle(&mut harness);
+    save(&mut harness, &out, "6-paleta-guard");
+    harness.state_mut().palette = None;
+
     harness.state_mut().active = None;
     settle(&mut harness);
     save(&mut harness, &out, "4-inicio");

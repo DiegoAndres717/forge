@@ -189,3 +189,44 @@ fn guard_blocks_a_commit_with_a_secret() {
     h.get_by_label_contains("Omitir con motivo");
     assert!(h.query_by_label_contains("Crear commit").is_none());
 }
+
+/// Abre la paleta con ⌘K, escribe la consulta y elige el primer resultado con Enter.
+fn palette(h: &mut Harness<'_, App>, query: &str) {
+    h.key_press_modifiers(CMD, Key::K);
+    h.run_steps(2);
+    assert!(h.state().palette.is_some(), "⌘K abre la paleta");
+    h.get_by(|n| {
+        n.placeholder()
+            .is_some_and(|p| p.starts_with("Buscar acciones"))
+    })
+    .type_text(query);
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(
+        h.state().palette.is_none(),
+        "Enter ejecuta y cierra la paleta"
+    );
+}
+
+#[test]
+fn command_palette_runs_actions_by_fuzzy_name() {
+    let mut h = app(project("palette"));
+    // "divder" → "Dividir a la derecha".
+    palette(&mut h, "divder");
+    assert_eq!(ws(h.state()).panel_count(), 2);
+
+    palette(&mut h, "nueva nota");
+    let ws = ws(h.state());
+    assert!(
+        ws.memory.open && ws.memory.form.is_some(),
+        "abre la memoria con el formulario"
+    );
+
+    // Escape cierra sin ejecutar nada.
+    h.key_press_modifiers(CMD, Key::K);
+    h.run_steps(2);
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().palette.is_none());
+}

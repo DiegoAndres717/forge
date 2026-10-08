@@ -26,6 +26,7 @@ const GUARD_WIDTH: f32 = 440.0;
 mod chrome;
 mod guard_panel;
 mod memory_panel;
+mod palette;
 mod sidebar;
 
 use guard_panel::*;
@@ -64,6 +65,7 @@ pub enum Action {
     ToggleGuard,
     OpenDefaultAgent,
     ToggleMemory,
+    Palette,
 }
 
 /// Atajos globales (siempre con ⌘, nunca con Ctrl, para no robar teclas al shell).
@@ -112,6 +114,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::G, false, false) => Action::ToggleGuard,
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
+        (Key::K, false, false) => Action::Palette,
         _ => return None,
     })
 }
@@ -140,6 +143,8 @@ enum UiCmd {
     ToggleGuard,
     ToggleMemory,
     MemorySave,
+    /// Abre la memoria con el formulario de nota nueva.
+    NewNote,
     MemoryDelete(i64),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
@@ -177,6 +182,8 @@ pub struct App {
     /// Memoria (RSS) de los procesos del proyecto activo, refrescada en segundo plano.
     ram: Arc<Mutex<Option<u64>>>,
     ram_checked: Option<Instant>,
+    /// Paleta de comandos (⌘K) abierta.
+    palette: Option<palette::Palette>,
 }
 
 impl App {
@@ -214,6 +221,7 @@ impl App {
             detecting: Arc::default(),
             ram: Arc::default(),
             ram_checked: None,
+            palette: None,
         };
         match store {
             Ok(store) => app.store = Some(store),
@@ -360,6 +368,39 @@ impl App {
         });
         self.picker = Some(rx);
     }
+    /// Aplica una acción de atajo (o elegida en la paleta).
+    fn handle_action(
+        &mut self,
+        action: Action,
+        cmds: &mut Vec<UiCmd>,
+        ws_actions: &mut Vec<WsAction>,
+    ) {
+        let font_size = &mut self.settings.font_size;
+        match action {
+            Action::Ws(a) => ws_actions.push(a),
+            Action::FontBigger => *font_size = (*font_size + 1.0).min(48.0),
+            Action::FontSmaller => *font_size = (*font_size - 1.0).max(8.0),
+            Action::FontReset => *font_size = load_settings().0.font_size,
+            Action::Home => cmds.push(UiCmd::Home),
+            Action::Switch(i) if i < self.workspaces.len() => cmds.push(UiCmd::Activate(i)),
+            Action::Switch(_) => {}
+            Action::OpenFolder => cmds.push(UiCmd::OpenFolder),
+            Action::CloseProject => {
+                if let Some(i) = self.active {
+                    cmds.push(UiCmd::Close(i));
+                }
+            }
+            Action::ToggleSidebar => self.sidebar = !self.sidebar,
+            Action::ToggleGuard => cmds.push(UiCmd::ToggleGuard),
+            Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
+            Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
+            Action::Palette => {
+                if self.palette.take().is_none() {
+                    self.open_palette();
+                }
+            }
+        }
+    }
 
     fn apply(&mut self, ctx: &egui::Context, cmd: UiCmd, area: Rect) {
         match cmd {
@@ -382,7 +423,7 @@ impl App {
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
-            UiCmd::ToggleMemory | UiCmd::MemorySave | UiCmd::MemoryDelete(_) => {
+            UiCmd::ToggleMemory | UiCmd::NewNote | UiCmd::MemorySave | UiCmd::MemoryDelete(_) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
                 match cmd {
@@ -393,6 +434,16 @@ impl App {
                         if ws.memory.open {
                             ws.guard.open = false;
                         }
+                    }
+                    UiCmd::NewNote => {
+                        let ws = &mut self.workspaces[i];
+                        ws.memory.open = true;
+                        ws.memory.dirty = true;
+                        ws.guard.open = false;
+                        ws.memory.form = Some(NoteForm {
+                            kind: "decision".into(),
+                            ..Default::default()
+                        });
                     }
                     UiCmd::MemorySave => {
                         let Some(form) = self.workspaces[i].memory.form.take() else {
@@ -701,29 +752,17 @@ impl eframe::App for App {
         });
         let mut ws_actions = Vec::new();
         for action in actions {
-            let font_size = &mut self.settings.font_size;
-            match action {
-                Action::Ws(a) => ws_actions.push(a),
-                Action::FontBigger => *font_size = (*font_size + 1.0).min(48.0),
-                Action::FontSmaller => *font_size = (*font_size - 1.0).max(8.0),
-                Action::FontReset => *font_size = load_settings().0.font_size,
-                Action::Home => cmds.push(UiCmd::Home),
-                Action::Switch(i) if i < self.workspaces.len() => cmds.push(UiCmd::Activate(i)),
-                Action::Switch(_) => {}
-                Action::OpenFolder => cmds.push(UiCmd::OpenFolder),
-                Action::CloseProject => {
-                    if let Some(i) = self.active {
-                        cmds.push(UiCmd::Close(i));
-                    }
-                }
-                Action::ToggleSidebar => self.sidebar = !self.sidebar,
-                Action::ToggleGuard => cmds.push(UiCmd::ToggleGuard),
-                Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
-                Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
-            }
+            self.handle_action(action, &mut cmds, &mut ws_actions);
         }
 
         let full = ui.max_rect();
+        match self.palette_ui(&ctx, full) {
+            Some(palette::Run::Action(action)) => {
+                self.handle_action(action, &mut cmds, &mut ws_actions)
+            }
+            Some(palette::Run::Cmds(list)) => cmds.extend(list),
+            None => {}
+        }
         // Fondo opaco de toda la ventana (barra lateral, contenido y barras).
         let side_width = if self.sidebar { SIDEBAR } else { 0.0 };
         let (side, content) = full.split_left_right_at_x(full.min.x + side_width);
@@ -782,7 +821,7 @@ impl eframe::App for App {
             Some(i) => {
                 let m = metrics(&ctx, &self.settings);
                 let ws = &mut self.workspaces[i];
-                ws.ui(ui, area, &m, &ws_actions, true);
+                ws.ui(ui, area, &m, &ws_actions, self.palette.is_none());
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
                 }
@@ -820,6 +859,11 @@ impl eframe::App for App {
             self.save();
         }
         self.error_banner(ui, area);
+        // Con la paleta abierta, el resto de la ventana se atenúa (la paleta va encima).
+        if self.palette.is_some() {
+            ui.painter()
+                .rect_filled(full, 0.0, Color32::from_black_alpha(150));
+        }
         // Guardado periódico aunque no haya eventos.
         ctx.request_repaint_after(SAVE_EVERY);
     }
