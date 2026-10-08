@@ -1,0 +1,13 @@
+[package]
+name = "forge-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+libc.workspace = true
+regex.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true

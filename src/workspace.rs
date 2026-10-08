@@ -3,13 +3,39 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use eframe::egui::{self, Align2, Color32, FontId, Key, Rect, Sense, Vec2};
 
 use crate::layout::{self, Dir, Node, PanelId, Toward};
 use crate::processes::{Processes, Tone};
-use crate::project::{LayoutSpec, Project, SavedCommand, SplitSpec, StartPolicy};
-use crate::store::{PanelState, WorkspaceState};
 use crate::terminal::{Metrics, Terminal};
+use forge_core::project::{LayoutSpec, Project, SavedCommand, SplitSpec, StartPolicy};
+
+/// Estado restaurable de un workspace (se guarda como JSON en la fila del proyecto).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WorkspaceState {
+    pub layout: Node,
+    pub panels: HashMap<PanelId, PanelState>,
+    pub focus: PanelId,
+    /// Procesos administrados en marcha al guardar (se reinician al abrir).
+    #[serde(default)]
+    pub running: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PanelState {
+    pub name: Option<String>,
+    pub cwd: PathBuf,
+    /// Comando con el que se abrió el panel (p. ej. `claude`, `npm run dev`).
+    pub command: Option<String>,
+    /// Si el panel muestra los logs de un proceso administrado, su id.
+    #[serde(default)]
+    pub process: Option<String>,
+    /// Agente abierto en el panel (al restaurar se reanuda su última sesión).
+    #[serde(default)]
+    pub agent: Option<String>,
+}
 
 const HEADER: f32 = 30.0;
 
@@ -61,9 +87,9 @@ pub fn tone_color(tone: Tone) -> Color32 {
 /// Estado del panel Guard (⌘G) de este proyecto.
 pub struct GuardView {
     pub open: bool,
-    pub stage: crate::guard::Stage,
+    pub stage: forge_core::guard::Stage,
     /// Última ejecución (en curso o terminada).
-    pub run: Option<crate::guard::Handle>,
+    pub run: Option<forge_core::guard::Handle>,
     /// Error al leer `.forge/rules.toml`.
     pub error: Option<String>,
     /// Formulario abierto para omitir una regla con motivo.
@@ -71,7 +97,7 @@ pub struct GuardView {
     /// Resultado de instalar/quitar hooks.
     pub notice: Option<String>,
     /// Estado de los hooks (se relee cada pocos segundos: lanza git).
-    pub hooks: Option<(Instant, crate::hooks::Status)>,
+    pub hooks: Option<(Instant, forge_core::hooks::Status)>,
     /// La ejecución actual ya se guardó (evidencia + historial).
     pub saved: bool,
     /// El candidato cambió después de validar: la evidencia ya no corresponde.
@@ -79,7 +105,7 @@ pub struct GuardView {
     pub stale_checked: Option<Instant>,
     pub stale_rx: Option<std::sync::mpsc::Receiver<bool>>,
     /// Historial de validaciones (se recarga tras guardar).
-    pub history: Option<Vec<(i64, crate::evidence::Report)>>,
+    pub history: Option<Vec<(i64, forge_core::evidence::Report)>>,
     /// (gasto del mes, presupuesto) de modelos de pago.
     pub ai_spend: Option<(f64, f64)>,
 }
@@ -88,14 +114,14 @@ pub struct AllowForm {
     pub rule: String,
     pub label: String,
     pub reason: String,
-    pub scope: crate::guard::Scope,
+    pub scope: forge_core::guard::Scope,
 }
 
 impl Default for GuardView {
     fn default() -> Self {
         Self {
             open: false,
-            stage: crate::guard::Stage::Commit,
+            stage: forge_core::guard::Stage::Commit,
             run: None,
             error: None,
             allow: None,
@@ -117,7 +143,7 @@ pub struct MemoryView {
     pub open: bool,
     pub query: String,
     pub kind: Option<String>,
-    pub results: Vec<crate::memory::Memory>,
+    pub results: Vec<forge_core::memory::Memory>,
     pub count: i64,
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).
     pub dirty: bool,
@@ -280,8 +306,8 @@ impl Workspace {
     }
 
     /// Servidor MCP de memoria para los agentes, si el proyecto la comparte.
-    pub fn mcp_server(&self) -> Option<crate::agents::McpServer> {
-        use crate::project::MemoryProvider;
+    pub fn mcp_server(&self) -> Option<forge_core::agents::McpServer> {
+        use forge_core::project::MemoryProvider;
         let memory = &self.project.config.memory;
         if !memory.enabled || !memory.share_with_agents {
             return None;
@@ -290,7 +316,7 @@ impl Workspace {
             MemoryProvider::Local => {
                 let exe = std::env::current_exe().ok()?;
                 let exe = exe.canonicalize().unwrap_or(exe);
-                Some(crate::agents::McpServer {
+                Some(forge_core::agents::McpServer {
                     name: "forge".into(),
                     command: exe.to_string_lossy().into_owned(),
                     args: vec![
@@ -307,7 +333,7 @@ impl Workspace {
                     .as_deref()?
                     .split_whitespace()
                     .map(String::from);
-                Some(crate::agents::McpServer {
+                Some(forge_core::agents::McpServer {
                     name: "memory".into(),
                     command: words.next()?,
                     args: words.collect(),
@@ -506,7 +532,7 @@ impl Workspace {
             .is_none_or(|t| t.elapsed() > Duration::from_secs(2))
         {
             self.branch = (
-                crate::project::git_branch(&self.project.path),
+                forge_core::project::git_branch(&self.project.path),
                 Some(Instant::now()),
             );
         }
@@ -981,7 +1007,7 @@ fn alacritty_background() -> alacritty_terminal::vte::ansi::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Store;
+    use forge_core::store::Store;
 
     fn wait_for(mut cond: impl FnMut() -> bool) {
         let deadline = Instant::now() + Duration::from_secs(10);

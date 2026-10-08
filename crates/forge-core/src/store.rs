@@ -1,40 +1,13 @@
 // Persistencia local (SQLite): proyectos recientes, workspaces abiertos y su layout.
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::evidence::{Evidence, Report};
 use crate::guard::{Exception, Scope, Stage};
-use crate::layout::{Node, PanelId};
 use crate::router::Usage;
-
-/// Estado restaurable de un workspace (se guarda como JSON en la fila del proyecto).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct WorkspaceState {
-    pub layout: Node,
-    pub panels: HashMap<PanelId, PanelState>,
-    pub focus: PanelId,
-    /// Procesos administrados en marcha al guardar (se reinician al abrir).
-    #[serde(default)]
-    pub running: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct PanelState {
-    pub name: Option<String>,
-    pub cwd: PathBuf,
-    /// Comando con el que se abrió el panel (p. ej. `claude`, `npm run dev`).
-    pub command: Option<String>,
-    /// Si el panel muestra los logs de un proceso administrado, su id.
-    #[serde(default)]
-    pub process: Option<String>,
-    /// Agente abierto en el panel (al restaurar se reanuda su última sesión).
-    #[serde(default)]
-    pub agent: Option<String>,
-}
 
 pub struct ProjectRow {
     pub path: PathBuf,
@@ -43,7 +16,7 @@ pub struct ProjectRow {
 }
 
 pub struct Store {
-    pub(crate) conn: Connection,
+    pub conn: Connection,
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -80,7 +53,7 @@ impl Store {
         Self::init(Connection::open(path).map_err(err)?)
     }
 
-    #[cfg(test)]
+    /// Base en memoria (tests).
     pub fn in_memory() -> Result<Self> {
         Self::init(Connection::open_in_memory().map_err(err)?)
     }
@@ -161,10 +134,11 @@ impl Store {
             .map_err(err)
     }
 
-    pub fn save_workspace(
+    /// Guarda el estado restaurable del workspace (lo define la app) como JSON.
+    pub fn save_workspace<T: Serialize>(
         &self,
         path: &Path,
-        state: &WorkspaceState,
+        state: &T,
         position: usize,
     ) -> Result<()> {
         let json = serde_json::to_string(state).map_err(err)?;
@@ -198,7 +172,7 @@ impl Store {
             .map_err(err)
     }
 
-    pub fn workspace(&self, path: &Path) -> Result<Option<WorkspaceState>> {
+    pub fn workspace<T: serde::de::DeserializeOwned>(&self, path: &Path) -> Result<Option<T>> {
         let json: Option<Option<String>> = self
             .conn
             .query_row(
@@ -509,7 +483,6 @@ pub fn ago(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::Dir;
 
     #[test]
     fn workspace_round_trip_and_recents() {
@@ -519,50 +492,10 @@ mod tests {
         store.touch(a, "Bovinapp").unwrap();
         store.touch(b, "ReparAppi").unwrap();
 
-        let state = WorkspaceState {
-            layout: Node::Split {
-                dir: Dir::Row,
-                ratio: 0.3,
-                first: Box::new(Node::Leaf(0)),
-                second: Box::new(Node::Leaf(4)),
-            },
-            panels: HashMap::from([
-                (
-                    0,
-                    PanelState {
-                        name: Some("Claude".into()),
-                        cwd: a.into(),
-                        command: Some("claude".into()),
-                        process: None,
-                        agent: None,
-                    },
-                ),
-                (
-                    4,
-                    PanelState {
-                        name: None,
-                        cwd: a.join("web"),
-                        command: None,
-                        process: Some("dev".into()),
-                        agent: None,
-                    },
-                ),
-            ]),
-            focus: 4,
-            running: vec!["dev".into()],
-        };
+        let state = serde_json::json!({"layout": {"Leaf": 0}, "focus": 4, "running": ["dev"]});
         store.save_workspace(a, &state, 1).unwrap();
         store
-            .save_workspace(
-                b,
-                &WorkspaceState {
-                    layout: Node::Leaf(0),
-                    panels: HashMap::new(),
-                    focus: 0,
-                    running: vec![],
-                },
-                0,
-            )
+            .save_workspace(b, &serde_json::json!({"focus": 0}), 0)
             .unwrap();
         assert_eq!(store.workspace(a).unwrap(), Some(state));
         assert_eq!(

@@ -3,12 +3,12 @@ use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::guard::{
+use forge_core::guard::{
     self, CheckState, Exception, GuardRun, Level, Rules, RunOptions, Scope, Stage, Verdict,
 };
-use crate::hooks::{self, HookState};
-use crate::project::Project;
-use crate::store::{self, Store};
+use forge_core::hooks::{self, HookState};
+use forge_core::project::Project;
+use forge_core::store::{self, Store};
 
 pub const USAGE: &str = "\
 Forge — workspace de proyectos con terminales, agentes y Project Guard
@@ -174,12 +174,12 @@ pub fn run(args: &[String]) -> i32 {
         ),
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
         (Some("mcp"), _) => open_store().and_then(|store| {
-            crate::mcp::serve(&project, &store)
+            forge_core::mcp::serve(&project, &store)
                 .map(|_| 0)
                 .map_err(|e| e.to_string())
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
-        (Some("ai"), Some("init")) => crate::router::write_template(&project).map(|_| {
+        (Some("ai"), Some("init")) => forge_core::router::write_template(&project).map(|_| {
             out.line(&format!(
                 "Creado {}",
                 project.join(".forge/routing.toml").display()
@@ -249,13 +249,13 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
         push_range,
         evidence,
         name: project.name(),
-        routing: Some(crate::router::RouterConfig::load(project_dir)?),
+        routing: Some(forge_core::router::RouterConfig::load(project_dir)?),
         month_spent: store
             .as_ref()
             .ok()
             .and_then(|s| s.month_spent(project_dir).ok())
             .unwrap_or(0.0),
-        reviewers: crate::reviewers::load(project_dir)?,
+        reviewers: forge_core::reviewers::load(project_dir)?,
     };
     let handle = guard::run(project_dir, &project.root(), rules, stage, options, || {});
 
@@ -427,7 +427,7 @@ fn valid_rule(rule: &str, rules: &Rules, project: &Path) -> Result<(), String> {
         return Ok(());
     }
     if let Some(id) = rule.strip_prefix("reviewer:") {
-        let reviewers = crate::reviewers::load(project)?;
+        let reviewers = forge_core::reviewers::load(project)?;
         return match reviewers.iter().any(|r| r.id == id) {
             true => Ok(()),
             false => Err(format!("no hay revisor \"{id}\" (forge ai route)")),
@@ -546,7 +546,7 @@ fn history(out: &Out, project: &Path) -> Result<i32, String> {
         out.line(&format!(
             "#{id:<4} {:<12} {:<26} {:<24} {}",
             r.stage.label(),
-            crate::evidence::verdict_label(r.verdict, r.stage),
+            forge_core::evidence::verdict_label(r.verdict, r.stage),
             candidate,
             store::ago_precise(r.finished_at)
         ));
@@ -583,15 +583,15 @@ fn report(
     Ok(0)
 }
 
-fn project_agents(project: &Path) -> Vec<crate::agents::AgentSpec> {
-    crate::agents::load(project).unwrap_or_else(|_| crate::agents::builtins())
+fn project_agents(project: &Path) -> Vec<forge_core::agents::AgentSpec> {
+    forge_core::agents::load(project).unwrap_or_else(|_| forge_core::agents::builtins())
 }
 
 fn agent_list(out: &Out, project: &Path) -> Result<i32, String> {
-    let agents = crate::agents::load(project)?;
+    let agents = forge_core::agents::load(project)?;
     let programs: Vec<String> = agents.iter().map(|a| a.program().to_string()).collect();
-    let found = crate::agents::detect(&programs);
-    let default = crate::agents::default_agent(&agents, &found).map(|a| a.id.clone());
+    let found = forge_core::agents::detect(&programs);
+    let default = forge_core::agents::default_agent(&agents, &found).map(|a| a.id.clone());
     for a in agents.iter().filter(|a| a.enabled) {
         let d = found.get(a.program()).cloned().unwrap_or_default();
         let star = if default.as_deref() == Some(a.id.as_str()) {
@@ -631,7 +631,7 @@ fn agent_list(out: &Out, project: &Path) -> Result<i32, String> {
 fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, String> {
     use std::os::unix::process::CommandExt;
     let id = id.ok_or("uso: forge agent open <id> [--resume]")?;
-    let agents = crate::agents::load(project)?;
+    let agents = forge_core::agents::load(project)?;
     let agent = agents
         .iter()
         .find(|a| a.id == id)
@@ -725,7 +725,7 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
     }
     let agents = project_agents(project);
     let programs: Vec<String> = agents.iter().map(|a| a.program().to_string()).collect();
-    let found = crate::agents::detect(&programs);
+    let found = forge_core::agents::detect(&programs);
     let installed: Vec<String> = agents
         .iter()
         .filter(|a| found.get(a.program()).is_some_and(|d| d.path.is_some()))
@@ -789,7 +789,7 @@ fn memory_cli(
         out.line("Sin resultados.");
     }
     for m in found {
-        out.line(&crate::memory::render(&m));
+        out.line(&forge_core::memory::render(&m));
         out.line("");
     }
     Ok(0)
@@ -797,7 +797,7 @@ fn memory_cli(
 
 /// Explica la decisión del router para el cambio actual, sin llamar a ningún modelo.
 fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
-    use crate::router;
+    use forge_core::router;
     let config = router::RouterConfig::load(project)?;
     let rules = Rules::load(project)?.unwrap_or_default();
     let repo = guard::repo_root(project)?;
@@ -848,8 +848,8 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
         "El nivel 3 también se activa si hay poca confianza o desacuerdo entre revisores.",
     ));
     if rules.stage(stage).require_ai_review {
-        let reviewers = crate::reviewers::load(project)?;
-        let (active, skipped) = crate::reviewers::activate(
+        let reviewers = forge_core::reviewers::load(project)?;
+        let (active, skipped) = forge_core::reviewers::activate(
             &reviewers,
             &guard::counted_files(&rules, &diff.files),
             &risk,
@@ -889,7 +889,7 @@ fn ai_usage(out: &Out, project: &Path) -> Result<i32, String> {
     for (provider, model, task, calls, input, output, cost) in rows {
         out.line(&format!("{provider:<10} {model:<14} {task:<15} {calls:>3} llamadas  {input:>9} → {output:<7} tokens  ${cost:.3}"));
     }
-    let budget = crate::router::RouterConfig::load(project)?.monthly_budget_usd;
+    let budget = forge_core::router::RouterConfig::load(project)?.monthly_budget_usd;
     out.line(&format!(
         "Total de pago: ${:.2} de ${budget:.2}",
         store.month_spent(project)?

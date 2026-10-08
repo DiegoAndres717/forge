@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 use eframe::egui;
 
-use crate::project::{AutoRestart, HealthCheck, ProcessDef};
 use crate::terminal::Terminal;
+use forge_core::project::{AutoRestart, HealthCheck, ProcessDef};
 
 const STOP_GRACE: Duration = Duration::from_secs(5);
 const POLL_EVERY: Duration = Duration::from_secs(2);

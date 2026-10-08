@@ -534,7 +534,7 @@ struct UrlScanner {
 impl UrlScanner {
     fn feed(&mut self, bytes: &[u8]) -> Vec<String> {
         let mut text = std::mem::take(&mut self.carry);
-        text.push_str(&strip_ansi(&String::from_utf8_lossy(bytes)));
+        text.push_str(&forge_core::strip_ansi(&String::from_utf8_lossy(bytes)));
         // La última línea puede estar incompleta: se guarda para la próxima lectura.
         let split = text.rfind(['\n', '\r']).map_or(0, |i| i + 1);
         let tail = text.split_off(split);
@@ -543,37 +543,6 @@ impl UrlScanner {
         }
         text.lines().flat_map(local_urls).collect()
     }
-}
-
-pub(crate) fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c != '\x1b' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            // CSI: ESC [ ... byte final en @..~
-            Some('[') => {
-                for c in chars.by_ref() {
-                    if ('@'..='~').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            // OSC: ESC ] ... BEL o ESC \
-            Some(']') => {
-                while let Some(c) = chars.next() {
-                    if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 /// URLs http(s) a localhost/127.0.0.1/0.0.0.0/[::1] (0.0.0.0 se reescribe a localhost).

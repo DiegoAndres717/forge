@@ -1301,8 +1301,20 @@ dependencies = [
  "eframe",
  "egui-phosphor",
  "egui_kittest",
+ "forge-core",
  "libc",
  "portable-pty",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "forge-core"
+version = "0.1.0"
+dependencies = [
+ "libc",
  "regex",
  "rusqlite",
  "serde",
