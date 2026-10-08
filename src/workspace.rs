@@ -227,6 +227,8 @@ pub struct Workspace {
     seen: Instant,
     /// Procesos fallidos que el usuario ya vio.
     seen_failures: Vec<String>,
+    /// Último aviso notificado (para no repetir la notificación del mismo).
+    pub notified: Option<Attention>,
 }
 
 impl Workspace {
@@ -268,6 +270,7 @@ impl Workspace {
             dormant: None,
             seen: Instant::now(),
             seen_failures: Vec::new(),
+            notified: None,
         }
     }
 

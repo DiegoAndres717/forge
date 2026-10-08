@@ -29,6 +29,7 @@ mod chrome;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
+mod notify;
 mod palette;
 mod sidebar;
 
@@ -224,6 +225,10 @@ pub struct App {
     mru_cycle: Option<(Vec<PathBuf>, usize)>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
+    /// Notificaciones de macOS (desactivadas en tests).
+    notifications: bool,
+    /// Proyecto de la notificación en la que el usuario hizo clic.
+    notification_click: Arc<Mutex<Option<PathBuf>>>,
 }
 
 impl App {
@@ -236,7 +241,9 @@ impl App {
         let store = Store::default_path()
             .ok_or_else(|| tr!("no se encontró $HOME").to_string())
             .and_then(|p| Store::open(&p));
-        Self::with_store(ctx, settings, error, open, store)
+        let mut app = Self::with_store(ctx, settings, error, open, store);
+        app.notifications = true; // solo la app real (los tests no notifican)
+        app
     }
 
     /// Como `new`, con la base de datos indicada (los tests usan una en memoria).
@@ -262,6 +269,8 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            notifications: false,
+            notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
             show_all: false,
@@ -996,6 +1005,7 @@ impl eframe::App for App {
 
         self.guard_tick(&ctx);
         self.ideas_tick();
+        self.notify_tick(&ctx);
         // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
         ctx.request_repaint_after(Duration::from_secs(2));
 
@@ -1004,7 +1014,9 @@ impl eframe::App for App {
                 let m = metrics(&ctx, &self.settings);
                 let ws = &mut self.workspaces[i];
                 ws.wake(&ctx);
-                ws.mark_seen();
+                if ctx.input(|i| i.viewport().focused.unwrap_or(true)) {
+                    ws.mark_seen();
+                }
                 let path = ws.project.path.clone();
                 if self.mru.first() != Some(&path) {
                     self.mru.retain(|p| p != &path);
