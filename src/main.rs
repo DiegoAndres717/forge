@@ -194,7 +194,12 @@ fn main() -> eframe::Result {
             .with_min_inner_size([760.0, 480.0])
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
-            .with_title_shown(false),
+            .with_title_shown(false)
+            // Sin esto eframe pone su icono por defecto en el Dock al abrir la ventana.
+            .with_icon(std::sync::Arc::new(
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+                    .unwrap_or_default(),
+            )),
         ..Default::default()
     };
     eframe::run_native(
