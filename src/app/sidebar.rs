@@ -34,9 +34,8 @@ impl App {
     pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
         let detected = self.agents.lock().unwrap().clone();
         let detecting = self.detecting.load(Ordering::Relaxed);
-        // Hueco para los semáforos de la ventana.
         let body = Rect::from_min_max(
-            rect.min + Vec2::new(10.0, theme::TOOLBAR_HEIGHT + 4.0),
+            rect.min + Vec2::new(10.0, 8.0),
             rect.max - Vec2::new(10.0, 8.0),
         );
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(body));

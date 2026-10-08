@@ -189,6 +189,7 @@ pub fn icon_button_sized(
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     paint_icon_button(ui, rect, glyph, &response, color);
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
     response.on_hover_text(tooltip)
 }

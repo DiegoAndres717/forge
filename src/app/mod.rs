@@ -244,6 +244,8 @@ pub struct App {
     notifications_enabled: bool,
     /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
     toolbar_right: f32,
+    /// Dónde acaban los semáforos de macOS (x); ahí empiezan los botones de la ventana.
+    traffic_end: f32,
 }
 
 impl App {
@@ -286,6 +288,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            traffic_end: 72.0,
             toolbar_right: 0.0,
             settings_open: false,
             notifications_enabled: true,
@@ -916,7 +919,7 @@ impl App {
 }
 
 impl eframe::App for App {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let mut cmds = Vec::new();
 
@@ -987,29 +990,23 @@ impl eframe::App for App {
             Some(palette::Run::Cmds(list)) => cmds.extend(list),
             None => {}
         }
-        // Fondo opaco de toda la ventana (barra lateral, contenido y barras).
+        // Semáforos de macOS centrados en la barra superior (como Warp).
+        #[cfg(target_os = "macos")]
+        if let Some(end) = crate::traffic_lights::center(frame, theme::TOOLBAR_HEIGHT as f64) {
+            self.traffic_end = end;
+        }
+        // Barra superior a todo lo ancho; debajo, la barra lateral y el contenido.
+        let (toolbar, below) = full.split_top_bottom_at_y(full.min.y + theme::TOOLBAR_HEIGHT);
         let side_width = if self.sidebar { SIDEBAR } else { 0.0 };
-        let (side, content) = full.split_left_right_at_x(full.min.x + side_width);
+        let (side, content) = below.split_left_right_at_x(below.min.x + side_width);
         ui.painter().rect_filled(content, 0.0, theme::BG);
-        let (toolbar, below) = content.split_top_bottom_at_y(content.min.y + theme::TOOLBAR_HEIGHT);
-        let (mut area, status) = below.split_top_bottom_at_y(below.max.y - theme::STATUS_HEIGHT);
-        // Arrastre de la ventana: barra de herramientas y franja superior de la barra lateral
-        // (se registra antes que sus botones, que tienen prioridad).
+        let (mut area, status) =
+            content.split_top_bottom_at_y(content.max.y - theme::STATUS_HEIGHT);
+        // Arrastre de la ventana desde la barra superior (sus botones tienen prioridad).
         self.window_drag(ui, toolbar);
         if self.sidebar {
             ui.painter().rect_filled(side, 0.0, theme::SIDEBAR);
             theme::hairline(ui, side, true);
-            let strip =
-                Rect::from_min_size(side.min, Vec2::new(side.width(), theme::TOOLBAR_HEIGHT));
-            ui.interact(
-                strip,
-                egui::Id::new("sidebar-drag"),
-                Sense::click_and_drag(),
-            )
-            .drag_started()
-            .then(|| {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-            });
             self.sidebar(ui, side, &mut cmds);
         }
         self.toolbar(ui, toolbar, &mut cmds);

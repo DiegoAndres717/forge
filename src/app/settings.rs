@@ -63,6 +63,7 @@ impl App {
                             .add(egui::Slider::new(&mut self.settings.font_size, 9.0..=28.0).step_by(1.0)
                                     .fixed_decimals(0)
                                     .trailing_fill(true).suffix(" pt"))
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
                             .changed();
                         ui.end_row();
                         ui.label(tr!("Tecla Option"));

@@ -2,9 +2,8 @@
 use super::*;
 use forge_core::tr;
 
-/// Hueco de los botones junto a los semáforos de macOS (que acaban hacia x = 72).
-const WINDOW_BUTTONS_START: f32 = 78.0;
-const WINDOW_BUTTONS_END: f32 = 136.0;
+/// Ancho de los botones junto a los semáforos (barra lateral y Ajustes).
+const WINDOW_BUTTONS_WIDTH: f32 = 58.0;
 
 impl App {
     /// Inicio: proyectos recientes como lista agrupada, con abrir y arrastrar carpeta.
@@ -228,9 +227,10 @@ impl App {
 
     /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes.
     pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let start = self.traffic_end + 12.0;
         let strip = Rect::from_min_max(
-            egui::pos2(WINDOW_BUTTONS_START, 0.0),
-            egui::pos2(WINDOW_BUTTONS_END, theme::TOOLBAR_HEIGHT),
+            egui::pos2(start, 0.0),
+            egui::pos2(start + WINDOW_BUTTONS_WIDTH, theme::TOOLBAR_HEIGHT),
         );
         let mut ui = ui.new_child(
             egui::UiBuilder::new()
@@ -255,11 +255,7 @@ impl App {
         ui.painter().rect_filled(rect, 0.0, theme::TOOLBAR);
         theme::hairline(ui, rect, false);
         // Sin barra lateral, los semáforos y sus botones quedan sobre la barra de herramientas.
-        let left = if self.sidebar {
-            12.0
-        } else {
-            WINDOW_BUTTONS_END + 8.0
-        };
+        let left = self.traffic_end + 12.0 + WINDOW_BUTTONS_WIDTH + 12.0;
         let inner = Rect::from_min_max(
             rect.min + Vec2::new(left, 0.0),
             rect.max - Vec2::new(10.0, 0.0),

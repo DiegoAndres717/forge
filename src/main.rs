@@ -4,6 +4,8 @@ mod layout;
 mod processes;
 mod terminal;
 mod theme;
+#[cfg(target_os = "macos")]
+mod traffic_lights;
 mod workspace;
 
 use std::path::PathBuf;
