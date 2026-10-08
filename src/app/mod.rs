@@ -246,6 +246,8 @@ pub struct App {
     toolbar_right: f32,
     /// Dónde acaban los semáforos de macOS (x); ahí empiezan los botones de la ventana.
     traffic_end: f32,
+    /// Última lectura de la carpeta de eventos de los agentes.
+    events_checked: Option<Instant>,
 }
 
 impl App {
@@ -288,6 +290,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            events_checked: None,
             traffic_end: 72.0,
             toolbar_right: 0.0,
             settings_open: false,

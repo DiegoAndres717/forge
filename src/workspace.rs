@@ -160,6 +160,8 @@ pub enum Attention {
     Failed(String),
     /// Guard bloqueó una validación.
     Blocked,
+    /// Mensaje del propio agente ("Claude Code terminó", "Claude needs your permission…").
+    Event(String),
 }
 
 /// Lista de ideas (de un proyecto, o la general en Inicio).
@@ -367,6 +369,11 @@ impl Workspace {
         self.current_attention().or_else(|| self.sticky.clone())
     }
 
+    /// Aviso enviado por el propio agente (hook): se mantiene hasta ver el proyecto.
+    pub fn agent_event(&mut self, text: String) {
+        self.sticky = Some(Attention::Event(text));
+    }
+
     /// Recuerda el aviso actual (se llama cada fotograma).
     pub fn refresh_attention(&mut self) {
         if let Some(a) = self.current_attention() {
@@ -400,6 +407,10 @@ impl Workspace {
         // redibujo de su pantalla) y lleva unos segundos quieto.
         self.panels.iter().find_map(|(id, p)| {
             let agent = p.agent.as_ref()?;
+            let spec = self.project.agents.iter().find(|s| &s.id == agent);
+            if spec.is_some_and(|s| s.sends_events()) {
+                return None; // avisa él mismo (hooks), sin adivinar
+            }
             let Content::Shell(t) = &p.content else {
                 return None;
             };
@@ -493,6 +504,16 @@ impl Workspace {
         let typed = match (&spec, &state.command, self.mcp_server()) {
             (Some(spec), Some(command), Some(server)) => Some(spec.with_mcp(command, &server)),
             _ => state.command.clone(),
+        };
+        // Y que el agente avise él mismo al terminar o al necesitar al usuario.
+        let forge = std::env::current_exe()
+            .ok()
+            .map(|e| e.canonicalize().unwrap_or(e));
+        let typed = match (&spec, typed, forge) {
+            (Some(spec), Some(command), Some(forge)) => {
+                Some(spec.with_events(&command, &forge.to_string_lossy()))
+            }
+            (_, typed, _) => typed,
         };
         match Terminal::spawn(ctx, &cwd, typed.as_deref(), &env) {
             Ok(terminal) => {

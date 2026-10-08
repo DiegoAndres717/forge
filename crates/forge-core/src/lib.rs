@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod candidate;
 pub mod danger;
+pub mod events;
 pub mod evidence;
 pub mod guard;
 pub mod hooks;

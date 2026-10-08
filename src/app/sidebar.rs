@@ -100,6 +100,7 @@ impl App {
                             Attention::Blocked => {
                                 (theme::RED, tr!("Guard bloqueó la validación").to_string())
                             }
+                            Attention::Event(text) => (theme::ORANGE, text.clone()),
                         };
                         ui.painter().circle_filled(
                             egui::pos2(row.rect.max.x - 14.0, row.rect.center().y),

@@ -8,6 +8,26 @@ use crate::workspace::Attention;
 impl App {
     pub(super) fn notify_tick(&mut self, ctx: &egui::Context) {
         self.notification_clicked(ctx);
+        // Eventos de los agentes (hooks), cada medio segundo.
+        if self
+            .events_checked
+            .is_none_or(|t| t.elapsed() > Duration::from_millis(500))
+            && let Some(dir) = crate::terminal::SHELL_ENV
+                .get()
+                .and_then(|e| e.get("FORGE_EVENTS"))
+        {
+            self.events_checked = Some(Instant::now());
+            for event in forge_core::events::drain(Path::new(dir)) {
+                if let Some(ws) = self
+                    .workspaces
+                    .iter_mut()
+                    .find(|w| w.project.path == event.project)
+                {
+                    ws.agent_event(event.text);
+                }
+            }
+            ctx.request_repaint_after(Duration::from_millis(500));
+        }
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if focused || !(self.notifications && self.notifications_enabled) {
             return;
@@ -24,6 +44,7 @@ impl App {
                 Attention::Agent(name) => tr!("{name} terminó o espera respuesta", name = name),
                 Attention::Failed(name) => tr!("El proceso {name} falló", name = name),
                 Attention::Blocked => tr!("Guard bloqueó la validación").to_string(),
+                Attention::Event(text) => text.clone(),
             };
             let (project, path) = (ws.project.name(), ws.project.path.clone());
             let (clicked, ctx) = (self.notification_click.clone(), ctx.clone());

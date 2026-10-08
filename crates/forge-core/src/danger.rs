@@ -396,7 +396,8 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     let shims = base.join("shims");
     let zsh = base.join("zsh");
     let approvals = base.join("approvals");
-    for dir in [&shims, &zsh, &approvals] {
+    let events = base.join("events");
+    for dir in [&shims, &zsh, &approvals, &events] {
         std::fs::create_dir_all(dir)?;
     }
     for name in SHIMMED {
@@ -413,6 +414,7 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
             "FORGE_APPROVALS".into(),
             approvals.to_string_lossy().into_owned(),
         ),
+        ("FORGE_EVENTS".into(), events.to_string_lossy().into_owned()),
         ("FORGE_APP_PID".into(), std::process::id().to_string()),
     ]);
     let shell = std::env::var("SHELL").unwrap_or_default();

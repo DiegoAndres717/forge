@@ -1101,4 +1101,6 @@ pub const EN: &[(&str, &str)] = &[
         "Search actions, projects, agents, processes… (⌘K)",
     ),
     ("Ajustes (⌘,)", "Settings (⌘,)"),
+    ("{name} espera tu respuesta", "{name} is waiting for you"),
+    ("{name} terminó", "{name} finished"),
 ];

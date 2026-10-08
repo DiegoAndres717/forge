@@ -79,6 +79,33 @@ impl AgentSpec {
         }
     }
 
+    /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code y
+    /// `notify` en Codex, que llaman a `forge agent-event`. Otros agentes, sin cambios.
+    pub fn with_events(&self, command: &str, forge: &str) -> String {
+        let flags = match self.mcp_style {
+            Some(McpStyle::ClaudeJson) => {
+                let hook = |kind: &str| serde_json::json!([{"hooks": [{"type": "command", "command": format!("{} agent-event {kind}", quote(forge))}]}]);
+                let settings = serde_json::json!({"hooks": {"Stop": hook("stop"), "Notification": hook("waiting")}});
+                format!("--settings {}", quote(&settings.to_string()))
+            }
+            Some(McpStyle::CodexConfig) => {
+                let notify =
+                    serde_json::to_string(&[forge, "agent-event", "stop"]).unwrap_or_default();
+                format!("-c {}", quote(&format!("notify={notify}")))
+            }
+            None => return command.to_string(),
+        };
+        match command.split_once(' ') {
+            Some((program, rest)) => format!("{program} {flags} {rest}"),
+            None => format!("{command} {flags}"),
+        }
+    }
+
+    /// El agente avisa él mismo cuando termina o espera (ver `with_events`).
+    pub fn sends_events(&self) -> bool {
+        self.mcp_style.is_some()
+    }
+
     /// Programa a buscar en el PATH (primera palabra del comando).
     pub fn program(&self) -> &str {
         self.command.split_whitespace().next().unwrap_or("")
@@ -382,6 +409,21 @@ pub fn default_agent<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agents_get_their_event_hooks() {
+        let agents = builtins();
+        let get = |id: &str| agents.iter().find(|a| a.id == id).unwrap();
+        let claude = get("claude").with_events("claude --continue", "/A/forge");
+        assert!(claude.starts_with("claude --settings '{\"hooks\":{"), "{claude}");
+        // Comillas anidadas escapadas para el shell ('\'').
+        assert!(claude.contains(r"'\''/A/forge'\'' agent-event stop"), "{claude}");
+        assert!(claude.contains("agent-event waiting"));
+        assert!(claude.ends_with(" --continue"));
+        let codex = get("codex").with_events("codex", "/A/forge");
+        assert_eq!(codex, r#"codex -c 'notify=["/A/forge","agent-event","stop"]'"#);
+        assert_eq!(get("opencode").with_events("opencode", "/A/forge"), "opencode");
+    }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("forge-agents-{name}-{}", std::process::id()));
