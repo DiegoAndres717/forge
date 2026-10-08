@@ -111,6 +111,10 @@ pub struct Terminal {
     exit_code: Option<u32>,
 }
 
+/// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
+/// carpeta de autorizaciones). Las fija la app al arrancar; en tests queda vacío.
+pub static SHELL_ENV: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
+
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
 
 impl Terminal {
@@ -152,7 +156,7 @@ impl Terminal {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
         cmd.env("TERM_PROGRAM", "Forge");
-        for (key, value) in env {
+        for (key, value) in env.iter().chain(SHELL_ENV.get().into_iter().flatten()) {
             cmd.env(key, value);
         }
         cmd.cwd(cwd);

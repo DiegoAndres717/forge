@@ -227,6 +227,30 @@ fn ui_preview() {
     save(&mut harness, &out, "6-paleta-guard");
     harness.state_mut().palette = None;
 
+    // Diálogo de comando peligroso.
+    let approvals = base.join("approvals");
+    std::fs::create_dir_all(&approvals).unwrap();
+    let request = forge_core::danger::Request {
+        id: "1-1".into(),
+        command: "git push --force origin main".into(),
+        reason: "reescribe la historia del remoto (git push --force)".into(),
+        cwd: project.clone(),
+        project: Some(project.clone()),
+        origin: Some("Claude Code".into()),
+        pid: std::process::id(),
+    };
+    std::fs::write(
+        approvals.join("1-1.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().watch_approvals(&ctx, approvals.clone());
+    settle(&mut harness);
+    save(&mut harness, &out, "7-autorizacion");
+    forge_core::danger::answer(&approvals, "1-1", false).unwrap();
+    settle(&mut harness);
+
     harness.state_mut().active = None;
     settle(&mut harness);
     save(&mut harness, &out, "4-inicio");

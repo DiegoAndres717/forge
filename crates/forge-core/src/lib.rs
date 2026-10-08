@@ -2,6 +2,7 @@
 // memoria, servidor MCP y persistencia. La app (ventana y CLI) se construye encima.
 pub mod agents;
 pub mod candidate;
+pub mod danger;
 pub mod evidence;
 pub mod guard;
 pub mod hooks;

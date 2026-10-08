@@ -10,6 +10,9 @@ antes de cada commit, push o pull request.
   hooks de Git, excepciones con motivo, evidencias reutilizables y revisión opcional con IA.
 - **Agentes** (Claude Code, Codex, OpenCode…) que se reanudan y comparten la memoria del
   proyecto vía MCP.
+- **Comandos peligrosos** (`rm -rf` fuera del proyecto, `git reset --hard`, `git push --force`,
+  `git clean -f`, `docker system prune`, `DROP DATABASE`) piden autorización en la ventana,
+  también cuando los lanza un agente.
 
 ## Instalar
 

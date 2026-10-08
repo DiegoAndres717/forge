@@ -23,6 +23,7 @@ use forge_core::store::{self, Store};
 const SIDEBAR: f32 = 240.0;
 const GUARD_WIDTH: f32 = 440.0;
 
+mod approvals;
 mod chrome;
 mod guard_panel;
 mod memory_panel;
@@ -187,6 +188,11 @@ pub struct App {
     ram_checked: Option<Instant>,
     /// Paleta de comandos (⌘K) abierta.
     palette: Option<palette::Palette>,
+    /// Solicitudes de comandos peligrosos pendientes (las vigila un hilo).
+    approvals: Arc<Mutex<Vec<forge_core::danger::Request>>>,
+    approvals_dir: Option<PathBuf>,
+    /// Última solicitud por la que se trajo la ventana al frente.
+    approval_seen: Option<String>,
 }
 
 impl App {
@@ -225,7 +231,16 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            approvals: Arc::default(),
+            approvals_dir: None,
+            approval_seen: None,
         };
+        if let Some(dir) = crate::terminal::SHELL_ENV
+            .get()
+            .and_then(|env| env.get("FORGE_APPROVALS"))
+        {
+            app.watch_approvals(ctx, PathBuf::from(dir));
+        }
         match store {
             Ok(store) => app.store = Some(store),
             Err(e) => app.error = Some(format!("{e} (los workspaces no se guardarán)")),
@@ -898,6 +913,7 @@ impl eframe::App for App {
             self.save();
         }
         self.error_banner(ui, area);
+        self.approvals_ui(&ctx);
         // Con la paleta abierta, el resto de la ventana se atenúa (la paleta va encima).
         if self.palette.is_some() {
             ui.painter()

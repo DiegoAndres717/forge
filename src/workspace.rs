@@ -278,8 +278,13 @@ impl Workspace {
             .and_then(|a| self.project.agents.iter().find(|s| &s.id == a))
             .cloned();
         let mut env = self.project.config.environment.clone();
+        env.insert(
+            "FORGE_PROJECT".into(),
+            self.project.path.to_string_lossy().into_owned(),
+        );
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
+            env.insert("FORGE_ORIGIN".into(), spec.name.clone());
         }
         // Agentes que lo permiten: se les conecta la memoria del proyecto por MCP.
         let typed = match (&spec, &state.command, self.mcp_server()) {

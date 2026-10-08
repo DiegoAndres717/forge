@@ -201,6 +201,11 @@ impl Processes {
     pub fn environment(&self, def: &ProcessDef) -> HashMap<String, String> {
         let mut env = self.env.clone();
         env.extend(def.environment.clone());
+        env.insert(
+            "FORGE_PROJECT".into(),
+            self.root.to_string_lossy().into_owned(),
+        );
+        env.insert("FORGE_ORIGIN".into(), format!("proceso {}", def.label()));
         env
     }
 

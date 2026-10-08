@@ -152,6 +152,20 @@ pub fn metrics(ctx: &egui::Context, s: &Settings) -> Metrics {
 }
 
 fn main() -> eframe::Result {
+    // Ejecutado como `rm`, `git`… desde `shims/`: control de comandos peligrosos.
+    if let Some(name) = std::env::args()
+        .next()
+        .as_deref()
+        .and_then(|a| {
+            std::path::Path::new(a)
+                .file_name()?
+                .to_str()
+                .map(str::to_string)
+        })
+        .filter(|n| forge_core::danger::SHIMMED.contains(&n.as_str()))
+    {
+        forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
+    }
     // `forge [carpeta]` abre (o activa) ese proyecto.
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -194,6 +208,22 @@ fn main() -> eframe::Result {
             }
             // ⌘+/⌘- cambian el tamaño de fuente del terminal, no el zoom de la UI.
             cc.egui_ctx.options_mut(|o| o.zoom_with_keyboard = false);
+            // Terminales con control de comandos peligrosos (§15.2).
+            let installed = forge_core::store::Store::default_path()
+                .and_then(|db| db.parent().map(|d| d.to_path_buf()))
+                .zip(std::env::current_exe().ok())
+                .ok_or_else(|| "no se encontró la carpeta de datos".to_string())
+                .and_then(|(base, exe)| {
+                    forge_core::danger::install(&base, &exe).map_err(|e| e.to_string())
+                });
+            match installed {
+                Ok(env) => {
+                    let _ = terminal::SHELL_ENV.set(env);
+                }
+                Err(e) => {
+                    error.get_or_insert(format!("sin control de comandos peligrosos: {e}"));
+                }
+            }
             Ok(Box::new(app::App::new(&cc.egui_ctx, settings, error, open)))
         }),
     )

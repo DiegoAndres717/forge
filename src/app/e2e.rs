@@ -276,3 +276,44 @@ fn pull_request_draft_after_guard_passes() {
     );
     assert!(dir.join(".git/FORGE_PR_BODY.md").exists());
 }
+
+#[test]
+fn dangerous_command_dialog_answers_the_terminal() {
+    let dir = project("approval");
+    let approvals = dir.join(".approvals");
+    std::fs::create_dir_all(&approvals).unwrap();
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    h.state_mut().watch_approvals(&ctx, approvals.clone());
+    // Lo que deja un `git push --force` lanzado por un agente desde una terminal de Forge.
+    let request = forge_core::danger::Request {
+        id: "1-1".into(),
+        command: "git push --force".into(),
+        reason: "reescribe la historia del remoto (git push --force)".into(),
+        cwd: dir.clone(),
+        project: Some(dir.clone()),
+        origin: Some("Claude Code".into()),
+        pid: std::process::id(),
+    };
+    std::fs::write(
+        approvals.join("1-1.json"),
+        serde_json::to_vec(&request).unwrap(),
+    )
+    .unwrap();
+    wait_until(&mut h, "llega la solicitud", |a| {
+        a.approvals.lock().is_ok_and(|p| !p.is_empty())
+    });
+    h.run_steps(3);
+    h.get_by_label_contains("Claude Code quiere ejecutar");
+    h.get_by_label("git push --force");
+    h.get_by_label("Denegar").click();
+    h.run_steps(3);
+    assert!(
+        approvals.join("1-1.deny").exists(),
+        "la terminal recibe el rechazo"
+    );
+    assert!(
+        h.query_by_label("Denegar").is_none(),
+        "el diálogo se cierra"
+    );
+}
