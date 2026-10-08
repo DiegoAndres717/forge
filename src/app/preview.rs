@@ -307,6 +307,10 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12-git");
     harness.state_mut().workspaces[0].git.open = false;
+    harness.state_mut().welcome = Some(0);
+    settle(&mut harness);
+    save(&mut harness, &out, "13-bienvenida");
+    harness.state_mut().welcome = None;
     harness.state_mut().settings_open = true;
     settle(&mut harness);
     save(&mut harness, &out, "11-ajustes");

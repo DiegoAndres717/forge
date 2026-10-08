@@ -613,3 +613,27 @@ fn git_panel_stages_unstages_and_commits() {
     );
     assert!(ws(h.state()).git.message.is_empty());
 }
+
+#[test]
+fn welcome_tour_runs_once_and_is_remembered() {
+    let mut h = app(project("welcome"));
+    h.state_mut().welcome = Some(0); // como la primera vez en la app real
+    h.run_steps(2);
+    h.get_by_label("Bienvenido a Forge");
+    for _ in 0..3 {
+        h.get_by_label("Siguiente").click();
+        h.run_steps(2);
+    }
+    h.get_by_label("Guard y Git");
+    h.get_by_label("Empezar").click();
+    h.run_steps(2);
+    assert_eq!(h.state().welcome, None);
+    let welcomed = h
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .setting("welcomed")
+        .unwrap();
+    assert_eq!(welcomed.as_deref(), Some("1"), "no vuelve a salir");
+}

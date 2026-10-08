@@ -34,6 +34,7 @@ mod notify;
 mod palette;
 mod settings;
 mod sidebar;
+mod welcome;
 
 use guard_panel::*;
 use ideas_panel::IdeasTarget;
@@ -148,6 +149,8 @@ enum UiCmd {
     OpenSettings,
     /// Abre la paleta de comandos (⌘K).
     OpenPalette,
+    /// Vuelve a mostrar la bienvenida.
+    ShowWelcome,
     /// Cambia el idioma de la interfaz (se guarda para la próxima vez).
     SetLang(forge_core::i18n::Lang),
     /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
@@ -266,6 +269,8 @@ pub struct App {
     events_checked: Option<Instant>,
     /// Versión nueva publicada: (etiqueta, página para descargarla).
     update: Arc<Mutex<Option<(String, String)>>>,
+    /// Paso de la bienvenida que se muestra (la primera vez, o desde ⌘K).
+    welcome: Option<usize>,
 }
 
 impl App {
@@ -281,6 +286,10 @@ impl App {
         let mut app = Self::with_store(ctx, settings, error, open, store);
         app.notifications = true; // solo la app real (los tests no notifican)
         app.check_updates(ctx);
+        // Primera vez: bienvenida.
+        if app.db(|s| s.setting("welcomed")).flatten().is_none() {
+            app.welcome = Some(0);
+        }
         app.notifications_enabled =
             app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
         app
@@ -309,6 +318,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            welcome: None,
             update: Arc::default(),
             events_checked: None,
             traffic_end: 72.0,
@@ -553,6 +563,7 @@ impl App {
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::OpenSettings => self.settings_open = true,
             UiCmd::OpenPalette => self.open_palette(),
+            UiCmd::ShowWelcome => self.welcome = Some(0),
             UiCmd::EditFile(name) => {
                 let Some(i) = self.active else { return };
                 let file = self.workspaces[i].project.path.join(".forge").join(name);
@@ -1122,7 +1133,7 @@ impl eframe::App for App {
                     area,
                     &m,
                     &ws_actions,
-                    self.palette.is_none() && !self.settings_open,
+                    self.palette.is_none() && !self.settings_open && self.welcome.is_none(),
                 );
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
@@ -1182,6 +1193,7 @@ impl eframe::App for App {
         self.approvals_ui(&ctx);
         let mut from_settings = Vec::new();
         self.settings_ui(&ctx, &mut from_settings);
+        self.welcome_ui(&ctx, &mut from_settings);
         for cmd in from_settings {
             self.apply(&ctx, cmd, area);
         }

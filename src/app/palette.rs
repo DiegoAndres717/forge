@@ -457,6 +457,12 @@ impl App {
             "⌘,",
             cmd(UiCmd::OpenSettings),
         );
+        add(
+            icon::HAND_WAVING,
+            tr!("Bienvenida").into(),
+            "",
+            cmd(UiCmd::ShowWelcome),
+        );
         // Idioma: cada opción en su propio idioma, para encontrarla en cualquiera de los dos.
         {
             use forge_core::i18n::{Lang, lang};

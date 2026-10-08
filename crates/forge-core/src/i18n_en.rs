@@ -1139,4 +1139,30 @@ pub const EN: &[(&str, &str)] = &[
         "{p0}  Forge {tag} available",
     ),
     ("Descargar la versión nueva", "Download the new version"),
+    ("Bienvenido a Forge", "Welcome to Forge"),
+    (
+        "Cada proyecto con sus terminales, procesos, agentes de IA y un Guard que revisa tus cambios. Abre una carpeta para empezar (o arrástrala a la ventana).",
+        "Each project with its terminals, processes, AI agents and a Guard that checks your changes. Open a folder to start (or drag it onto the window).",
+    ),
+    ("⌘K para todo", "⌘K for everything"),
+    (
+        "Escribe lo que quieres hacer: abrir un proyecto, dividir la terminal, iniciar un proceso, abrir Claude… ⌘D divide, ⌘T abre una terminal, ⌘F busca en ella y ⌃Tab vuelve al proyecto anterior.",
+        "Type what you want to do: open a project, split the terminal, start a process, open Claude… ⌘D splits, ⌘T opens a terminal, ⌘F searches it and ⌃Tab goes back to the previous project.",
+    ),
+    ("Agentes con memoria", "Agents with memory"),
+    (
+        "Claude Code y Codex abiertos desde Forge comparten la Memoria y las Ideas del proyecto (⌘⇧M, ⌘⇧I): recuerdan decisiones, anotan pendientes y los tachan. Te avisan cuando terminan o te necesitan.",
+        "Claude Code and Codex opened from Forge share the project Memory and Ideas (⌘⇧M, ⌘⇧I): they remember decisions, write down to-dos and check them off. They notify you when they finish or need you.",
+    ),
+    ("Guard y Git", "Guard and Git"),
+    (
+        "Antes de un commit o un push, Guard revisa tamaño, secretos y tus tests (⌘G). Instala sus hooks para que proteja también fuera de Forge. El panel de Git (⌘⇧G) prepara, confirma y sube tus cambios.",
+        "Before a commit or a push, Guard checks size, secrets and your tests (⌘G). Install its hooks so it protects you outside Forge too. The Git panel (⌘⇧G) stages, commits and pushes your changes.",
+    ),
+    ("Empezar", "Get started"),
+    ("Siguiente", "Next"),
+    ("Anterior", "Back"),
+    ("Saltar", "Skip"),
+    ("Bienvenida", "Welcome"),
+    ("Abrir proyecto…", "Open project…"),
 ];
