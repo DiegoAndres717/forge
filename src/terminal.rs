@@ -625,6 +625,8 @@ impl Terminal {
     }
 
     fn mouse(&mut self, ctx: &egui::Context, response: &egui::Response, rect: Rect, m: &Metrics) {
+        // El puntero está sobre esta terminal y no sobre algo encima (Ajustes, paleta…).
+        let over = response.contains_pointer();
         let (events, scroll, hover, mods) = ctx.input(|i| {
             (
                 i.events.clone(),
@@ -640,7 +642,7 @@ impl Terminal {
         let report = mode.intersects(TermMode::MOUSE_MODE) && !mods.shift;
 
         // Scroll: a la app si captura ratón; flechas en pantalla alternativa; si no, scrollback.
-        if hover.is_some_and(|p| rect.contains(p)) && scroll != 0.0 {
+        if over && scroll != 0.0 {
             self.scroll_acc += scroll;
             let lines = (self.scroll_acc / m.cell.y).trunc();
             if lines != 0.0 {
@@ -667,7 +669,7 @@ impl Terminal {
 
         // URL bajo el puntero con ⌘ (la de la manito); el ⌘-clic abre esta misma.
         let hover_url = hover
-            .filter(|p| mods.mac_cmd && rect.contains(*p))
+            .filter(|_| mods.mac_cmd && over)
             .and_then(|p| {
                 let (line, col, _) = self.cell_at(p, rect, m);
                 url_at_point(
@@ -684,7 +686,7 @@ impl Terminal {
                     button,
                     pressed,
                     modifiers,
-                } if (rect.contains(pos) && !self.overlays.iter().any(|o| o.contains(pos)))
+                } if (over && rect.contains(pos) && !self.overlays.iter().any(|o| o.contains(pos)))
                     || !pressed =>
                 {
                     let (line, col, side) = self.cell_at(pos, rect, m);
@@ -756,7 +758,7 @@ impl Terminal {
         // ⌘ sobre una URL: cursor de mano (el subrayado se pinta en paint()).
         if hover_url.is_some() {
             ctx.set_cursor_icon(CursorIcon::PointingHand);
-        } else if !mods.mac_cmd && hover.is_some_and(|p| rect.contains(p)) && !report {
+        } else if !mods.mac_cmd && over && !report {
             ctx.set_cursor_icon(CursorIcon::Text);
         }
 

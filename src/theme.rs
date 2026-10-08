@@ -194,6 +194,21 @@ pub fn icon_button_sized(
     response.on_hover_text(tooltip)
 }
 
+/// Botón de icono que se ve seleccionado (fondo) mientras `on`.
+pub fn icon_toggle(ui: &mut Ui, glyph: &str, tooltip: &str, on: bool) -> Response {
+    let (rect, response) = ui.allocate_exact_size(Vec2::splat(26.0), Sense::click());
+    if on {
+        ui.painter()
+            .rect_filled(rect.shrink(1.0), 6.0, SURFACE_HOVER);
+    }
+    let color = if on { TEXT } else { TEXT_2 };
+    paint_icon_button(ui, rect, glyph, &response, color);
+    let response = response.on_hover_cursor(CursorIcon::PointingHand);
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, tooltip));
+    response.on_hover_text(tooltip)
+}
+
 /// Pinta un botón de icono en un rectángulo ya reservado (para cabeceras dibujadas a mano).
 pub fn paint_icon_button(ui: &Ui, rect: Rect, glyph: &str, response: &Response, color: Color32) {
     if response.hovered() {

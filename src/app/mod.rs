@@ -1106,6 +1106,20 @@ impl eframe::App for App {
             self.save();
         }
         self.error_banner(ui, area);
+        // Manito sobre cualquier control clicable (casillas, selectores, filas…) si nadie
+        // eligió otro cursor; no en lo arrastrable (terminal, divisores, barra superior).
+        let clickable = ctx.viewport(|v| {
+            v.interact_widgets.hovered.iter().copied().collect::<Vec<_>>()
+        });
+        if ctx.output(|o| o.cursor_icon) == egui::CursorIcon::Default
+            && clickable.into_iter().any(|id| {
+                ctx.read_response(id).is_some_and(|r| {
+                    r.enabled() && r.sense.senses_click() && !r.sense.senses_drag()
+                })
+            })
+        {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
         self.approvals_ui(&ctx);
         let mut from_settings = Vec::new();
         self.settings_ui(&ctx, &mut from_settings);

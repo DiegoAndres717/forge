@@ -20,9 +20,11 @@ pub fn center(frame: &eframe::Frame, bar_height: f64) -> Option<f32> {
     // El contenedor de la barra de título: se alarga para que los botones queden centrados.
     // SAFETY: vistas de AppKit en el hilo principal; solo se leen sus padres.
     let container = unsafe { close.superview()?.superview()? };
-    let button_height = close.frame().size.height;
-    let inset = (bar_height - button_height) / 2.0;
-    let height = button_height + inset;
+    // Los botones guardan su distancia al borde inferior del contenedor (origin.y, AppKit
+    // cuenta desde abajo): para centrarlos a `bar_height / 2` desde arriba, el contenedor
+    // debe medir ese centro + media altura de botón + esa distancia.
+    let button = close.frame();
+    let height = bar_height / 2.0 + button.size.height / 2.0 + button.origin.y;
     let mut rect = container.frame();
     if (rect.size.height - height).abs() > 0.5 {
         rect.size.height = height;
