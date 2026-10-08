@@ -23,6 +23,8 @@ struct Entry {
     /// Atajo o detalle, a la derecha.
     hint: String,
     run: Run,
+    /// Palabras extra para encontrarla (en cualquier idioma): coinciden por prefijo.
+    keywords: &'static [&'static str],
 }
 
 const MAX_RESULTS: usize = 12;
@@ -86,6 +88,39 @@ pub(super) fn fuzzy(query: &str, text: &str) -> Option<i32> {
     }
 }
 
+/// Idioma: se encuentra escriba lo que escriba el usuario en uno u otro idioma.
+const LANGUAGE_WORDS: &[&str] = &[
+    "idioma",
+    "lengua",
+    "lenguaje",
+    "language",
+    "lang",
+    "english",
+    "ingles",
+    "español",
+    "espanol",
+    "spanish",
+    "traducir",
+    "translate",
+];
+
+/// Puntuación de una entrada: su nombre (difuso) o una palabra clave que empiece por la
+/// consulta (puntúa alto: es justo lo que se buscaba).
+fn score(query: &str, entry: &Entry) -> Option<i32> {
+    let q: String = query.trim().chars().map(fold).collect();
+    let keyword = q.chars().count() >= 3
+        && entry
+            .keywords
+            .iter()
+            .any(|k| k.chars().map(fold).collect::<String>().starts_with(&q));
+    let by_name = fuzzy(query, &entry.label);
+    if keyword {
+        Some(by_name.unwrap_or(0).max(100))
+    } else {
+        by_name
+    }
+}
+
 impl App {
     pub(super) fn open_palette(&mut self) {
         let open: Vec<PathBuf> = self
@@ -125,6 +160,7 @@ impl App {
                 label,
                 hint,
                 run,
+                keywords: &[],
             })
         };
         let act = Run::Action;
@@ -431,6 +467,11 @@ impl App {
             "⌘0",
             act(Action::FontReset),
         );
+        for e in &mut out {
+            if matches!(&e.run, Run::Cmds(c) if matches!(c.as_slice(), [UiCmd::SetLang(_)])) {
+                e.keywords = LANGUAGE_WORDS;
+            }
+        }
         out
     }
 
@@ -458,7 +499,7 @@ impl App {
         let mut matches: Vec<(i32, Entry)> = self
             .palette_entries()
             .into_iter()
-            .filter_map(|e| fuzzy(&query, &e.label).map(|s| (s, e)))
+            .filter_map(|e| score(&query, &e).map(|s| (s, e)))
             .collect();
         // Orden estable: a igual puntuación, el orden de la lista (lo más útil primero).
         matches.sort_by_key(|(s, _)| -s);
@@ -575,5 +616,20 @@ mod tests {
         // Letras seguidas al inicio de palabra ganan a letras sueltas.
         assert!(fuzzy("gua", "Guard: validar") > fuzzy("gua", "Ir a gestión de usuarios"));
         assert_eq!(fuzzy("", "lo que sea"), Some(0));
+    }
+
+    #[test]
+    fn language_is_found_with_words_in_either_language() {
+        let entry = super::Entry {
+            icon: "",
+            label: "Idioma: Español".into(),
+            hint: String::new(),
+            run: super::Run::Cmds(vec![]),
+            keywords: super::LANGUAGE_WORDS,
+        };
+        for q in ["lengua", "inglés", "english", "spanish", "idioma"] {
+            assert!(super::score(q, &entry).is_some(), "{q}");
+        }
+        assert!(super::score("abrir", &entry).is_none());
     }
 }
