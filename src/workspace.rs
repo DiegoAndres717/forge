@@ -227,8 +227,11 @@ pub struct Workspace {
     seen: Instant,
     /// Procesos fallidos que el usuario ya vio.
     seen_failures: Vec<String>,
-    /// Último aviso notificado (para no repetir la notificación del mismo).
-    pub notified: Option<Attention>,
+    /// Avisos ya notificados desde la última vez que se vio el proyecto (uno por aviso).
+    pub notified: Vec<Attention>,
+    /// Último aviso visto: se mantiene hasta entrar al proyecto (sin parpadeos si el
+    /// agente redibuja su pantalla mientras espera).
+    sticky: Option<Attention>,
 }
 
 impl Workspace {
@@ -270,7 +273,8 @@ impl Workspace {
             dormant: None,
             seen: Instant::now(),
             seen_failures: Vec::new(),
-            notified: None,
+            notified: Vec::new(),
+            sticky: None,
         }
     }
 
@@ -324,6 +328,8 @@ impl Workspace {
     pub fn mark_seen(&mut self) {
         self.seen = Instant::now();
         self.guard.unseen = false;
+        self.notified.clear();
+        self.sticky = None;
         self.seen_failures = self.failed_processes();
     }
 
@@ -339,8 +345,20 @@ impl Workspace {
             .collect()
     }
 
-    /// Aviso más importante desde la última vez que se vio el proyecto.
+    /// Aviso más importante desde la última vez que se vio el proyecto (se mantiene hasta
+    /// verlo).
     pub fn attention(&self) -> Option<Attention> {
+        self.current_attention().or_else(|| self.sticky.clone())
+    }
+
+    /// Recuerda el aviso actual (se llama cada fotograma).
+    pub fn refresh_attention(&mut self) {
+        if let Some(a) = self.current_attention() {
+            self.sticky = Some(a);
+        }
+    }
+
+    fn current_attention(&self) -> Option<Attention> {
         if self.is_dormant() {
             return None;
         }

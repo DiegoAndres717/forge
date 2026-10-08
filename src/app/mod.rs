@@ -143,6 +143,8 @@ enum UiCmd {
     EditFile(&'static str),
     /// Abre la ventana de Ajustes.
     OpenSettings,
+    /// Abre la paleta de comandos (⌘K).
+    OpenPalette,
     /// Cambia el idioma de la interfaz (se guarda para la próxima vez).
     SetLang(forge_core::i18n::Lang),
     /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
@@ -240,6 +242,8 @@ pub struct App {
     settings_open: bool,
     /// Notificaciones activadas en Ajustes.
     notifications_enabled: bool,
+    /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
+    toolbar_right: f32,
 }
 
 impl App {
@@ -282,6 +286,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            toolbar_right: 0.0,
             settings_open: false,
             notifications_enabled: true,
             notifications: false,
@@ -517,6 +522,7 @@ impl App {
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::OpenSettings => self.settings_open = true,
+            UiCmd::OpenPalette => self.open_palette(),
             UiCmd::EditFile(name) => {
                 let Some(i) = self.active else { return };
                 let file = self.workspaces[i].project.path.join(".forge").join(name);
@@ -1007,6 +1013,7 @@ impl eframe::App for App {
             self.sidebar(ui, side, &mut cmds);
         }
         self.toolbar(ui, toolbar, &mut cmds);
+        self.window_buttons(ui, &mut cmds);
         self.status_bar(ui, status);
         self.ram_tick(&ctx);
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).
@@ -1037,6 +1044,9 @@ impl eframe::App for App {
 
         self.guard_tick(&ctx);
         self.ideas_tick();
+        for ws in &mut self.workspaces {
+            ws.refresh_attention();
+        }
         self.notify_tick(&ctx);
         // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
         ctx.request_repaint_after(Duration::from_secs(2));

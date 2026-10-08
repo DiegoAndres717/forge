@@ -1095,4 +1095,10 @@ pub const EN: &[(&str, &str)] = &[
         "Custom fonts and more options: ~/.config/forge/config.toml",
     ),
     ("Proyecto: {name}", "Project: {name}"),
+    ("Buscar", "Search"),
+    (
+        "Buscar acciones, proyectos, agentes, procesos… (⌘K)",
+        "Search actions, projects, agents, processes… (⌘K)",
+    ),
+    ("Ajustes (⌘,)", "Settings (⌘,)"),
 ];

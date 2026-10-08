@@ -2,6 +2,10 @@
 use super::*;
 use forge_core::tr;
 
+/// Hueco de los botones junto a los semáforos de macOS (que acaban hacia x = 72).
+const WINDOW_BUTTONS_START: f32 = 78.0;
+const WINDOW_BUTTONS_END: f32 = 136.0;
+
 impl App {
     /// Inicio: proyectos recientes como lista agrupada, con abrir y arrastrar carpeta.
     pub(super) fn home(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
@@ -198,11 +202,64 @@ impl App {
     }
 
     /// Barra de herramientas unificada: proyecto y rama, estado del Guard, RAM y acciones.
+    /// Búsqueda (abre ⌘K): con texto si hay sitio, solo la lupa si no.
+    fn search_pill(ui: &mut egui::Ui, width: f32, cmds: &mut Vec<UiCmd>) {
+        let compact = width < 100.0;
+        let text = if compact {
+            icon::MAGNIFYING_GLASS.to_string()
+        } else {
+            format!("{}  {}", icon::MAGNIFYING_GLASS, tr!("Buscar"))
+        };
+        let mut button = egui::Button::new(RichText::new(text).size(12.0).color(theme::TEXT_3))
+            .fill(theme::SURFACE)
+            .corner_radius(13.0)
+            .min_size(Vec2::new(if compact { 28.0 } else { width }, 26.0));
+        if !compact {
+            button = button.right_text(RichText::new("⌘K").size(11.0).color(theme::TEXT_4));
+        }
+        if ui
+            .add(button)
+            .on_hover_text(tr!("Buscar acciones, proyectos, agentes, procesos… (⌘K)"))
+            .clicked()
+        {
+            cmds.push(UiCmd::OpenPalette);
+        }
+    }
+
+    /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes.
+    pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let strip = Rect::from_min_max(
+            egui::pos2(WINDOW_BUTTONS_START, 0.0),
+            egui::pos2(WINDOW_BUTTONS_END, theme::TOOLBAR_HEIGHT),
+        );
+        let mut ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(strip)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let tip = if self.sidebar {
+            tr!("Ocultar barra lateral (⌘B)")
+        } else {
+            tr!("Mostrar barra lateral (⌘B)")
+        };
+        if theme::icon_button(&mut ui, icon::SIDEBAR_SIMPLE, tip).clicked() {
+            self.sidebar = !self.sidebar;
+        }
+        if theme::icon_button(&mut ui, icon::GEAR_SIX, tr!("Ajustes (⌘,)")).clicked() {
+            cmds.push(UiCmd::OpenSettings);
+        }
+    }
+
     pub(super) fn toolbar(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
         ui.painter().rect_filled(rect, 0.0, theme::TOOLBAR);
         theme::hairline(ui, rect, false);
-        // Sin barra lateral, los semáforos quedan sobre la barra de herramientas.
-        let left = if self.sidebar { 12.0 } else { 84.0 };
+        // Sin barra lateral, los semáforos y sus botones quedan sobre la barra de herramientas.
+        let left = if self.sidebar {
+            12.0
+        } else {
+            WINDOW_BUTTONS_END + 8.0
+        };
         let inner = Rect::from_min_max(
             rect.min + Vec2::new(left, 0.0),
             rect.max - Vec2::new(10.0, 0.0),
@@ -213,15 +270,6 @@ impl App {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         ui.spacing_mut().item_spacing.x = 4.0;
-        let tip = if self.sidebar {
-            tr!("Ocultar barra lateral (⌘B)")
-        } else {
-            tr!("Mostrar barra lateral (⌘B)")
-        };
-        if theme::icon_button(&mut ui, icon::SIDEBAR_SIMPLE, tip).clicked() {
-            self.sidebar = !self.sidebar;
-        }
-        ui.add_space(6.0);
         let Some(i) = self.active else {
             ui.label(
                 RichText::new(tr!("Inicio"))
@@ -229,6 +277,9 @@ impl App {
                     .color(theme::TEXT)
                     .strong(),
             );
+            ui.add_space(10.0);
+            let width = ui.available_width();
+            Self::search_pill(&mut ui, width, cmds);
             return;
         };
         let bytes = self
@@ -243,15 +294,34 @@ impl App {
                 .color(theme::TEXT)
                 .strong(),
         );
+        // Lo que queda entre el nombre y los botones de la derecha (medidos el fotograma
+        // anterior): la rama se recorta y la búsqueda se reduce a la lupa si no caben.
+        let free = ui.available_width() - self.toolbar_right - 12.0;
+        let pill = if free > 330.0 { 150.0 } else { 30.0 };
         if let Some(branch) = ws.branch() {
             ui.add_space(4.0);
-            ui.label(
-                RichText::new(format!("{}  {branch}", icon::GIT_BRANCH))
-                    .size(12.0)
-                    .color(theme::TEXT_3),
-            );
+            let room = (free - pill - 12.0).max(0.0);
+            if room > 40.0 {
+                ui.scope(|ui| {
+                    ui.set_max_width(room);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("{}  {branch}", icon::GIT_BRANCH))
+                                .size(12.0)
+                                .color(theme::TEXT_3),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&branch);
+                });
+            }
         }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.add_space(8.0);
+        if free > 40.0 {
+            Self::search_pill(&mut ui, pill, cmds);
+        }
+        let right_start = ui.max_rect().max.x;
+        let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if theme::icon_button(ui, icon::BRAIN, tr!("Memoria del proyecto (⌘⇧M)")).clicked()
             {
                 cmds.push(UiCmd::ToggleMemory);
@@ -310,6 +380,7 @@ impl App {
                 ));
             }
         });
+        self.toolbar_right = (right_start - right.response.rect.min.x).max(0.0);
     }
 
     /// Barra de estado con los atajos principales (plan §4.2).

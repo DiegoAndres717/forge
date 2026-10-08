@@ -68,6 +68,8 @@ pub fn apply(ctx: &egui::Context) {
         v.selection.bg_fill = ACCENT.gamma_multiply(0.45);
         v.selection.stroke = Stroke::new(1.0, ACCENT);
         v.override_text_color = None;
+        // Manito sobre botones, casillas, selectores y deslizadores.
+        v.interact_cursor = Some(CursorIcon::PointingHand);
         let radius = CornerRadius::same(6);
         let w = &mut v.widgets;
         w.noninteractive.bg_stroke = Stroke::new(1.0, SEPARATOR);

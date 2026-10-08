@@ -1,23 +1,25 @@
-// Notificaciones de macOS para los avisos de actividad cuando Forge no está a la vista
-// (o el aviso es de otro proyecto). Un clic en la notificación abre ese proyecto.
+// Notificaciones de macOS para los avisos de actividad, solo con Forge en segundo plano
+// (dentro de la app basta el punto de la barra lateral). Una por aviso hasta que se entra
+// al proyecto: un agente que espera y redibuja su pantalla no vuelve a notificar. Un clic
+// en la notificación abre ese proyecto.
 use super::*;
 use crate::workspace::Attention;
 
 impl App {
     pub(super) fn notify_tick(&mut self, ctx: &egui::Context) {
+        self.notification_clicked(ctx);
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
-        for (i, ws) in self.workspaces.iter_mut().enumerate() {
-            let attention = ws.attention();
-            if attention == ws.notified {
+        if focused || !(self.notifications && self.notifications_enabled) {
+            return;
+        }
+        for ws in &mut self.workspaces {
+            let Some(attention) = ws.attention() else {
+                continue;
+            };
+            if ws.notified.contains(&attention) {
                 continue;
             }
-            ws.notified = attention.clone();
-            let Some(attention) = attention else { continue };
-            if focused && self.active == Some(i)
-                || !(self.notifications && self.notifications_enabled)
-            {
-                continue;
-            }
+            ws.notified.push(attention.clone());
             let text = match &attention {
                 Attention::Agent(name) => tr!("{name} terminó o espera respuesta", name = name),
                 Attention::Failed(name) => tr!("El proceso {name} falló", name = name),
@@ -43,7 +45,10 @@ impl App {
                 }
             });
         }
-        // Clic en una notificación: Forge al frente y en ese proyecto.
+    }
+
+    /// Clic en una notificación: Forge al frente y en ese proyecto.
+    fn notification_clicked(&mut self, ctx: &egui::Context) {
         if let Some(path) = self
             .notification_click
             .lock()
