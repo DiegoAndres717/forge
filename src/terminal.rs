@@ -436,6 +436,17 @@ impl Terminal {
             }
         }
 
+        // URL bajo el puntero con ⌘ (la de la manito); el ⌘-clic abre esta misma.
+        let hover_url = hover
+            .filter(|p| mods.mac_cmd && rect.contains(*p))
+            .and_then(|p| {
+                let (line, col, _) = self.cell_at(p, rect, m);
+                url_at_point(
+                    &term,
+                    viewport_to_point(offset, Point::new(line, Column(col))),
+                )
+            });
+
         let mut outgoing = Vec::new();
         for event in &events {
             match *event {
@@ -463,10 +474,11 @@ impl Terminal {
                         continue;
                     }
                     let point = viewport_to_point(offset, Point::new(line, Column(col)));
-                    if modifiers.mac_cmd {
-                        // ⌘+clic abre la URL bajo el puntero.
-                        if let Some(url) = url_at_point(&term, point) {
-                            ctx.open_url(egui::OpenUrl::new_tab(url));
+                    if modifiers.mac_cmd || mods.mac_cmd {
+                        // ⌘+clic abre la URL en el navegador predeterminado.
+                        if let Some(url) = hover_url.clone().or_else(|| url_at_point(&term, point))
+                        {
+                            let _ = std::process::Command::new("open").arg(url).spawn();
                         }
                     } else {
                         term.selection = Some(Selection::new(SelectionType::Simple, point, side));
@@ -511,13 +523,9 @@ impl Terminal {
         }
 
         // ⌘ sobre una URL: cursor de mano (el subrayado se pinta en paint()).
-        if mods.mac_cmd && hover.is_some_and(|p| rect.contains(p)) {
-            let (line, col, _) = self.cell_at(hover.unwrap_or(rect.min), rect, m);
-            let point = viewport_to_point(offset, Point::new(line, Column(col)));
-            if url_at_point(&term, point).is_some() {
-                ctx.set_cursor_icon(CursorIcon::PointingHand);
-            }
-        } else if hover.is_some_and(|p| rect.contains(p)) && !report {
+        if hover_url.is_some() {
+            ctx.set_cursor_icon(CursorIcon::PointingHand);
+        } else if !mods.mac_cmd && hover.is_some_and(|p| rect.contains(p)) && !report {
             ctx.set_cursor_icon(CursorIcon::Text);
         }
 
@@ -1147,6 +1155,37 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
         assert_eq!(term.exit_code(), Some(3));
+    }
+
+    /// La línea de Vite (colores, flecha ancha) se detecta como URL en cualquier columna.
+    #[test]
+    fn vite_url_under_the_pointer() {
+        let ctx = egui::Context::default();
+        let line = r"printf '  \033[32m➜\033[39m  \033[1mLocal\033[22m:   \033[36mhttp://localhost:\033[1m5173\033[22m/\033[39m\n'; sleep 5";
+        let term = Terminal::exec(&ctx, Path::new("/tmp"), line, &HashMap::new()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            {
+                let t = term.term.lock().unwrap();
+                for l in 0..t.screen_lines() {
+                    let row = &t.grid()[alacritty_terminal::index::Line(l as i32)];
+                    let text: String = (0..t.columns()).map(|c| row[Column(c)].c).collect();
+                    if let Some(col) = text.find("localhost") {
+                        let col = text[..col].chars().count();
+                        let point =
+                            Point::new(alacritty_terminal::index::Line(l as i32), Column(col));
+                        eprintln!("fila: {text:?}");
+                        assert_eq!(
+                            url_at_point(&t, point).as_deref(),
+                            Some("http://localhost:5173/")
+                        );
+                        return;
+                    }
+                }
+            }
+            assert!(std::time::Instant::now() < deadline, "no apareció la línea");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
     }
 
     #[test]
