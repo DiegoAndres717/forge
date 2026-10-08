@@ -415,14 +415,26 @@ mod tests {
         let agents = builtins();
         let get = |id: &str| agents.iter().find(|a| a.id == id).unwrap();
         let claude = get("claude").with_events("claude --continue", "/A/forge");
-        assert!(claude.starts_with("claude --settings '{\"hooks\":{"), "{claude}");
+        assert!(
+            claude.starts_with("claude --settings '{\"hooks\":{"),
+            "{claude}"
+        );
         // Comillas anidadas escapadas para el shell ('\'').
-        assert!(claude.contains(r"'\''/A/forge'\'' agent-event stop"), "{claude}");
+        assert!(
+            claude.contains(r"'\''/A/forge'\'' agent-event stop"),
+            "{claude}"
+        );
         assert!(claude.contains("agent-event waiting"));
         assert!(claude.ends_with(" --continue"));
         let codex = get("codex").with_events("codex", "/A/forge");
-        assert_eq!(codex, r#"codex -c 'notify=["/A/forge","agent-event","stop"]'"#);
-        assert_eq!(get("opencode").with_events("opencode", "/A/forge"), "opencode");
+        assert_eq!(
+            codex,
+            r#"codex -c 'notify=["/A/forge","agent-event","stop"]'"#
+        );
+        assert_eq!(
+            get("opencode").with_events("opencode", "/A/forge"),
+            "opencode"
+        );
     }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {

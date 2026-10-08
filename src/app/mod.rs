@@ -26,6 +26,7 @@ const GUARD_WIDTH: f32 = 440.0;
 
 mod approvals;
 mod chrome;
+mod git_panel;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
@@ -72,6 +73,7 @@ pub enum Action {
     OpenDefaultAgent,
     ToggleMemory,
     ToggleIdeas,
+    ToggleGit,
     Palette,
     Settings,
     /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
@@ -122,6 +124,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::H, true, false) => Action::Home,
         (Key::B, false, false) => Action::ToggleSidebar,
         (Key::G, false, false) => Action::ToggleGuard,
+        (Key::G, true, false) => Action::ToggleGit,
         (Key::F, false, false) => Action::Ws(WsAction::Find),
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
@@ -165,6 +168,19 @@ enum UiCmd {
     StopAll,
     ToggleGuard,
     ToggleMemory,
+    ToggleGit,
+    GitStage(Vec<String>),
+    GitUnstage(Vec<String>),
+    GitDiscardAsk(forge_core::git::FileChange),
+    GitDiscard(forge_core::git::FileChange),
+    GitSwitch(String),
+    GitNewBranch(String),
+    GitNewBranchCancel,
+    /// Diff de un archivo en un panel: (ruta, preparado).
+    GitDiff(String, bool),
+    /// `git pull` / `git push` en un panel.
+    GitRun(&'static str),
+    GitCommit,
     ToggleIdeas,
     /// Abre Ideas con el foco en "Nueva idea…" (la general si no hay proyecto activo).
     NewIdea,
@@ -498,6 +514,7 @@ impl App {
             Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
             Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
+            Action::ToggleGit => cmds.push(UiCmd::ToggleGit),
             Action::Settings => self.settings_open = !self.settings_open,
             Action::NextRecent => {
                 if self.mru.len() < 2 {
@@ -573,6 +590,27 @@ impl App {
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
+            UiCmd::ToggleGit => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    ws.git.open = !ws.git.open;
+                    ws.git.dirty = true;
+                    if ws.git.open {
+                        ws.guard.open = false;
+                        ws.memory.open = false;
+                        ws.ideas.open = false;
+                    }
+                }
+            }
+            UiCmd::GitStage(_)
+            | UiCmd::GitUnstage(_)
+            | UiCmd::GitDiscardAsk(_)
+            | UiCmd::GitDiscard(_)
+            | UiCmd::GitSwitch(_)
+            | UiCmd::GitNewBranch(_)
+            | UiCmd::GitNewBranchCancel
+            | UiCmd::GitDiff(..)
+            | UiCmd::GitRun(_)
+            | UiCmd::GitCommit => self.apply_git(ctx, cmd, area),
             UiCmd::ToggleIdeas | UiCmd::NewIdea => match self.active {
                 Some(i) => {
                     let ws = &mut self.workspaces[i];
@@ -583,6 +621,7 @@ impl App {
                     if ws.ideas.open {
                         ws.guard.open = false;
                         ws.memory.open = false;
+                        ws.git.open = false;
                     }
                 }
                 None => self.general.focus = true,
@@ -603,6 +642,7 @@ impl App {
                         if ws.memory.open {
                             ws.guard.open = false;
                             ws.ideas.open = false;
+                            ws.git.open = false;
                         }
                     }
                     UiCmd::NewNote => {
@@ -611,6 +651,7 @@ impl App {
                         ws.memory.dirty = true;
                         ws.guard.open = false;
                         ws.ideas.open = false;
+                        ws.git.open = false;
                         ws.memory.form = Some(NoteForm {
                             kind: "decision".into(),
                             ..Default::default()
@@ -709,6 +750,7 @@ impl App {
                         if ws.guard.open {
                             ws.memory.open = false;
                             ws.ideas.open = false;
+                            ws.git.open = false;
                         }
                     }
                     UiCmd::GuardStage(stage) => ws.guard.stage = stage,
@@ -1019,14 +1061,16 @@ impl eframe::App for App {
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).
         if let Some(i) = self.active {
             let ws = &mut self.workspaces[i];
-            if ws.guard.open || ws.memory.open || ws.ideas.open {
+            if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open {
                 let (rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
                 if ws.guard.open {
                     Self::guard_ui(ws, ui, drawer, &mut cmds);
                 } else if ws.memory.open {
                     Self::memory_ui(ws, ui, drawer, &mut cmds);
-                } else {
+                } else if ws.ideas.open {
                     Self::ideas_ui(ws, Some(i), ui, drawer, &mut cmds);
+                } else {
+                    Self::git_ui(ws, ui, drawer, &mut cmds);
                 }
                 area = rest;
             }
@@ -1044,6 +1088,7 @@ impl eframe::App for App {
 
         self.guard_tick(&ctx);
         self.ideas_tick();
+        self.git_tick(&ctx);
         for ws in &mut self.workspaces {
             ws.refresh_attention();
         }

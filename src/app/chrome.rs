@@ -302,6 +302,9 @@ impl App {
         let ws = &mut self.workspaces[i];
         let right_start = ui.max_rect().max.x;
         let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if theme::icon_toggle(ui, icon::GIT_BRANCH, "Git (⌘⇧G)", ws.git.open).clicked() {
+                cmds.push(UiCmd::ToggleGit);
+            }
             if theme::icon_toggle(
                 ui,
                 icon::BRAIN,

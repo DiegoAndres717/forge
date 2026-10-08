@@ -5,6 +5,7 @@ pub mod candidate;
 pub mod danger;
 pub mod events;
 pub mod evidence;
+pub mod git;
 pub mod guard;
 pub mod hooks;
 pub mod i18n;

@@ -164,6 +164,30 @@ pub enum Attention {
     Event(String),
 }
 
+/// Datos del panel de Git (se leen en segundo plano).
+pub type GitData = (
+    forge_core::git::Status,
+    Vec<String>,
+    Vec<forge_core::git::Commit>,
+);
+
+/// Panel de Git (⌘⇧G).
+#[derive(Default)]
+pub struct GitView {
+    pub open: bool,
+    pub data: Option<GitData>,
+    pub error: Option<String>,
+    /// Mensaje del commit en preparación.
+    pub message: String,
+    /// Nombre de la rama nueva (formulario abierto).
+    pub new_branch: Option<String>,
+    /// Archivo cuyo descarte espera confirmación.
+    pub confirm_discard: Option<forge_core::git::FileChange>,
+    pub loading: Option<std::sync::mpsc::Receiver<Result<GitData, String>>>,
+    pub loaded: Option<Instant>,
+    pub dirty: bool,
+}
+
 /// Lista de ideas (de un proyecto, o la general en Inicio).
 #[derive(Default)]
 pub struct IdeasView {
@@ -219,6 +243,7 @@ pub struct Workspace {
     pub guard: GuardView,
     pub memory: MemoryView,
     pub ideas: IdeasView,
+    pub git: GitView,
     panels: HashMap<PanelId, Panel>,
     layout: Node,
     focus: PanelId,
@@ -268,6 +293,10 @@ impl Workspace {
                 ..Default::default()
             },
             ideas: IdeasView {
+                dirty: true,
+                ..Default::default()
+            },
+            git: GitView {
                 dirty: true,
                 ..Default::default()
             },

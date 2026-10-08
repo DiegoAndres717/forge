@@ -203,6 +203,27 @@ impl App {
                 } else {
                     String::new()
                 };
+                let changes =
+                    ws.git
+                        .data
+                        .as_ref()
+                        .map_or(String::new(), |(s, _, _)| match s.files.len() {
+                            0 => String::new(),
+                            n => n.to_string(),
+                        });
+                if theme::row(
+                    ui,
+                    icon::GIT_BRANCH,
+                    theme::ORANGE,
+                    "Git",
+                    &changes,
+                    ws.git.open,
+                )
+                .on_hover_text("⌘⇧G")
+                .clicked()
+                {
+                    cmds.push(UiCmd::ToggleGit);
+                }
                 let open = if ws.ideas.open_count > 0 {
                     ws.ideas.open_count.to_string()
                 } else {

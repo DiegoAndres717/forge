@@ -21,15 +21,36 @@ fn agent_event_records_the_agent_message() {
             .stdin(Stdio::piped())
             .spawn()
             .unwrap();
-        child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(stdin.as_bytes())
+            .unwrap();
         assert!(child.wait().unwrap().success(), "el hook nunca falla");
     };
     // Lo que manda Claude Code en su hook Notification (JSON por stdin).
-    run("waiting", r#"{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}"#);
+    run(
+        "waiting",
+        r#"{"hook_event_name":"Notification","message":"Claude needs your permission to use Bash"}"#,
+    );
     run("stop", "{}");
     let events = forge_core::events::drain(&dir);
     let texts: Vec<&str> = events.iter().map(|e| e.text.as_str()).collect();
-    assert_eq!(texts, ["Claude needs your permission to use Bash", "Claude Code terminó"]);
-    assert!(events.iter().all(|e| e.project == std::path::Path::new("/p/bovinapp")));
-    assert!(forge_core::events::drain(&dir).is_empty(), "se borran al leerlos");
+    assert_eq!(
+        texts,
+        [
+            "Claude needs your permission to use Bash",
+            "Claude Code terminó"
+        ]
+    );
+    assert!(
+        events
+            .iter()
+            .all(|e| e.project == std::path::Path::new("/p/bovinapp"))
+    );
+    assert!(
+        forge_core::events::drain(&dir).is_empty(),
+        "se borran al leerlos"
+    );
 }

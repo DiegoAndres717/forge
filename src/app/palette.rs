@@ -422,6 +422,26 @@ impl App {
             }
         }
 
+        if self.active.is_some() {
+            add(
+                icon::GIT_BRANCH,
+                tr!("Git: mostrar u ocultar").into(),
+                "⌘⇧G",
+                cmd(UiCmd::ToggleGit),
+            );
+            add(
+                icon::ARROW_UP,
+                "Git: push".into(),
+                "",
+                cmd(UiCmd::GitRun("git push")),
+            );
+            add(
+                icon::ARROW_DOWN,
+                "Git: pull".into(),
+                "",
+                cmd(UiCmd::GitRun("git pull")),
+            );
+        }
         // Ideas: del proyecto activo o, en Inicio, la lista general.
         add(
             icon::LIGHTBULB,

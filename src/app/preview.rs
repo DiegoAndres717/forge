@@ -295,6 +295,14 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].ideas.dirty = true;
     settle(&mut harness);
     save(&mut harness, &out, "8-ideas");
+    // Panel de Git con un cambio sin preparar.
+    std::fs::write(project.join("README.md"), "# Bovinapp\n\nControl de vacunación.\n").unwrap();
+    harness.state_mut().workspaces[0].ideas.open = false;
+    harness.state_mut().workspaces[0].git.open = true;
+    harness.state_mut().workspaces[0].git.dirty = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "12-git");
+    harness.state_mut().workspaces[0].git.open = false;
     harness.state_mut().settings_open = true;
     settle(&mut harness);
     save(&mut harness, &out, "11-ajustes");

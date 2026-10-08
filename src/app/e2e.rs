@@ -568,3 +568,48 @@ fn an_agent_that_only_redraws_does_not_raise_an_alert() {
     }
     assert_eq!(ws(h.state()).attention(), None);
 }
+
+#[test]
+fn git_panel_stages_unstages_and_commits() {
+    let mut h = app(project("git"));
+    h.key_press_modifiers(CMD_SHIFT, Key::G);
+    h.run_steps(2);
+    assert!(ws(h.state()).git.open, "⌘⇧G abre Git");
+    wait_until(&mut h, "estado de git", |a| ws(a).git.data.is_some());
+    h.run_steps(2);
+    // project() deja rules.toml y main.ts preparados.
+    h.get_by_label("PREPARADOS (2)"); // los títulos de sección van en mayúsculas
+    h.get_by_label("Quitar todo").click();
+    h.run_steps(2);
+    wait_until(&mut h, "todo sin preparar", |a| {
+        ws(a)
+            .git
+            .data
+            .as_ref()
+            .is_some_and(|(s, _, _)| s.files.iter().all(|f| !f.is_staged()))
+    });
+    h.run_steps(2);
+    h.get_by_label("Preparar todo").click();
+    h.run_steps(2);
+    wait_until(&mut h, "todo preparado", |a| {
+        ws(a)
+            .git
+            .data
+            .as_ref()
+            .is_some_and(|(s, _, _)| s.files.iter().all(|f| f.is_staged()))
+    });
+    h.run_steps(2);
+    let message = h.get_by(|n| n.placeholder() == Some("Mensaje del commit"));
+    message.focus();
+    message.type_text("Primer commit");
+    h.run_steps(2);
+    let panels = ws(h.state()).panel_count();
+    h.get_by_label_contains("Commit (2)").click();
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).panel_count(),
+        panels + 1,
+        "git commit corre en un panel"
+    );
+    assert!(ws(h.state()).git.message.is_empty());
+}
