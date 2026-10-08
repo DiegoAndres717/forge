@@ -18,6 +18,7 @@ pub mod project;
 pub mod reviewers;
 pub mod router;
 pub mod store;
+pub mod updates;
 
 /// Quita secuencias de escape ANSI (CSI y OSC) de la salida de un comando.
 pub fn strip_ansi(s: &str) -> String {

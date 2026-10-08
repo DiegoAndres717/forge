@@ -264,6 +264,8 @@ pub struct App {
     traffic_end: f32,
     /// Última lectura de la carpeta de eventos de los agentes.
     events_checked: Option<Instant>,
+    /// Versión nueva publicada: (etiqueta, página para descargarla).
+    update: Arc<Mutex<Option<(String, String)>>>,
 }
 
 impl App {
@@ -278,6 +280,7 @@ impl App {
             .and_then(|p| Store::open(&p));
         let mut app = Self::with_store(ctx, settings, error, open, store);
         app.notifications = true; // solo la app real (los tests no notifican)
+        app.check_updates(ctx);
         app.notifications_enabled =
             app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
         app
@@ -306,6 +309,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
             palette: None,
+            update: Arc::default(),
             events_checked: None,
             traffic_end: 72.0,
             toolbar_right: 0.0,

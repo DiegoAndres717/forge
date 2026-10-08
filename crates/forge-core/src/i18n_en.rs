@@ -1134,4 +1134,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Descartar cambios", "Discard changes"),
     ("Git: mostrar u ocultar", "Git: show or hide"),
     ("sesión anterior", "previous session"),
+    (
+        "{p0}  Forge {tag} disponible",
+        "{p0}  Forge {tag} available",
+    ),
+    ("Descargar la versión nueva", "Download the new version"),
 ];
