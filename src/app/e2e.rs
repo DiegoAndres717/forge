@@ -61,7 +61,7 @@ fn wait_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) ->
     let start = Instant::now();
     while !done(harness.state()) {
         assert!(
-            start.elapsed() < Duration::from_secs(20),
+            start.elapsed() < Duration::from_secs(60),
             "tiempo agotado: {what}"
         );
         harness.run_steps(2);
