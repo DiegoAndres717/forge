@@ -394,7 +394,7 @@ mod tests {
         let list = server
             .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 5);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 9);
 
         let call = |server: &mut Server, id: i64, name: &str, args: Value| {
             server.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()
