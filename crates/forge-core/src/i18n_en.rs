@@ -120,12 +120,12 @@ pub const EN: &[(&str, &str)] = &[
         "Memory used by this project (terminals, agents and processes)",
     ),
     (
-        "⌘K Acciones    Ctrl+Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente",
-        "⌘K Actions    Ctrl+Tab Recent    ⌘T Terminal    ⌘D Split    ⌘⇧D Down    ⌘⌥← → Focus    ⌘G Guard    ⌘⇧M Memory    ⌘⇧A Agent",
+        "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente",
+        "⌘K Actions    ⌃Tab Recent    ⌘T Terminal    ⌘D Split    ⌘⇧D Down    ⌘⌥← → Focus    ⌘G Guard    ⌘⇧M Memory    ⌘⇧A Agent",
     ),
     (
-        "⌘O Abrir carpeta    ⌘1…9 Proyectos    Ctrl+Tab Reciente    ⌘B Barra lateral",
-        "⌘O Open folder    ⌘1…9 Projects    Ctrl+Tab Recent    ⌘B Sidebar",
+        "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral",
+        "⌘O Open folder    ⌘1…9 Projects    ⌃Tab Recent    ⌘B Sidebar",
     ),
     ("Clic para cerrar", "Click to close"),
     ("en espera", "waiting"),

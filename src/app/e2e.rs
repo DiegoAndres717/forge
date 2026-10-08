@@ -419,7 +419,7 @@ fn only_the_active_project_starts_and_the_rest_sleep() {
     assert!(!h.state().workspaces[1].is_dormant());
     assert_eq!(h.state().workspaces[1].panel_count(), 1);
 
-    // Ctrl+Tab vuelve al anterior.
+    // ⌃Tab vuelve al anterior.
     h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
     h.run_steps(3);
     assert_eq!(h.state().active, Some(0));

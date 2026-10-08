@@ -71,7 +71,7 @@ pub enum Action {
     ToggleMemory,
     ToggleIdeas,
     Palette,
-    /// Ctrl+Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
+    /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
     NextRecent,
 }
 
@@ -216,9 +216,9 @@ pub struct App {
     approval_seen: Option<String>,
     /// Ideas generales (sin proyecto), en Inicio.
     general: crate::workspace::IdeasView,
-    /// Proyectos de más a menos recientemente usados (Ctrl+Tab).
+    /// Proyectos de más a menos recientemente usados (⌃Tab).
     mru: Vec<PathBuf>,
-    /// Último Ctrl+Tab: (posición en `mru`, cuándo) para seguir retrocediendo si se repite.
+    /// Último ⌃Tab: (posición en `mru`, cuándo) para seguir retrocediendo si se repite.
     mru_cycle: Option<(usize, Instant)>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,

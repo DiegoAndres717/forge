@@ -322,10 +322,10 @@ impl App {
         );
         let hints = if self.active.is_some() {
             tr!(
-                "⌘K Acciones    Ctrl+Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
+                "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
             )
         } else {
-            tr!("⌘O Abrir carpeta    ⌘1…9 Proyectos    Ctrl+Tab Reciente    ⌘B Barra lateral")
+            tr!("⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral")
         };
         ui.painter().text(
             egui::pos2(rect.min.x + 12.0, rect.center().y),
