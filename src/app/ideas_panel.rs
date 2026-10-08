@@ -76,6 +76,10 @@ impl App {
         let input = ui.add(
             egui::TextEdit::singleline(&mut view.input)
                 .hint_text(tr!("Nueva idea… (Enter para anotar)"))
+                .font(FontId::proportional(13.5))
+                // Campo cómodo: más alto y con aire, no la línea mínima por defecto.
+                .margin(egui::Margin::symmetric(10, 8))
+                .min_size(Vec2::new(0.0, 34.0))
                 .desired_width(f32::INFINITY),
         );
         if std::mem::take(&mut view.focus) {

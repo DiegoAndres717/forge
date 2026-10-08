@@ -1544,20 +1544,21 @@ mod tests {
         assert_eq!(t.grid().display_offset(), 0);
     }
 
-    /// Busca en pantalla e historial: `seq 1 300` contiene "42" en 42, 142 y 242.
+    /// Busca en pantalla e historial (un marcador propio: la salida del shell del usuario,
+    /// como fastfetch, puede contener cualquier otra cosa).
     #[test]
     fn search_finds_matches_in_scrollback() {
         let ctx = egui::Context::default();
         let term = Terminal::exec(
             &ctx,
             Path::new("/tmp"),
-            "seq 1 300; sleep 5",
+            "for i in 1 2 3; do seq 1 100; echo marca-xq; done; sleep 5",
             &HashMap::new(),
         )
         .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut search = Search {
-            query: "42".into(),
+            query: "MARCA-XQ".into(), // sin distinguir mayúsculas
             ..Default::default()
         };
         loop {

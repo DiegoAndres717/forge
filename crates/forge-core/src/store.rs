@@ -475,8 +475,8 @@ pub fn ago_precise(timestamp: i64) -> String {
 /// "hoy", "ayer", "hace 3 días"...
 pub fn ago(timestamp: i64) -> String {
     match (now() - timestamp) / 86_400 {
-        ..=0 => "hoy".into(),
-        1 => "ayer".into(),
+        ..=0 => crate::tr!("hoy").into(),
+        1 => crate::tr!("ayer").into(),
         days @ 2..=30 => tr!("hace {days} días", days = days),
         days => tr!("hace {p0} meses", p0 = days / 30),
     }

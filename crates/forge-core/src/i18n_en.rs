@@ -1165,4 +1165,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Saltar", "Skip"),
     ("Bienvenida", "Welcome"),
     ("Abrir proyecto…", "Open project…"),
+    ("hoy", "today"),
+    ("ayer", "yesterday"),
 ];
