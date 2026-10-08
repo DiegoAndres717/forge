@@ -2,6 +2,7 @@
 // en `approvals/` y esperan; aquí se vigila esa carpeta y se pregunta al usuario.
 use super::*;
 use forge_core::danger::{self, Request};
+use forge_core::tr;
 
 impl App {
     /// Vigila la carpeta de solicitudes en segundo plano (repinta al cambiar).
@@ -63,7 +64,7 @@ impl App {
         }
         if let Some(allow) = decision {
             if let Err(e) = danger::answer(&dir, &request.id, allow) {
-                self.error = Some(format!("no se pudo responder la autorización: {e}"));
+                self.error = Some(tr!("no se pudo responder la autorización: {e}", e = e));
             }
             if let Ok(mut p) = self.approvals.lock() {
                 p.retain(|r| r.id != request.id);
@@ -72,11 +73,15 @@ impl App {
     }
 
     fn request_ui(ui: &mut egui::Ui, request: &Request, decision: &mut Option<bool>) {
-        let who = request.origin.as_deref().unwrap_or("Una terminal de Forge");
+        let who = request
+            .origin
+            .as_deref()
+            .unwrap_or(tr!("Una terminal de Forge"));
         ui.label(
-            RichText::new(format!(
-                "{}  {who} quiere ejecutar un comando peligroso",
-                icon::WARNING
+            RichText::new(tr!(
+                "{p0}  {who} quiere ejecutar un comando peligroso",
+                p0 = icon::WARNING,
+                who = who
             ))
             .size(15.0)
             .strong()
@@ -98,16 +103,16 @@ impl App {
         ui.add_space(4.0);
         ui.label(RichText::new(capitalize(&request.reason)).color(theme::TEXT_2));
         ui.label(
-            RichText::new(format!("En {}", tilde(&request.cwd)))
+            RichText::new(tr!("En {p0}", p0 = tilde(&request.cwd)))
                 .size(11.5)
                 .color(theme::TEXT_3),
         );
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            if theme::primary(ui, "Denegar").clicked() {
+            if theme::primary(ui, tr!("Denegar")).clicked() {
                 *decision = Some(false);
             }
-            if theme::secondary(ui, "Permitir una vez").clicked() {
+            if theme::secondary(ui, tr!("Permitir una vez")).clicked() {
                 *decision = Some(true);
             }
         });

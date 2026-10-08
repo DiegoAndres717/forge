@@ -1,5 +1,6 @@
 // Ejecución: checks en paralelo, evidencias, revisión con IA y revisores.
 use super::*;
+use crate::tr;
 
 // ---------------------------------------------------------------- ejecución
 
@@ -68,13 +69,13 @@ pub(crate) fn unix(t: SystemTime) -> i64 {
 impl GuardRun {
     fn check_status(c: &CheckRun) -> String {
         match &c.state {
-            CheckState::Waiting => "en espera".into(),
-            CheckState::Running => "ejecutándose".into(),
-            CheckState::Passed if c.reused.is_some() => "pasó (evidencia reutilizada)".into(),
-            CheckState::Passed => "pasó".into(),
-            CheckState::Failed(code) => format!("código {code}"),
+            CheckState::Waiting => tr!("en espera").into(),
+            CheckState::Running => tr!("ejecutándose").into(),
+            CheckState::Passed if c.reused.is_some() => tr!("pasó (evidencia reutilizada)").into(),
+            CheckState::Passed => tr!("pasó").into(),
+            CheckState::Failed(code) => tr!("código {code}", code = code),
             CheckState::TimedOut => format!("tiempo agotado ({} s)", c.check.timeout_seconds),
-            CheckState::Cancelled => "cancelado".into(),
+            CheckState::Cancelled => tr!("cancelado").into(),
             CheckState::Error(e) => e.clone(),
         }
     }
@@ -361,7 +362,7 @@ pub fn run(
             let (active, skipped) =
                 crate::reviewers::activate(&options.reviewers, &files, &router::assess(&files, 0));
             for a in &active {
-                let details = vec![format!("archivos de su área: {}", a.files.join(", "))];
+                let details = vec![tr!("archivos de su área: {p0}", p0 = a.files.join(", "))];
                 items.push(item(
                     format!("reviewer:{}", a.reviewer.id),
                     Level::Pending,
@@ -370,9 +371,9 @@ pub fn run(
                 ));
             }
             if !skipped.is_empty() {
-                let label = format!(
-                    "{} revisores no activados (el diff no toca su área)",
-                    skipped.len()
+                let label = tr!(
+                    "{p0} revisores no activados (el diff no toca su área)",
+                    p0 = skipped.len()
                 );
                 items.push(item(
                     "reviewers-skipped",
@@ -443,7 +444,9 @@ pub fn run(
         let snapshot = match (frozen.isolated && !pending.is_empty())
             .then(|| Snapshot::create(&repo, &frozen.tree, &frozen.head))
         {
-            Some(Err(e)) => return fail(format!("no se pudo crear la copia del candidato: {e}")),
+            Some(Err(e)) => {
+                return fail(tr!("no se pudo crear la copia del candidato: {e}", e = e));
+            }
             Some(Ok(snap)) => Some(snap),
             None => None,
         };
@@ -570,8 +573,9 @@ impl AiRun<'_> {
         if blocked {
             let mut st = s.lock().unwrap();
             for (n, _) in &wanted {
-                st.items[*n].details =
-                    vec!["en espera: primero hay que resolver los bloqueos deterministas".into()];
+                st.items[*n].details = vec![
+                    tr!("en espera: primero hay que resolver los bloqueos deterministas").into(),
+                ];
             }
             return;
         }
@@ -595,9 +599,9 @@ impl AiRun<'_> {
         {
             let security = rule == "security-review";
             let title = if security {
-                "Revisión de seguridad"
+                tr!("Revisión de seguridad")
             } else {
-                "Revisión de IA"
+                tr!("Revisión de IA")
             };
             // Firma de la ruta: si cambia el perfil o los modelos, la aprobación previa no vale.
             let signature = format!(
@@ -618,13 +622,17 @@ impl AiRun<'_> {
             {
                 let mut st = s.lock().unwrap();
                 st.items[n].level = Level::Pass;
-                st.items[n].label = format!("{title}: aprobada (evidencia del mismo candidato)");
+                st.items[n].label = tr!(
+                    "{title}: aprobada (evidencia del mismo candidato)",
+                    title = title
+                );
                 st.items[n].details = vec![e.output.clone()];
                 continue;
             }
             let started = Instant::now();
             let on_step = |step: &str| {
-                s.lock().unwrap().items[n].label = format!("{title} · {step}…");
+                s.lock().unwrap().items[n].label =
+                    tr!("{title} · {step}…", title = title, step = step);
                 (self.notify)();
             };
             let outcome = router::review(
@@ -649,7 +657,7 @@ impl AiRun<'_> {
                 .extend(outcome.steps.iter().filter_map(|step| step.usage.clone()));
             let (level, word) = match outcome.verdict {
                 AiVerdict::Approve => (Level::Pass, "aprobada"),
-                AiVerdict::Changes => (Level::Warn, "pide cambios"),
+                AiVerdict::Changes => (Level::Warn, tr!("pide cambios")),
                 AiVerdict::Block => (Level::Block, "bloquea"),
                 AiVerdict::Incomplete => (Level::Pending, "incompleta"),
             };
@@ -723,17 +731,17 @@ impl AiRun<'_> {
             match reused {
                 Some(e) => {
                     st.items[n].level = Level::Pass;
-                    st.items[n].label = format!(
-                        "{}: aprueba (evidencia del mismo candidato)",
-                        a.reviewer.name
+                    st.items[n].label = tr!(
+                        "{p0}: aprueba (evidencia del mismo candidato)",
+                        p0 = a.reviewer.name
                     );
                     st.items[n].details = vec![e.output.clone()];
                 }
                 None => {
-                    st.items[n].label = format!(
-                        "{} · revisando {} archivos…",
-                        a.reviewer.name,
-                        a.files.len()
+                    st.items[n].label = tr!(
+                        "{p0} · revisando {p1} archivos…",
+                        p0 = a.reviewer.name,
+                        p1 = a.files.len()
                     );
                     pending.push((n, a));
                 }
@@ -767,12 +775,12 @@ impl AiRun<'_> {
                 (AiVerdict::Approve, _) => (Level::Pass, "aprueba"),
                 (AiVerdict::Block, true) => (Level::Block, "bloquea"),
                 (AiVerdict::Block, false) => (Level::Warn, "objeta (informativo)"),
-                (AiVerdict::Changes, true) => (Level::Warn, "pide cambios"),
+                (AiVerdict::Changes, true) => (Level::Warn, tr!("pide cambios")),
                 (AiVerdict::Changes, false) => (Level::Info, "comenta"),
                 (AiVerdict::Incomplete, true) => (Level::Pending, "incompleto"),
-                (AiVerdict::Incomplete, false) => (Level::Info, "sin respuesta"),
+                (AiVerdict::Incomplete, false) => (Level::Info, tr!("sin respuesta")),
             };
-            let mut details = vec![format!("archivos: {}", a.files.join(", "))];
+            let mut details = vec![tr!("archivos: {p0}", p0 = a.files.join(", "))];
             details.extend(outcome.details());
             let level = match st.exception_for(&rule).cloned() {
                 Some(e) if matches!(level, Level::Block | Level::Warn | Level::Pending) => {
@@ -843,11 +851,15 @@ pub(crate) fn compare_reviewers(
     if approves && objects {
         (
             Level::Warn,
-            "Los revisores no coinciden: revisa sus objeciones",
+            tr!("Los revisores no coinciden: revisa sus objeciones"),
             lines,
         )
     } else {
-        (Level::Info, "Comparación de revisores: coinciden", lines)
+        (
+            Level::Info,
+            tr!("Comparación de revisores: coinciden"),
+            lines,
+        )
     }
 }
 

@@ -1,5 +1,6 @@
 // Patrones de rutas estilo gitignore y diff de Git por etapa.
 use super::*;
+use crate::tr;
 
 // ---------------------------------------------------------------- patrones de rutas
 
@@ -86,7 +87,7 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
         .args(args)
         .stdin(Stdio::null())
         .output()
-        .map_err(|e| format!("no se pudo ejecutar git: {e}"))?;
+        .map_err(|e| tr!("no se pudo ejecutar git: {e}", e = e))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -101,7 +102,7 @@ pub(crate) fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
 pub fn repo_root(path: &Path) -> Result<PathBuf, String> {
     git(path, &["rev-parse", "--show-toplevel"])
         .map(|s| PathBuf::from(s.trim()))
-        .map_err(|_| "no es un repositorio Git".to_string())
+        .map_err(|_| tr!("no es un repositorio Git").to_string())
 }
 
 pub(crate) fn has_head(repo: &Path) -> bool {
@@ -121,7 +122,7 @@ pub(crate) fn default_branch(repo: &Path) -> Result<String, String> {
             return Ok(candidate.to_string());
         }
     }
-    Err("no se encontró la rama base (configura `base` en [pull_request])".into())
+    Err(tr!("no se encontró la rama base (configura `base` en [pull_request])").into())
 }
 
 /// `push_range`: rango exacto que se va a subir (lo da el hook pre-push).
@@ -139,12 +140,13 @@ pub fn collect_diff(
                 &["diff", "--cached", "--numstat", "-z", "--no-renames"],
             )?;
             if !staged.is_empty() {
-                diff.description = "cambios preparados (git add)".into();
+                diff.description = tr!("cambios preparados (git add)").into();
                 diff.command = "git diff --cached".into();
                 vec!["--cached".into()]
             } else {
                 diff.unstaged = true;
-                diff.description = "nada preparado: se evalúan todos los cambios sin commit".into();
+                diff.description =
+                    tr!("nada preparado: se evalúan todos los cambios sin commit").into();
                 diff.command = "git status --short && git diff HEAD".into();
                 let base = if has_head(repo) { "HEAD" } else { EMPTY_TREE };
                 vec![base.into()]
@@ -152,13 +154,13 @@ pub fn collect_diff(
         }
         Stage::Push if push_range.is_some() => {
             let range = push_range.unwrap_or_default();
-            diff.description = format!("commits a subir ({range})");
+            diff.description = tr!("commits a subir ({range})", range = range);
             diff.command = format!("git log --oneline {range} && git diff {range}");
             vec![range.to_string()]
         }
         Stage::Push | Stage::PullRequest => {
             if !has_head(repo) {
-                return Err("el repositorio no tiene commits todavía".into());
+                return Err(tr!("el repositorio no tiene commits todavía").into());
             }
             let base = match (stage, &rules.pull_request.base) {
                 (Stage::PullRequest, Some(base)) => base.clone(),
@@ -177,8 +179,8 @@ pub fn collect_diff(
                 _ => default_branch(repo)?,
             };
             diff.description = match stage {
-                Stage::Push => format!("commits sin subir (vs {base})"),
-                _ => format!("cambios de la rama vs {base}"),
+                Stage::Push => tr!("commits sin subir (vs {base})", base = base),
+                _ => tr!("cambios de la rama vs {base}", base = base),
             };
             diff.command = format!("git diff {base}...HEAD");
             vec![format!("{base}...HEAD")]
@@ -210,7 +212,8 @@ pub fn collect_diff(
         let untracked = git(repo, &["ls-files", "--others", "--exclude-standard", "-z"])?;
         for path in untracked.split('\0').filter(|p| !p.is_empty()) {
             let (lines, binary) = read_text(&repo.join(path));
-            hasher.update(format!("\0nuevo:{path}\0{}", lines.join("\n")).as_bytes());
+            hasher
+                .update(tr!("\0nuevo:{path}\0{p0}", p0 = lines.join("\n"), path = path).as_bytes());
             diff.files.push(FileChange {
                 path: path.into(),
                 added: lines.len(),

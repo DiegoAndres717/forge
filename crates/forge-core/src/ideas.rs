@@ -1,5 +1,6 @@
 // Ideas: lista de pendientes por proyecto (o general, sin proyecto) que el usuario y los
 // agentes leen, escriben y tachan. Vive en la base de Forge, nunca en el repositorio.
+use crate::tr;
 use std::path::Path;
 
 use rusqlite::{Connection, params};
@@ -65,8 +66,9 @@ fn check_status(status: &str) -> Result<(), String> {
     if STATUSES.iter().any(|(id, _)| *id == status) {
         Ok(())
     } else {
-        Err(format!(
-            "estado desconocido \"{status}\" (válidos: pending, doing, done)"
+        Err(tr!(
+            "estado desconocido \"{status}\" (válidos: pending, doing, done)",
+            status = status
         ))
     }
 }
@@ -80,7 +82,7 @@ impl Store {
         source: &str,
     ) -> Result<i64, String> {
         if title.trim().is_empty() {
-            return Err("la idea necesita un título".into());
+            return Err(tr!("la idea necesita un título").into());
         }
         let t = now();
         self.conn
@@ -152,7 +154,7 @@ impl Store {
             check_status(status)?;
         }
         if title.is_some_and(|t| t.trim().is_empty()) {
-            return Err("la idea necesita un título".into());
+            return Err(tr!("la idea necesita un título").into());
         }
         let changed = self
             .conn

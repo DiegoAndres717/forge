@@ -1,5 +1,6 @@
 // Panel de Guard (⌘G): etapas, controles, excepciones, historial y su sondeo.
 use super::*;
+use forge_core::tr;
 
 pub(super) fn level_icon(level: guard::Level) -> (&'static str, Color32) {
     match level {
@@ -51,34 +52,41 @@ pub(super) fn check_status(
         guard::Severity::Warning => (icon::WARNING_CIRCLE, theme::YELLOW),
     };
     let (glyph, color, status) = match &c.state {
-        guard::CheckState::Waiting => (icon::CIRCLE, theme::TEXT_4, "en espera".to_string()),
+        guard::CheckState::Waiting => (icon::CIRCLE, theme::TEXT_4, tr!("en espera").to_string()),
         guard::CheckState::Running => {
             let secs = c.started.map_or(0, |s| s.elapsed().as_secs());
             (
                 icon::CIRCLE_NOTCH,
                 theme::ACCENT,
-                format!("ejecutándose · {secs} s"),
+                tr!("ejecutándose · {secs} s", secs = secs),
             )
         }
         guard::CheckState::Passed => match c.reused {
             Some(at) => (
                 icon::CHECK_CIRCLE,
                 theme::GREEN,
-                format!("evidencia del mismo candidato ({})", store::ago_precise(at)),
+                tr!(
+                    "evidencia del mismo candidato ({p0})",
+                    p0 = store::ago_precise(at)
+                ),
             ),
             None => (icon::CHECK_CIRCLE, theme::GREEN, seconds(c.duration)),
         },
         guard::CheckState::Failed(code) => (
             bad.0,
             bad.1,
-            format!("código {code} · {}", seconds(c.duration)),
+            tr!(
+                "código {code} · {p0}",
+                p0 = seconds(c.duration),
+                code = code
+            ),
         ),
         guard::CheckState::TimedOut => (
             bad.0,
             bad.1,
             format!("tiempo agotado ({} s)", c.check.timeout_seconds),
         ),
-        guard::CheckState::Cancelled => (icon::CIRCLE, theme::TEXT_4, "cancelado".to_string()),
+        guard::CheckState::Cancelled => (icon::CIRCLE, theme::TEXT_4, tr!("cancelado").to_string()),
         guard::CheckState::Error(e) => (bad.0, bad.1, e.clone()),
     };
     match exception.filter(|_| level == Some(guard::Level::Excepted)) {
@@ -135,18 +143,18 @@ pub(super) fn verdict_text(verdict: guard::Verdict, stage: Stage) -> (String, Co
     let target = match stage {
         Stage::Commit => "commit",
         Stage::Push => "push",
-        Stage::PullRequest => "pull request",
+        Stage::PullRequest => tr!("pull request"),
     };
     match verdict {
-        guard::Verdict::Ready => (format!("listo para {target}"), theme::GREEN),
+        guard::Verdict::Ready => (tr!("listo para {target}", target = target), theme::GREEN),
         guard::Verdict::Warnings => (
-            format!("listo para {target} con advertencias"),
+            tr!("listo para {target} con advertencias", target = target),
             theme::YELLOW,
         ),
-        guard::Verdict::Blocked => ("bloqueado".into(), theme::RED),
-        guard::Verdict::Running => ("revisando…".into(), theme::ACCENT),
-        guard::Verdict::Pending => ("pendiente de revisión".into(), theme::TEXT_3),
-        guard::Verdict::NothingToCheck => ("sin cambios".into(), theme::TEXT_3),
+        guard::Verdict::Blocked => (tr!("bloqueado").into(), theme::RED),
+        guard::Verdict::Running => (tr!("revisando…").into(), theme::ACCENT),
+        guard::Verdict::Pending => (tr!("pendiente de revisión").into(), theme::TEXT_3),
+        guard::Verdict::NothingToCheck => (tr!("sin cambios").into(), theme::TEXT_3),
     }
 }
 
@@ -186,12 +194,12 @@ pub(super) fn export_report(
 /// Estado corto del Guard para barras y listas.
 pub(super) fn verdict_short(verdict: guard::Verdict) -> (String, Color32) {
     match verdict {
-        guard::Verdict::Ready => ("Listo".into(), theme::GREEN),
-        guard::Verdict::Warnings => ("Con avisos".into(), theme::YELLOW),
-        guard::Verdict::Blocked => ("Bloqueado".into(), theme::RED),
-        guard::Verdict::Running => ("Revisando…".into(), theme::ACCENT),
-        guard::Verdict::Pending => ("Pendiente".into(), theme::TEXT_3),
-        guard::Verdict::NothingToCheck => ("Sin cambios".into(), theme::TEXT_3),
+        guard::Verdict::Ready => (tr!("Listo").into(), theme::GREEN),
+        guard::Verdict::Warnings => (tr!("Con avisos").into(), theme::YELLOW),
+        guard::Verdict::Blocked => (tr!("Bloqueado").into(), theme::RED),
+        guard::Verdict::Running => (tr!("Revisando…").into(), theme::ACCENT),
+        guard::Verdict::Pending => (tr!("Pendiente").into(), theme::TEXT_3),
+        guard::Verdict::NothingToCheck => (tr!("Sin cambios").into(), theme::TEXT_3),
     }
 }
 
@@ -326,7 +334,7 @@ impl App {
                     .color(theme::TEXT_3),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::icon_button(ui, icon::X, "Cerrar (⌘G)").clicked() {
+                if theme::icon_button(ui, icon::X, tr!("Cerrar (⌘G)")).clicked() {
                     cmds.push(UiCmd::ToggleGuard);
                 }
             });
@@ -345,9 +353,9 @@ impl App {
         // Resumen y acciones.
         theme::card(&mut ui, |ui| {
             let Some(run) = &ws.guard.run else {
-                ui.label(RichText::new("Comprueba si el proyecto está listo con reglas deterministas: tamaño del diff, archivos prohibidos, secretos y tus checks.").color(theme::TEXT_2));
+                ui.label(RichText::new(tr!("Comprueba si el proyecto está listo con reglas deterministas: tamaño del diff, archivos prohibidos, secretos y tus checks.")).color(theme::TEXT_2));
                 ui.add_space(4.0);
-                if theme::primary(ui, format!("{}  Ejecutar", icon::PLAY)).clicked() {
+                if theme::primary(ui, tr!("{p0}  Ejecutar", p0 = icon::PLAY)).clicked() {
                     cmds.push(UiCmd::GuardRun);
                 }
                 return;
@@ -375,10 +383,12 @@ impl App {
                     let (done, total) = state.progress();
                     let ago = state.started_at.elapsed().map_or(0, |d| d.as_secs());
                     ui.label(
-                        RichText::new(format!(
-                            "{done} de {total} controles · {} · hace {}",
-                            state.stage.label(),
-                            human_secs(ago)
+                        RichText::new(tr!(
+                            "{done} de {total} controles · {p0} · hace {p1}",
+                            p0 = state.stage.label(),
+                            p1 = human_secs(ago),
+                            done = done,
+                            total = total
                         ))
                         .size(12.0)
                         .color(theme::TEXT_3),
@@ -387,10 +397,10 @@ impl App {
             });
             if ws.guard.stage != state.stage {
                 ui.label(
-                    RichText::new(format!(
-                        "Resultado de {}: pulsa Ejecutar para {}.",
-                        state.stage.label(),
-                        ws.guard.stage.label()
+                    RichText::new(tr!(
+                        "Resultado de {p0}: pulsa Ejecutar para {p1}.",
+                        p0 = state.stage.label(),
+                        p1 = ws.guard.stage.label()
                     ))
                     .size(12.0)
                     .color(theme::YELLOW),
@@ -405,9 +415,9 @@ impl App {
                     && !ws.guard.stale;
                 if can_commit {
                     let label = if state.unstaged {
-                        "Preparar todo y crear commit"
+                        tr!("Preparar todo y crear commit")
                     } else {
-                        "Crear commit"
+                        tr!("Crear commit")
                     };
                     if theme::primary(ui, format!("{}  {label}", icon::GIT_BRANCH)).clicked() {
                         cmds.push(UiCmd::GuardCommit);
@@ -419,35 +429,37 @@ impl App {
                     && !ws.guard.stale;
                 if can_pr
                     && ws.guard.pr.is_none()
-                    && theme::primary(ui, format!("{}  Crear PR", icon::GIT_PULL_REQUEST)).clicked()
+                    && theme::primary(ui, tr!("{p0}  Crear PR", p0 = icon::GIT_PULL_REQUEST))
+                        .clicked()
                 {
                     cmds.push(UiCmd::PrForm(true));
                 }
                 if running {
-                    if theme::secondary(ui, format!("{}  Cancelar", icon::STOP)).clicked() {
+                    if theme::secondary(ui, tr!("{p0}  Cancelar", p0 = icon::STOP)).clicked() {
                         cmds.push(UiCmd::GuardCancel);
                     }
                 } else if can_commit || can_pr {
-                    if theme::secondary(ui, format!("{}  Repetir", icon::ARROW_CLOCKWISE)).clicked()
+                    if theme::secondary(ui, tr!("{p0}  Repetir", p0 = icon::ARROW_CLOCKWISE))
+                        .clicked()
                     {
                         cmds.push(UiCmd::GuardRun);
                     }
-                } else if theme::primary(ui, format!("{}  Ejecutar", icon::PLAY)).clicked() {
+                } else if theme::primary(ui, tr!("{p0}  Ejecutar", p0 = icon::PLAY)).clicked() {
                     cmds.push(UiCmd::GuardRun);
                 }
-                if theme::secondary(ui, format!("{}  Ver diff", icon::GIT_DIFF)).clicked() {
+                if theme::secondary(ui, tr!("{p0}  Ver diff", p0 = icon::GIT_DIFF)).clicked() {
                     cmds.push(UiCmd::GuardDiff);
                 }
                 if state.finished()
                     && state.frozen.is_some()
-                    && theme::secondary(ui, format!("{}  Exportar", icon::EXPORT)).clicked()
+                    && theme::secondary(ui, tr!("{p0}  Exportar", p0 = icon::EXPORT)).clicked()
                 {
                     cmds.push(UiCmd::GuardExport(None));
                 }
             });
             if let Some(c) = &state.frozen {
                 let place = if c.isolated {
-                    " · checks en copia aislada"
+                    tr!(" · checks en copia aislada")
                 } else {
                     ""
                 };
@@ -461,34 +473,38 @@ impl App {
                     .monospace()
                     .color(theme::TEXT_4),
                 )
-                .on_hover_text(format!("Árbol {}\nDiff {}", c.tree, c.diff_hash));
+                .on_hover_text(tr!(
+                    "Árbol {p0}\nDiff {p1}",
+                    p0 = c.tree,
+                    p1 = c.diff_hash
+                ));
             }
         });
 
         if let Some(pr) = &mut ws.guard.pr {
             theme::card(&mut ui, |ui| {
                 ui.label(
-                    RichText::new(format!(
-                        "{}  Pull request hacia {}",
-                        icon::GIT_PULL_REQUEST,
-                        pr.base
+                    RichText::new(tr!(
+                        "{p0}  Pull request hacia {p1}",
+                        p0 = icon::GIT_PULL_REQUEST,
+                        p1 = pr.base
                     ))
                     .strong(),
                 );
                 ui.add(
                     egui::TextEdit::singleline(&mut pr.title)
-                        .hint_text("Título del PR")
+                        .hint_text(tr!("Título del PR"))
                         .desired_width(f32::INFINITY),
                 );
                 ui.add(
                     egui::TextEdit::multiline(&mut pr.body)
-                        .hint_text("Descripción")
+                        .hint_text(tr!("Descripción"))
                         .desired_rows(10)
                         .desired_width(f32::INFINITY),
                 );
-                ui.checkbox(&mut pr.draft, "Crear como borrador");
+                ui.checkbox(&mut pr.draft, tr!("Crear como borrador"));
                 ui.label(
-                    RichText::new("Se publica con gh pr create en un panel nuevo (si la rama no está subida, gh lo ofrece).")
+                    RichText::new(tr!("Se publica con gh pr create en un panel nuevo (si la rama no está subida, gh lo ofrece)."))
                         .size(11.0)
                         .color(theme::TEXT_3),
                 );
@@ -496,13 +512,13 @@ impl App {
                     if ui
                         .add_enabled(
                             !pr.title.trim().is_empty(),
-                            egui::Button::new("Crear en GitHub"),
+                            egui::Button::new(tr!("Crear en GitHub")),
                         )
                         .clicked()
                     {
                         cmds.push(UiCmd::PrCreate);
                     }
-                    if theme::secondary(ui, "Cancelar").clicked() {
+                    if theme::secondary(ui, tr!("Cancelar")).clicked() {
                         cmds.push(UiCmd::PrForm(false));
                     }
                 });
@@ -516,19 +532,19 @@ impl App {
                 .inner_margin(egui::Margin::symmetric(12, 10))
                 .show(&mut ui, |ui| {
                     ui.set_width(ui.available_width());
-                    ui.label(RichText::new(format!("{}  El proyecto cambió después de la validación", icon::WARNING_CIRCLE)).color(theme::YELLOW).strong());
-                    ui.label(RichText::new("La evidencia ya no corresponde al estado actual. Ejecuta la revisión de nuevo.").size(12.0).color(theme::TEXT_2));
+                    ui.label(RichText::new(tr!("{p0}  El proyecto cambió después de la validación", p0 = icon::WARNING_CIRCLE)).color(theme::YELLOW).strong());
+                    ui.label(RichText::new(tr!("La evidencia ya no corresponde al estado actual. Ejecuta la revisión de nuevo.")).size(12.0).color(theme::TEXT_2));
                 });
         }
         if !ws.project.path.join(".forge/rules.toml").exists() {
             ui.horizontal_wrapped(|ui| {
                 ui.label(
-                    RichText::new("Sin .forge/rules.toml: solo se analiza el diff.")
+                    RichText::new(tr!("Sin .forge/rules.toml: solo se analiza el diff."))
                         .size(12.0)
                         .color(theme::TEXT_3),
                 );
                 if ui
-                    .link(RichText::new("Crear rules.toml").size(12.0))
+                    .link(RichText::new(tr!("Crear rules.toml")).size(12.0))
                     .on_hover_text("Detecta lint, typecheck, tests y build")
                     .clicked()
                 {
@@ -541,15 +557,19 @@ impl App {
         }
         if let Some(form) = &mut ws.guard.allow {
             theme::card(&mut ui, |ui| {
-                ui.label(RichText::new(format!("Omitir: {}", form.label)).strong());
+                ui.label(RichText::new(tr!("Omitir: {p0}", p0 = form.label)).strong());
                 ui.label(
-                    RichText::new("Queda registrada con tu usuario, la fecha y el diff actual.")
-                        .size(12.0)
-                        .color(theme::TEXT_3),
+                    RichText::new(tr!(
+                        "Queda registrada con tu usuario, la fecha y el diff actual."
+                    ))
+                    .size(12.0)
+                    .color(theme::TEXT_3),
                 );
                 ui.add(
                     egui::TextEdit::multiline(&mut form.reason)
-                        .hint_text("Motivo (obligatorio), p. ej. «archivos generados por Drizzle»")
+                        .hint_text(tr!(
+                            "Motivo (obligatorio), p. ej. «archivos generados por Drizzle»"
+                        ))
                         .desired_rows(2)
                         .desired_width(f32::INFINITY),
                 );
@@ -562,7 +582,7 @@ impl App {
                         .add_enabled(
                             valid,
                             egui::Button::new(
-                                RichText::new("Registrar excepción").color(Color32::WHITE),
+                                RichText::new(tr!("Registrar excepción")).color(Color32::WHITE),
                             )
                             .fill(theme::ACCENT),
                         )
@@ -570,7 +590,7 @@ impl App {
                     {
                         cmds.push(UiCmd::GuardAllow);
                     }
-                    if theme::secondary(ui, "Cancelar").clicked() {
+                    if theme::secondary(ui, tr!("Cancelar")).clicked() {
                         cmds.push(UiCmd::GuardAllowForm(None));
                     }
                 });
@@ -588,7 +608,7 @@ impl App {
                 if state.items.is_empty() && state.checks.is_empty() && state.error.is_none() {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label(RichText::new("Analizando el diff…").color(theme::TEXT_3));
+                        ui.label(RichText::new(tr!("Analizando el diff…")).color(theme::TEXT_3));
                     });
                     return;
                 }
@@ -620,7 +640,7 @@ impl App {
                         }
                         if item.level == guard::Level::Block
                             && ui
-                                .link(RichText::new("Omitir con motivo…").size(11.5))
+                                .link(RichText::new(tr!("Omitir con motivo…")).size(11.5))
                                 .on_hover_text(format!("Regla: {}", item.id))
                                 .clicked()
                         {
@@ -666,7 +686,7 @@ impl App {
                         }
                         if level == Some(guard::Level::Block)
                             && ui
-                                .link(RichText::new("Omitir con motivo…").size(11.5))
+                                .link(RichText::new(tr!("Omitir con motivo…")).size(11.5))
                                 .on_hover_text(format!("Regla: {rule}"))
                                 .clicked()
                         {
@@ -691,19 +711,31 @@ impl App {
                 Ok(list) => {
                     let installed = list.iter().all(|(_, s)| *s == hooks::HookState::Installed);
                     let (glyph, color, text) = if installed {
-                        (icon::CHECK_CIRCLE, theme::GREEN, "Hooks de Git instalados")
+                        (
+                            icon::CHECK_CIRCLE,
+                            theme::GREEN,
+                            tr!("Hooks de Git instalados"),
+                        )
                     } else {
-                        (icon::CIRCLE, theme::TEXT_4, "Hooks de Git no instalados")
+                        (
+                            icon::CIRCLE,
+                            theme::TEXT_4,
+                            tr!("Hooks de Git no instalados"),
+                        )
                     };
                     ui.label(
                         RichText::new(format!("{glyph}  {text}"))
                             .size(12.0)
                             .color(color),
                     )
-                    .on_hover_text(
-                        "pre-commit y pre-push ejecutan el Guard también fuera de Forge",
-                    );
-                    let action = if installed { "Quitar" } else { "Instalar" };
+                    .on_hover_text(tr!(
+                        "pre-commit y pre-push ejecutan el Guard también fuera de Forge"
+                    ));
+                    let action = if installed {
+                        tr!("Quitar")
+                    } else {
+                        tr!("Instalar")
+                    };
                     if ui.link(RichText::new(action).size(12.0)).clicked() {
                         cmds.push(if installed {
                             UiCmd::HooksUninstall
@@ -714,7 +746,7 @@ impl App {
                 }
                 Err(e) => {
                     ui.label(
-                        RichText::new(format!("Hooks: {e}"))
+                        RichText::new(tr!("Hooks: {e}", e = e))
                             .size(11.5)
                             .color(theme::TEXT_4),
                     );
@@ -726,7 +758,7 @@ impl App {
         }
         if let Some(history) = &ws.guard.history {
             egui::CollapsingHeader::new(
-                RichText::new(format!("Historial ({})", history.len()))
+                RichText::new(tr!("Historial ({p0})", p0 = history.len()))
                     .size(12.0)
                     .color(theme::TEXT_2),
             )
@@ -750,7 +782,7 @@ impl App {
                                     .size(12.0)
                                     .color(theme::TEXT_2),
                                 );
-                                if ui.link(RichText::new("Exportar").size(12.0)).clicked() {
+                                if ui.link(RichText::new(tr!("Exportar")).size(12.0)).clicked() {
                                     cmds.push(UiCmd::GuardExport(Some(*id)));
                                 }
                             });

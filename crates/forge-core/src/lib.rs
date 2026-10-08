@@ -6,6 +6,8 @@ pub mod danger;
 pub mod evidence;
 pub mod guard;
 pub mod hooks;
+pub mod i18n;
+mod i18n_en;
 pub mod ideas;
 pub mod mcp;
 pub mod memory;

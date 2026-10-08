@@ -1,5 +1,6 @@
 // Pull requests: borrador (título y descripción) a partir de los commits de la rama y del
 // resultado de Guard, y el comando `gh pr create` que lo publica.
+use crate::tr;
 use std::path::{Path, PathBuf};
 
 use crate::agents::shell_quote;
@@ -32,8 +33,9 @@ pub fn draft(repo: &Path, rules: &Rules, report: &Report) -> Result<Draft, Strin
         .trim()
         .to_string();
     if branch == base || branch == "HEAD" {
-        return Err(format!(
-            "estás en `{branch}`: crea una rama para el PR (git switch -c mi-cambio)"
+        return Err(tr!(
+            "estás en `{branch}`: crea una rama para el PR (git switch -c mi-cambio)",
+            branch = branch
         ));
     }
     let range = format!("{base_ref}..HEAD");
@@ -42,8 +44,10 @@ pub fn draft(repo: &Path, rules: &Rules, report: &Report) -> Result<Draft, Strin
         .map(str::to_string)
         .collect();
     if subjects.is_empty() {
-        return Err(format!(
-            "la rama `{branch}` no tiene commits nuevos frente a `{base}`"
+        return Err(tr!(
+            "la rama `{branch}` no tiene commits nuevos frente a `{base}`",
+            branch = branch,
+            base = base
         ));
     }
     let title = match subjects.as_slice() {
@@ -78,14 +82,14 @@ fn title_from_branch(branch: &str) -> String {
 }
 
 fn body(subjects: &[String], stat: &str, report: &Report) -> String {
-    let mut md = String::from("## Cambios\n\n");
+    let mut md = String::from(tr!("## Cambios\n\n"));
     for s in subjects {
         md += &format!("- {s}\n");
     }
     if !stat.is_empty() {
         md += &format!("\n{stat}\n");
     }
-    md += "\n## Validación\n\nValidado con Forge Guard antes de abrir el PR:\n\n";
+    md += tr!("\n## Validación\n\nValidado con Forge Guard antes de abrir el PR:\n\n");
     for c in &report.checks {
         md += &format!("- {} {} (`{}`)\n", mark(c.level), c.name, c.command);
     }
@@ -101,7 +105,7 @@ fn body(subjects: &[String], stat: &str, report: &Report) -> String {
         }
     }
     if report.checks.is_empty() && !report.items.iter().any(|i| i.level == Level::Warn) {
-        md += "- ✓ Sin bloqueos en las reglas del proyecto\n";
+        md += tr!("- ✓ Sin bloqueos en las reglas del proyecto\n");
     }
     md
 }
@@ -122,12 +126,12 @@ pub fn command(repo: &Path, draft: &Draft) -> Result<String, String> {
         .trim(),
     );
     std::fs::write(&path, &draft.body).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(format!(
-        "gh pr create --base {} --title {} --body-file {}{}",
-        shell_quote(&draft.base),
-        shell_quote(draft.title.trim()),
-        shell_quote(&path.to_string_lossy()),
-        if draft.draft { " --draft" } else { "" }
+    Ok(tr!(
+        "gh pr create --base {p0} --title {p1} --body-file {p2}{p3}",
+        p0 = shell_quote(&draft.base),
+        p1 = shell_quote(draft.title.trim()),
+        p2 = shell_quote(&path.to_string_lossy()),
+        p3 = if draft.draft { " --draft" } else { "" }
     ))
 }
 

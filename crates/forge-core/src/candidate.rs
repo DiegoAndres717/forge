@@ -1,5 +1,6 @@
 // Candidato congelado: el árbol exacto que se va a commitear/subir, y una copia aislada
 // de él para ejecutar los checks sin tocar el árbol de trabajo ni el index del usuario.
+use crate::tr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -32,7 +33,7 @@ fn git(repo: &Path, args: &[&str], index: Option<&Path>) -> Result<String, Strin
     }
     let out = cmd
         .output()
-        .map_err(|e| format!("no se pudo ejecutar git: {e}"))?;
+        .map_err(|e| tr!("no se pudo ejecutar git: {e}", e = e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
@@ -58,7 +59,7 @@ fn git_clean(repo: &Path, args: &[&str]) -> Result<String, String> {
         .env("GIT_COMMITTER_EMAIL", "forge@localhost");
     let out = cmd
         .output()
-        .map_err(|e| format!("no se pudo ejecutar git: {e}"))?;
+        .map_err(|e| tr!("no se pudo ejecutar git: {e}", e = e))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {

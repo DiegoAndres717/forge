@@ -1,6 +1,7 @@
 // Adaptadores de agentes: qué agentes hay, cómo se abren, reanudan y detectan.
 // Cada agente es un dato (comando, reanudar, modo no interactivo); `.forge/agents.toml`
 // puede cambiarlos o añadir agentes propios.
+use crate::tr;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -89,7 +90,7 @@ impl AgentSpec {
             caps.push(format!("reanuda sesiones ({r})"));
         }
         if let Some(h) = &self.headless {
-            caps.push(format!("modo no interactivo ({h})"));
+            caps.push(tr!("modo no interactivo ({h})", h = h));
         }
         if self.mcp {
             caps.push("servidores MCP".into());
@@ -225,10 +226,10 @@ pub fn load(project: &Path) -> Result<Vec<AgentSpec>, String> {
             Some(i) => &mut agents[i],
             None => {
                 let Some(command) = entry.command.clone() else {
-                    return Err(format!(
-                        "{}: el agente \"{}\" necesita `command`",
-                        path.display(),
-                        entry.id
+                    return Err(tr!(
+                        "{p0}: el agente \"{p1}\" necesita `command`",
+                        p0 = path.display(),
+                        p1 = entry.id
                     ));
                 };
                 agents.push(AgentSpec {
@@ -268,9 +269,9 @@ pub fn load(project: &Path) -> Result<Vec<AgentSpec>, String> {
         agent.environment.extend(entry.environment);
     }
     if agents.iter().filter(|a| a.default).count() > 1 {
-        return Err(format!(
-            "{}: solo un agente puede tener default = true",
-            path.display()
+        return Err(tr!(
+            "{p0}: solo un agente puede tener default = true",
+            p0 = path.display()
         ));
     }
     Ok(agents)

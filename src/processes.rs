@@ -1,4 +1,5 @@
 // Procesos administrados: iniciar/detener/reiniciar, reinicio automático, puertos y health checks.
+use forge_core::tr;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -77,26 +78,30 @@ impl Managed {
     /// Texto y color del estado, como en el panel PROCESOS.
     pub fn describe(&self) -> (String, Tone) {
         match &self.status {
-            Status::Stopped => ("detenido".into(), Tone::Idle),
+            Status::Stopped => (tr!("detenido").into(), Tone::Idle),
             Status::Running { since } => match &self.health {
                 Health::Healthy => ("healthy".into(), Tone::Ok),
                 Health::Unhealthy(_) if since.elapsed() < STARTUP_GRACE => {
-                    ("iniciando…".into(), Tone::Busy)
+                    (tr!("iniciando…").into(), Tone::Busy)
                 }
                 Health::Unhealthy(why) => (format!("unhealthy: {why}"), Tone::Bad),
-                Health::Unknown => ("ejecutándose".into(), Tone::Ok),
+                Health::Unknown => (tr!("ejecutándose").into(), Tone::Ok),
             },
-            Status::Stopping { .. } => ("deteniendo…".into(), Tone::Busy),
+            Status::Stopping { .. } => (tr!("deteniendo…").into(), Tone::Busy),
             Status::Waiting { until } => {
                 let secs = until.saturating_duration_since(Instant::now()).as_secs() + 1;
                 (
-                    format!("reinicio en {secs} s (intento {})", self.attempts),
+                    tr!(
+                        "reinicio en {secs} s (intento {p0})",
+                        p0 = self.attempts,
+                        secs = secs
+                    ),
                     Tone::Busy,
                 )
             }
-            Status::Exited { code: 0 } => ("terminó (código 0)".into(), Tone::Idle),
-            Status::Exited { code } => (format!("falló (código {code})"), Tone::Bad),
-            Status::Failed(why) => (format!("no se pudo iniciar: {why}"), Tone::Bad),
+            Status::Exited { code: 0 } => (tr!("terminó (código 0)").into(), Tone::Idle),
+            Status::Exited { code } => (tr!("falló (código {code})", code = code), Tone::Bad),
+            Status::Failed(why) => (tr!("no se pudo iniciar: {why}", why = why), Tone::Bad),
         }
     }
 
@@ -523,7 +528,7 @@ fn run_health_check(check: &HealthCheck, root: &std::path::Path) -> Health {
     let result = if let Some(port) = check.port {
         connect("localhost", port, timeout)
             .map(drop)
-            .map_err(|_| format!("puerto {port} cerrado"))
+            .map_err(|_| tr!("puerto {port} cerrado", port = port))
     } else if let Some(url) = &check.url {
         http_status(url, timeout).and_then(|code| {
             if (200..400).contains(&code) {
@@ -544,7 +549,7 @@ fn run_health_check(check: &HealthCheck, root: &std::path::Path) -> Health {
 }
 
 fn connect(host: &str, port: u16, timeout: Duration) -> std::io::Result<TcpStream> {
-    let mut last = std::io::Error::other("sin direcciones");
+    let mut last = std::io::Error::other(tr!("sin direcciones"));
     for addr in (host, port).to_socket_addrs()? {
         match TcpStream::connect_timeout(&addr, timeout) {
             Ok(stream) => return Ok(stream),
@@ -573,9 +578,10 @@ fn parse_http_url(url: &str) -> Option<(String, u16, String)> {
 
 // ponytail: HTTP/1.1 mínimo sin TLS; para https el health check usa `port` o `command`.
 fn http_status(url: &str, timeout: Duration) -> Result<u16, String> {
-    let (host, port, path) = parse_http_url(url).ok_or_else(|| format!("URL no válida: {url}"))?;
-    let mut stream =
-        connect(&host, port, timeout).map_err(|_| format!("sin respuesta en {host}:{port}"))?;
+    let (host, port, path) =
+        parse_http_url(url).ok_or_else(|| tr!("URL no válida: {url}", url = url))?;
+    let mut stream = connect(&host, port, timeout)
+        .map_err(|_| tr!("sin respuesta en {host}:{port}", host = host, port = port))?;
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
     let request = format!(
@@ -587,12 +593,12 @@ fn http_status(url: &str, timeout: Duration) -> Result<u16, String> {
     let mut head = [0u8; 64];
     let n = stream
         .read(&mut head)
-        .map_err(|_| "sin respuesta HTTP".to_string())?;
+        .map_err(|_| tr!("sin respuesta HTTP").to_string())?;
     let line = String::from_utf8_lossy(&head[..n]);
     line.split_whitespace()
         .nth(1)
         .and_then(|c| c.parse().ok())
-        .ok_or_else(|| "respuesta HTTP inválida".into())
+        .ok_or_else(|| tr!("respuesta HTTP inválida").into())
 }
 
 fn command_ok(command: &str, root: &std::path::Path, timeout: Duration) -> Result<(), String> {
@@ -608,15 +614,20 @@ fn command_ok(command: &str, root: &std::path::Path, timeout: Duration) -> Resul
         match child.try_wait() {
             Ok(Some(status)) if status.success() => return Ok(()),
             Ok(Some(status)) => {
-                return Err(format!(
-                    "`{command}` salió con {}",
-                    status.code().unwrap_or(-1)
+                return Err(tr!(
+                    "`{command}` salió con {p0}",
+                    p0 = status.code().unwrap_or(-1),
+                    command = command
                 ));
             }
             Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
             _ => {
                 let _ = child.kill();
-                return Err(format!("`{command}` tardó más de {} s", timeout.as_secs()));
+                return Err(tr!(
+                    "`{command}` tardó más de {p0} s",
+                    p0 = timeout.as_secs(),
+                    command = command
+                ));
             }
         }
     }

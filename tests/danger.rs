@@ -71,6 +71,8 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
 
 #[test]
 fn dangerous_commands_wait_for_authorization() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let e = setup("git");
     // Inofensivo: se ejecuta sin preguntar (y es el git real).
     let out = sh(&e, "git status --short && rm -rf build");
@@ -109,6 +111,8 @@ fn dangerous_commands_wait_for_authorization() {
 
 #[test]
 fn without_forge_open_and_no_terminal_it_is_blocked() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let mut e = setup("closed");
     e.vars.insert("FORGE_APP_PID".into(), "999999".into());
     let out = Command::new("sh")
@@ -126,6 +130,8 @@ fn without_forge_open_and_no_terminal_it_is_blocked() {
 /// primero en el PATH (después de path_helper y compañía).
 #[test]
 fn forge_zsh_puts_shims_first() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     if !Path::new("/bin/zsh").exists() {
         return;
     }

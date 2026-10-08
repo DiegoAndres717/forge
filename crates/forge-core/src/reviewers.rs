@@ -1,5 +1,6 @@
 // Revisores especializados (arquitectura, seguridad, base de datos, frontend…):
 // cada uno solo se activa si el diff toca su área y solo recibe esos archivos.
+use crate::tr;
 use std::path::Path;
 
 use serde::Deserialize;
@@ -59,35 +60,43 @@ pub fn builtins() -> Vec<ReviewerSpec> {
     vec![
         reviewer(
             "architecture",
-            "Revisor de arquitectura",
+            tr!("Revisor de arquitectura"),
             Tier::Powerful,
             false,
             Detector::Architecture,
-            "arquitectura: límites entre módulos, acoplamiento, responsabilidades, duplicación y riesgos de mantenimiento",
+            tr!(
+                "arquitectura: límites entre módulos, acoplamiento, responsabilidades, duplicación y riesgos de mantenimiento"
+            ),
         ),
         reviewer(
             "security",
-            "Revisor de seguridad",
+            tr!("Revisor de seguridad"),
             Tier::Powerful,
             true,
             Detector::Security,
-            "seguridad: autenticación, autorización y permisos, inyección, exposición de secretos y datos personales, pagos",
+            tr!(
+                "seguridad: autenticación, autorización y permisos, inyección, exposición de secretos y datos personales, pagos"
+            ),
         ),
         reviewer(
             "database",
-            "Revisor de base de datos",
+            tr!("Revisor de base de datos"),
             Tier::Balanced,
             true,
             Detector::Database,
-            "base de datos: migraciones destructivas o irreversibles, pérdida de datos, bloqueos largos, índices, restricciones, RLS y consultas N+1",
+            tr!(
+                "base de datos: migraciones destructivas o irreversibles, pérdida de datos, bloqueos largos, índices, restricciones, RLS y consultas N+1"
+            ),
         ),
         reviewer(
             "frontend",
-            "Revisor de frontend",
+            tr!("Revisor de frontend"),
             Tier::Balanced,
             false,
             Detector::Frontend,
-            "frontend: accesibilidad (contraste, foco, etiquetas), regresiones visuales, estado, rendimiento de renderizado y textos",
+            tr!(
+                "frontend: accesibilidad (contraste, foco, etiquetas), regresiones visuales, estado, rendimiento de renderizado y textos"
+            ),
         ),
     ]
 }
@@ -130,10 +139,10 @@ pub fn load(project: &Path) -> Result<Vec<ReviewerSpec>, String> {
             Some(i) => i,
             None => {
                 if entry.paths.as_ref().is_none_or(Vec::is_empty) {
-                    return Err(format!(
-                        "{}: el revisor \"{}\" necesita `paths` (rutas que activan la revisión)",
-                        path.display(),
-                        entry.id
+                    return Err(tr!(
+                        "{p0}: el revisor \"{p1}\" necesita `paths` (rutas que activan la revisión)",
+                        p0 = path.display(),
+                        p1 = entry.id
                     ));
                 }
                 reviewers.push(ReviewerSpec {
@@ -146,7 +155,7 @@ pub fn load(project: &Path) -> Result<Vec<ReviewerSpec>, String> {
                     effort: None,
                     blocking: false,
                     paths: Vec::new(),
-                    focus: format!("el área \"{}\"", entry.id),
+                    focus: tr!("el área \"{p0}\"", p0 = entry.id),
                     detector: None,
                 });
                 reviewers.len() - 1
@@ -226,7 +235,7 @@ pub fn activate(
         let (matched, why_not) = if !r.paths.is_empty() {
             (
                 pick(&|p| r.paths.iter().any(|g| glob_match(g, p))),
-                "no toca sus rutas",
+                tr!("no toca sus rutas"),
             )
         } else {
             match r.detector {
@@ -234,19 +243,19 @@ pub fn activate(
                     let words: Vec<&str> = crate::router::security_words();
                     (
                         pick(&|p| matches_any(p, &words)),
-                        "no toca autenticación, permisos, pagos ni secretos",
+                        tr!("no toca autenticación, permisos, pagos ni secretos"),
                     )
                 }
                 Some(Detector::Database) => (
                     pick(&|p| matches_any(p, &DATABASE)),
-                    "no toca migraciones ni esquema",
+                    tr!("no toca migraciones ni esquema"),
                 ),
                 Some(Detector::Frontend) => (
                     pick(&|p| {
                         FRONTEND_EXT.iter().any(|e| p.ends_with(e))
                             || matches_any(p, &FRONTEND_DIRS)
                     }),
-                    "no toca la interfaz",
+                    tr!("no toca la interfaz"),
                 ),
                 Some(Detector::Architecture) => {
                     let top_dirs: std::collections::HashSet<&str> = files
@@ -257,10 +266,10 @@ pub fn activate(
                         risk.level >= RiskLevel::High || top_dirs.len() >= 4 || files.len() > 20;
                     (
                         if wide { pick(&|_| true) } else { Vec::new() },
-                        "cambio acotado (riesgo bajo o medio, pocas carpetas)",
+                        tr!("cambio acotado (riesgo bajo o medio, pocas carpetas)"),
                     )
                 }
-                None => (Vec::new(), "sin rutas configuradas"),
+                None => (Vec::new(), tr!("sin rutas configuradas")),
             }
         };
         if matched.is_empty() {

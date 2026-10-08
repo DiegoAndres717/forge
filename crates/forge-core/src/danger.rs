@@ -7,6 +7,7 @@
 // programa real al instante; si es peligroso, se pide autorización a la app (un archivo en
 // `approvals/` que la ventana muestra como diálogo) y se espera la respuesta. Así también
 // se protege lo que ejecutan los agentes, no solo lo que escribe el usuario.
+use crate::tr;
 use std::collections::HashMap;
 use std::io::Write;
 use std::os::unix::process::CommandExt;
@@ -40,9 +41,9 @@ pub fn classify(
                 .collect();
             pos.windows(2)
                 .any(|w| w == ["system", "prune"])
-                .then(|| "borra contenedores, imágenes y redes de Docker sin uso".into())
+                .then(|| tr!("borra contenedores, imágenes y redes de Docker sin uso").into())
         }
-        "dropdb" => Some("borra una base de datos".into()),
+        "dropdb" => Some(tr!("borra una base de datos").into()),
         "psql" | "mysql" | "mariadb" => args
             .iter()
             .any(|a| {
@@ -92,9 +93,9 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
         return None;
     }
     let names: Vec<&str> = outside.iter().take(3).map(|s| s.as_str()).collect();
-    Some(format!(
-        "borra en forma recursiva fuera de la carpeta del proyecto: {}",
-        names.join(", ")
+    Some(tr!(
+        "borra en forma recursiva fuera de la carpeta del proyecto: {p0}",
+        p0 = names.join(", ")
     ))
 }
 
@@ -126,7 +127,7 @@ fn git(args: &[String]) -> Option<String> {
     let (sub, rest) = (args.get(i)?.as_str(), &args[(i + 1).min(args.len())..]);
     match sub {
         "reset" if rest.iter().any(|a| a == "--hard") => {
-            Some("descarta todos los cambios sin commit (git reset --hard)".into())
+            Some(tr!("descarta todos los cambios sin commit (git reset --hard)").into())
         }
         "push"
             if has_flag(rest, 'f', "--force")
@@ -134,10 +135,10 @@ fn git(args: &[String]) -> Option<String> {
                     .iter()
                     .any(|a| a.starts_with("--force") || a.starts_with('+')) =>
         {
-            Some("reescribe la historia del remoto (git push --force)".into())
+            Some(tr!("reescribe la historia del remoto (git push --force)").into())
         }
         "clean" if has_flag(rest, 'f', "--force") && !has_flag(rest, 'n', "--dry-run") => {
-            Some("borra los archivos sin seguimiento (git clean)".into())
+            Some(tr!("borra los archivos sin seguimiento (git clean)").into())
         }
         _ => None,
     }
@@ -203,8 +204,12 @@ fn ask(dir: &Path, request: &Request, app_pid: Option<u32>) -> Result<bool, Stri
     .and_then(|_| std::fs::rename(&tmp, &file))
     .map_err(|e| e.to_string())?;
     eprintln!(
-        "Forge: «{}» {} — esperando autorización en Forge…",
-        request.command, request.reason
+        "{}",
+        tr!(
+            "Forge: «{p0}» {p1} — esperando autorización en Forge…",
+            p0 = request.command,
+            p1 = request.reason
+        )
     );
     let start = Instant::now();
     let decision = loop {
@@ -215,7 +220,7 @@ fn ask(dir: &Path, request: &Request, app_pid: Option<u32>) -> Result<bool, Stri
             break Ok(false);
         }
         if start.elapsed() > WAIT || !app_pid.is_some_and(alive) {
-            break Err("sin respuesta de Forge".to_string());
+            break Err(tr!("sin respuesta de Forge").to_string());
         }
         std::thread::sleep(Duration::from_millis(100));
     };
@@ -231,11 +236,15 @@ fn ask_tty(request: &Request) -> Result<bool, String> {
         .read(true)
         .write(true)
         .open("/dev/tty")
-        .map_err(|_| "Forge no está abierto para autorizarlo".to_string())?;
+        .map_err(|_| tr!("Forge no está abierto para autorizarlo").to_string())?;
     write!(
         tty,
-        "Forge: «{}» {}.\n¿Ejecutar? [s/N] ",
-        request.command, request.reason
+        "{}",
+        tr!(
+            "Forge: «{p0}» {p1}.\n¿Ejecutar? [s/N] ",
+            p0 = request.command,
+            p1 = request.reason
+        )
     )
     .map_err(|e| e.to_string())?;
     let mut line = String::new();
@@ -269,12 +278,24 @@ fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
 pub fn shim_main(name: &str, args: Vec<String>) -> ! {
     let shims = std::env::var_os("FORGE_SHIMS").map(PathBuf::from);
     let Some(real) = real_program(name, shims.as_deref()) else {
-        eprintln!("Forge: no se encontró `{name}` en el PATH");
+        eprintln!(
+            "{}",
+            tr!("Forge: no se encontró `{name}` en el PATH", name = name)
+        );
         std::process::exit(127);
     };
     let cwd = std::env::current_dir().unwrap_or_default();
     let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
-    if let Some(reason) = classify(name, &args, &cwd, project.as_deref()) {
+    let dangerous = classify(name, &args, &cwd, project.as_deref()).is_some();
+    // Solo en este camino poco frecuente se lee el idioma (`git status` no paga la base) y
+    // se vuelve a clasificar para que el motivo salga en ese idioma.
+    if dangerous {
+        crate::i18n::init_from_store();
+    }
+    if let Some(reason) = dangerous
+        .then(|| classify(name, &args, &cwd, project.as_deref()))
+        .flatten()
+    {
         let mut command = vec![name.to_string()];
         command.extend(args.iter().cloned());
         let request = Request {
@@ -303,11 +324,21 @@ pub fn shim_main(name: &str, args: Vec<String>) -> ! {
         match decision {
             Ok(true) => {}
             Ok(false) => {
-                eprintln!("Forge: comando rechazado: {}", request.command);
+                eprintln!(
+                    "{}",
+                    tr!("Forge: comando rechazado: {p0}", p0 = request.command)
+                );
                 std::process::exit(126);
             }
             Err(e) => {
-                eprintln!("Forge: comando bloqueado ({e}): {}", request.command);
+                eprintln!(
+                    "{}",
+                    tr!(
+                        "Forge: comando bloqueado ({e}): {p0}",
+                        p0 = request.command,
+                        e = e
+                    )
+                );
                 std::process::exit(126);
             }
         }
@@ -316,7 +347,14 @@ pub fn shim_main(name: &str, args: Vec<String>) -> ! {
         .arg0(name)
         .args(&args)
         .exec();
-    eprintln!("Forge: no se pudo ejecutar {}: {err}", real.display());
+    eprintln!(
+        "{}",
+        tr!(
+            "Forge: no se pudo ejecutar {p0}: {err}",
+            p0 = real.display(),
+            err = err
+        )
+    );
     std::process::exit(126);
 }
 

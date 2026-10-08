@@ -1,5 +1,6 @@
 // Evaluación determinista del diff y excepciones con motivo.
 use super::*;
+use crate::tr;
 
 // ---------------------------------------------------------------- evaluación
 
@@ -67,9 +68,9 @@ impl Scope {
 
     pub fn label(self) -> &'static str {
         match self {
-            Scope::Commit => "solo este commit",
-            Scope::PullRequest => "esta rama (pull request)",
-            Scope::Session => "esta sesión (8 h)",
+            Scope::Commit => tr!("solo este commit"),
+            Scope::PullRequest => tr!("esta rama (pull request)"),
+            Scope::Session => tr!("esta sesión (8 h)"),
         }
     }
 }
@@ -144,7 +145,7 @@ pub fn local_user(repo: &Path) -> String {
         .ok()
         .filter(|u| !u.is_empty())
         .or_else(|| std::env::var("USER").ok())
-        .unwrap_or_else(|| "desconocido".into())
+        .unwrap_or_else(|| tr!("desconocido").into())
 }
 
 /// Marca como omitidos los controles fallidos que tienen excepción válida.
@@ -202,7 +203,7 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     let mut items = vec![item(
         "summary",
         Level::Info,
-        format!("{} archivos analizados", diff.files.len()),
+        tr!("{p0} archivos analizados", p0 = diff.files.len()),
         vec![diff.description.clone()],
     )];
 
@@ -216,14 +217,15 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     if !excluded.is_empty() {
         let names: Vec<&str> = excluded.iter().take(4).map(|f| f.path.as_str()).collect();
         let more = if excluded.len() > 4 {
-            format!(" y {} más", excluded.len() - 4)
+            tr!(" y {p0} más", p0 = excluded.len() - 4)
         } else {
             String::new()
         };
-        details.push(format!(
-            "sin contar {} archivos excluidos: {}{more}",
-            excluded.len(),
-            names.join(", ")
+        details.push(tr!(
+            "sin contar {p0} archivos excluidos: {p1}{more}",
+            p0 = excluded.len(),
+            p1 = names.join(", "),
+            more = more
         ));
     }
     let mut biggest = counted.clone();
@@ -244,10 +246,10 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     items.push(item(
         "lines",
         level,
-        format!(
-            "{} líneas modificadas (límite {})",
-            thousands(lines),
-            thousands(q.max_changed_lines)
+        tr!(
+            "{p0} líneas modificadas (límite {p1})",
+            p0 = thousands(lines),
+            p1 = thousands(q.max_changed_lines)
         ),
         details,
     ));
@@ -261,9 +263,10 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     items.push(item(
         "files",
         level,
-        format!(
-            "{files} archivos cambiados (límite {})",
-            q.max_files_changed
+        tr!(
+            "{files} archivos cambiados (límite {p0})",
+            p0 = q.max_files_changed,
+            files = files
         ),
         vec![],
     ));
@@ -282,11 +285,11 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
         .map(|f| f.path.clone())
         .collect();
     items.push(match forbidden.is_empty() {
-        true => item("forbidden", Level::Pass, "Archivos permitidos", vec![]),
+        true => item("forbidden", Level::Pass, tr!("Archivos permitidos"), vec![]),
         false => item(
             "forbidden",
             Level::Block,
-            format!("{} archivos prohibidos", forbidden.len()),
+            tr!("{p0} archivos prohibidos", p0 = forbidden.len()),
             forbidden,
         ),
     });
@@ -294,7 +297,12 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     if q.block_secrets {
         let found = scan_secrets(&diff.added_lines);
         items.push(match found.is_empty() {
-            true => item("secrets", Level::Pass, "No se detectaron secretos", vec![]),
+            true => item(
+                "secrets",
+                Level::Pass,
+                tr!("No se detectaron secretos"),
+                vec![],
+            ),
             false => item(
                 "secrets",
                 Level::Block,
@@ -320,18 +328,22 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
         items.push(item(
             format!("missing:{id}"),
             Level::Block,
-            format!("require_{flag} activo pero no hay [[checks]] con id = \"{id}\""),
+            tr!(
+                "require_{flag} activo pero no hay [[checks]] con id = \"{id}\"",
+                flag = flag,
+                id = id
+            ),
             vec![".forge/rules.toml".into()],
         ));
     }
     let s = rules.stage(stage);
     // Se ejecutan al final, solo si pasan los controles deterministas (router de modelos).
-    let waiting = vec!["se ejecuta cuando pasen los controles deterministas".to_string()];
+    let waiting = vec![tr!("se ejecuta cuando pasen los controles deterministas").to_string()];
     if s.require_ai_review {
         items.push(item(
             "ai-review",
             Level::Pending,
-            "Revisión de IA",
+            tr!("Revisión de IA"),
             waiting.clone(),
         ));
     }
@@ -339,7 +351,7 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
         items.push(item(
             "security-review",
             Level::Pending,
-            "Revisión de seguridad",
+            tr!("Revisión de seguridad"),
             waiting,
         ));
     }

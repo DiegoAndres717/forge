@@ -1,5 +1,6 @@
 // Reglas (.forge/rules.toml), etapas y plantilla con checks detectados.
 use super::*;
+use crate::tr;
 
 // ---------------------------------------------------------------- reglas
 
@@ -148,9 +149,9 @@ impl Stage {
 
     pub fn label(self) -> &'static str {
         match self {
-            Stage::Commit => "Commit",
-            Stage::Push => "Push",
-            Stage::PullRequest => "Pull request",
+            Stage::Commit => tr!("Commit"),
+            Stage::Push => tr!("Push"),
+            Stage::PullRequest => tr!("Pull request"),
         }
     }
 }
@@ -167,10 +168,10 @@ impl Rules {
         let rules: Rules = toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
         let mut seen = std::collections::HashSet::new();
         if let Some(c) = rules.checks.iter().find(|c| !seen.insert(&c.id)) {
-            return Err(format!(
-                "{}: el check \"{}\" está repetido",
-                path.display(),
-                c.id
+            return Err(tr!(
+                "{p0}: el check \"{p1}\" está repetido",
+                p0 = path.display(),
+                p1 = c.id
             ));
         }
         Ok(Some(rules))
@@ -214,7 +215,7 @@ impl Rules {
 pub fn write_template(project: &Path) -> Result<(), String> {
     let file = project.join(".forge/rules.toml");
     if file.exists() {
-        return Err(format!("{} ya existe", file.display()));
+        return Err(tr!("{p0} ya existe", p0 = file.display()));
     }
     std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
     std::fs::write(&file, template(&detect_checks(project)))

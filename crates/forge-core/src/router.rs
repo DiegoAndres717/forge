@@ -2,6 +2,7 @@
 // de barato a potente solo cuando hace falta, con presupuesto y registro de consumo.
 // Los modelos se llaman a través de los CLIs del usuario (claude -p, codex exec, opencode
 // run, ollama), así que no hacen falta claves de API.
+use crate::tr;
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
@@ -240,12 +241,12 @@ pub enum RiskLevel {
 
 impl RiskLevel {
     pub fn label(self) -> &'static str {
-        match self {
+        crate::i18n::t(match self {
             RiskLevel::Low => "bajo",
             RiskLevel::Medium => "medio",
             RiskLevel::High => "alto",
             RiskLevel::Critical => "crítico",
-        }
+        })
     }
 }
 
@@ -344,16 +345,16 @@ pub fn assess(files: &[FileChange], failed_checks: usize) -> Risk {
     let lines: usize = files.iter().map(|f| f.added + f.deleted).sum();
     if files.len() > 20 {
         score += 2;
-        signals.push(format!("{} archivos cambiados", files.len()));
+        signals.push(tr!("{p0} archivos cambiados", p0 = files.len()));
     }
     match lines {
         2001.. => {
             score += 3;
-            signals.push(format!("{lines} líneas"));
+            signals.push(tr!("{lines} líneas", lines = lines));
         }
         501.. => {
             score += 2;
-            signals.push(format!("{lines} líneas"));
+            signals.push(tr!("{lines} líneas", lines = lines));
         }
         _ => {}
     }
@@ -369,13 +370,16 @@ pub fn assess(files: &[FileChange], failed_checks: usize) -> Risk {
         if let Some(first) = hits.first() {
             score += weight;
             security |= sec;
-            signals.push(format!(
-                "toca {name} ({first}{})",
-                if hits.len() > 1 {
-                    format!(" y {} más", hits.len() - 1)
-                } else {
-                    String::new()
-                }
+            let more = if hits.len() > 1 {
+                tr!(" y {p0} más", p0 = hits.len() - 1)
+            } else {
+                String::new()
+            };
+            signals.push(tr!(
+                "toca {name} ({first}{more})",
+                name = crate::i18n::t(name),
+                first = first,
+                more = more
             ));
         }
     }
@@ -504,10 +508,10 @@ fn truncate(text: &str, budget: usize) -> String {
     while !text.is_char_boundary(end) {
         end -= 1;
     }
-    format!(
-        "{}\n[… recortado: {} caracteres omitidos para ahorrar contexto]",
-        &text[..end],
-        text.len() - end
+    tr!(
+        "{p0}\n[… recortado: {p1} caracteres omitidos para ahorrar contexto]",
+        p0 = &text[..end],
+        p1 = text.len() - end
     )
 }
 
@@ -668,7 +672,7 @@ impl AiOutcome {
                     "{}: {} (confianza {:.2}){cost} — {}",
                     s.route, r.verdict, r.confidence, r.summary
                 )),
-                (None, Some(e)) => out.push(format!("{}: error — {e}", s.route)),
+                (None, Some(e)) => out.push(tr!("{p0}: error — {e}", p0 = s.route, e = e)),
                 _ => {}
             }
         }
@@ -704,11 +708,11 @@ fn parse_output(
         OutputFormat::Text => Ok((stdout.to_string(), 0, 0, None)),
         OutputFormat::ClaudeJson => {
             let v: serde_json::Value = serde_json::from_str(stdout.trim())
-                .map_err(|e| format!("salida de claude no válida: {e}"))?;
+                .map_err(|e| tr!("salida de claude no válida: {e}", e = e))?;
             if v["is_error"].as_bool() == Some(true) {
                 return Err(v["result"]
                     .as_str()
-                    .unwrap_or("error de claude")
+                    .unwrap_or(tr!("error de claude"))
                     .to_string());
             }
             let u = &v["usage"];
@@ -741,7 +745,7 @@ fn parse_output(
                 }
             }
             if text.is_empty() {
-                return Err("codex no devolvió ningún mensaje".into());
+                return Err(tr!("codex no devolvió ningún mensaje").into());
             }
             Ok((text, input, output, None))
         }
@@ -775,13 +779,13 @@ fn call(
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| e.to_string())?;
-    let mut stdin = child.stdin.take().ok_or("sin stdin")?;
+    let mut stdin = child.stdin.take().ok_or(tr!("sin stdin"))?;
     let input = prompt.to_string();
     std::thread::spawn(move || {
         let _ = stdin.write_all(input.as_bytes());
     });
-    let mut stdout = child.stdout.take().ok_or("sin stdout")?;
-    let mut stderr = child.stderr.take().ok_or("sin stderr")?;
+    let mut stdout = child.stdout.take().ok_or(tr!("sin stdout"))?;
+    let mut stderr = child.stderr.take().ok_or(tr!("sin stderr"))?;
     let out_reader = std::thread::spawn(move || {
         let mut s = String::new();
         let _ = std::io::Read::read_to_string(&mut stdout, &mut s);
@@ -800,7 +804,7 @@ fn call(
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("sin respuesta en {} s", config.timeout_seconds));
+                return Err(tr!("sin respuesta en {p0} s", p0 = config.timeout_seconds));
             }
         }
     };
@@ -808,9 +812,9 @@ fn call(
     let stderr = err_reader.join().unwrap_or_default();
     if !status.success() && stdout.trim().is_empty() {
         let tail: Vec<&str> = stderr.lines().rev().take(3).collect();
-        return Err(format!(
-            "el proveedor falló: {}",
-            tail.into_iter().rev().collect::<Vec<_>>().join(" ")
+        return Err(tr!(
+            "el proveedor falló: {p0}",
+            p0 = tail.into_iter().rev().collect::<Vec<_>>().join(" ")
         ));
     }
     let (text, input_tokens, output_tokens, cost) = parse_output(provider.format, &stdout)?;
@@ -824,7 +828,8 @@ fn call(
         local: provider.local,
         created_at: crate::store::now(),
     };
-    let review = parse_review(&text).ok_or_else(|| "la respuesta no es el JSON pedido".to_string());
+    let review =
+        parse_review(&text).ok_or_else(|| tr!("la respuesta no es el JSON pedido").to_string());
     review.map(|r| (r, usage))
 }
 
@@ -886,7 +891,7 @@ pub fn review(
         on_step(&chosen.label());
         let diff = match reduced_diff(&ctx.repo, &ctx.range, rules, task.context_budget(), &[]) {
             Ok(d) => d,
-            Err(e) => return finish(steps, Some(format!("no se pudo preparar el diff: {e}"))),
+            Err(e) => return finish(steps, Some(tr!("no se pudo preparar el diff: {e}", e = e))),
         };
         let started = Instant::now();
         let result = call(config, &chosen, &prompt(task, ctx, &diff), &ctx.repo);
@@ -945,7 +950,7 @@ pub fn review(
             if paid && spent + config.max_cost_per_call_usd > config.monthly_budget_usd {
                 return finish(
                     steps,
-                    Some("no se escaló: presupuesto mensual agotado".into()),
+                    Some(tr!("no se escaló: presupuesto mensual agotado").into()),
                 );
             }
             on_step(&route.label());
@@ -1034,12 +1039,12 @@ pub fn specialist(
         &activation.files,
     ) {
         Ok(d) => d,
-        Err(e) => return incomplete(Vec::new(), format!("no se pudo preparar el diff: {e}")),
+        Err(e) => return incomplete(Vec::new(), tr!("no se pudo preparar el diff: {e}", e = e)),
     };
-    let role = format!(
-        "Eres el {}. Revisa SOLO {}. Ignora lo que no sea de tu área y no repitas observaciones generales.",
-        reviewer.name.to_lowercase(),
-        reviewer.focus
+    let role = tr!(
+        "Eres el {p0}. Revisa SOLO {p1}. Ignora lo que no sea de tu área y no repitas observaciones generales.",
+        p0 = reviewer.name.to_lowercase(),
+        p1 = reviewer.focus
     );
     let started = Instant::now();
     let label = format!("{} · {} {}", reviewer.name, chosen.provider, chosen.model);
@@ -1075,7 +1080,7 @@ pub fn specialist(
                 usage: None,
                 seconds: started.elapsed().as_secs_f64(),
             };
-            incomplete(vec![step], format!("el revisor no respondió: {e}"))
+            incomplete(vec![step], tr!("el revisor no respondió: {e}", e = e))
         }
     }
 }
@@ -1105,8 +1110,9 @@ fn finish(steps: Vec<Step>, reason: Option<String>) -> AiOutcome {
             summary: String::new(),
             findings: Vec::new(),
             steps,
-            reason: reason
-                .or_else(|| Some("ningún revisor de nivel 2 o 3 dio una respuesta válida".into())),
+            reason: reason.or_else(|| {
+                Some(tr!("ningún revisor de nivel 2 o 3 dio una respuesta válida").into())
+            }),
         },
     }
 }
@@ -1115,7 +1121,7 @@ fn finish(steps: Vec<Step>, reason: Option<String>) -> AiOutcome {
 pub fn write_template(project: &Path) -> Result<(), String> {
     let file = project.join(".forge/routing.toml");
     if file.exists() {
-        return Err(format!("{} ya existe", file.display()));
+        return Err(tr!("{p0} ya existe", p0 = file.display()));
     }
     std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
     let text = "# Router de modelos: qué modelo revisa según la tarea y el riesgo.\n\

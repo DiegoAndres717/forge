@@ -1,4 +1,5 @@
 // Persistencia local (SQLite): proyectos recientes, workspaces abiertos y su layout.
+use crate::tr;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,7 +23,7 @@ pub struct Store {
 type Result<T> = std::result::Result<T, String>;
 
 fn err(e: impl std::fmt::Display) -> String {
-    format!("base de datos: {e}")
+    tr!("base de datos: {e}", e = e)
 }
 
 pub fn now() -> i64 {
@@ -464,10 +465,10 @@ impl Store {
 /// "hace 5 min", "hace 2 h", "hace 3 días".
 pub fn ago_precise(timestamp: i64) -> String {
     match now() - timestamp {
-        ..60 => "hace un momento".into(),
-        s @ 60..3600 => format!("hace {} min", s / 60),
-        s @ 3600..86_400 => format!("hace {} h", s / 3600),
-        s => format!("hace {} días", s / 86_400),
+        ..60 => tr!("hace un momento").into(),
+        s @ 60..3600 => tr!("hace {p0} min", p0 = s / 60),
+        s @ 3600..86_400 => tr!("hace {p0} h", p0 = s / 3600),
+        s => tr!("hace {p0} días", p0 = s / 86_400),
     }
 }
 
@@ -476,8 +477,8 @@ pub fn ago(timestamp: i64) -> String {
     match (now() - timestamp) / 86_400 {
         ..=0 => "hoy".into(),
         1 => "ayer".into(),
-        days @ 2..=30 => format!("hace {days} días"),
-        days => format!("hace {} meses", days / 30),
+        days @ 2..=30 => tr!("hace {days} días", days = days),
+        days => tr!("hace {p0} meses", p0 = days / 30),
     }
 }
 

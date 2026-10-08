@@ -1,5 +1,6 @@
 // Memoria del proyecto: decisiones, arquitectura, errores resueltos, comandos útiles…
 // Local (SQLite con búsqueda de texto completo) e independiente del agente y la terminal.
+use crate::tr;
 use std::path::Path;
 
 use rusqlite::{Connection, params};
@@ -21,7 +22,7 @@ pub fn kind_label(kind: &str) -> &str {
     KINDS
         .iter()
         .find(|(id, _)| *id == kind)
-        .map_or(kind, |(_, label)| label)
+        .map_or(kind, |(_, label)| crate::i18n::t(label))
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -91,13 +92,14 @@ impl Store {
     ) -> Result<i64, String> {
         if !KINDS.iter().any(|(id, _)| *id == kind) {
             let valid: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
-            return Err(format!(
-                "tipo de memoria desconocido \"{kind}\" (válidos: {})",
-                valid.join(", ")
+            return Err(tr!(
+                "tipo de memoria desconocido \"{kind}\" (válidos: {p0})",
+                p0 = valid.join(", "),
+                kind = kind
             ));
         }
         if title.trim().is_empty() {
-            return Err("la memoria necesita un título".into());
+            return Err(tr!("la memoria necesita un título").into());
         }
         self.conn
             .execute(
@@ -204,16 +206,17 @@ pub fn render(m: &Memory) -> String {
     let tags = if m.tags.is_empty() {
         String::new()
     } else {
-        format!(" · etiquetas: {}", m.tags)
+        tr!(" · etiquetas: {p0}", p0 = m.tags)
     };
-    format!(
-        "#{} [{}] {}\n{}\n(guardada por {}, {}{tags})",
-        m.id,
-        kind_label(&m.kind),
-        m.title,
-        m.body,
-        m.source,
-        crate::store::ago_precise(m.created_at)
+    tr!(
+        "#{p0} [{p1}] {p2}\n{p3}\n(guardada por {p4}, {p5}{tags})",
+        p0 = m.id,
+        p1 = kind_label(&m.kind),
+        p2 = m.title,
+        p3 = m.body,
+        p4 = m.source,
+        p5 = crate::store::ago_precise(m.created_at),
+        tags = tags
     )
 }
 

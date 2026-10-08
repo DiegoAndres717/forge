@@ -104,6 +104,8 @@ fn app_icon() {
 #[test]
 #[ignore]
 fn ui_preview() {
+    // Como la app: inglés salvo FORGE_LANG=es.
+    forge_core::i18n::init(None);
     let out = PathBuf::from(std::env::var("FORGE_PREVIEW_DIR").expect("FORGE_PREVIEW_DIR"));
     std::fs::create_dir_all(&out).unwrap();
     let base = std::env::temp_dir().join(format!("forge-preview-{}", std::process::id()));

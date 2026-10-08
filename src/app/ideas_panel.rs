@@ -2,6 +2,7 @@
 // La lista general (sin proyecto) se muestra en Inicio con el mismo componente.
 use super::*;
 use crate::workspace::IdeasView;
+use forge_core::tr;
 
 /// Lista a la que se refiere un comando: `Some(i)` = workspace i, `None` = general.
 pub(super) type IdeasTarget = Option<usize>;
@@ -30,29 +31,29 @@ impl App {
                     .color(theme::YELLOW),
             );
             ui.label(
-                RichText::new("Ideas")
+                RichText::new(tr!("Ideas"))
                     .size(15.0)
                     .color(theme::TEXT)
                     .strong(),
             );
             ui.label(
-                RichText::new(format!(
-                    "{} · {} pendientes",
-                    ws.project.name(),
-                    ws.ideas.open_count
+                RichText::new(tr!(
+                    "{p0} · {p1} pendientes",
+                    p0 = ws.project.name(),
+                    p1 = ws.ideas.open_count
                 ))
                 .size(13.0)
                 .color(theme::TEXT_3),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::icon_button(ui, icon::X, "Cerrar (⌘⇧I)").clicked() {
+                if theme::icon_button(ui, icon::X, tr!("Cerrar (⌘⇧I)")).clicked() {
                     cmds.push(UiCmd::ToggleIdeas);
                 }
             });
         });
         ui.label(
             RichText::new(
-                "Se guardan en Forge, no en el repositorio. Claude Code y Codex abiertos desde Forge las leen, anotan y tachan.",
+                tr!("Se guardan en Forge, no en el repositorio. Claude Code y Codex abiertos desde Forge las leen, anotan y tachan."),
             )
             .size(11.5)
             .color(theme::TEXT_3),
@@ -73,7 +74,7 @@ impl App {
     ) {
         let input = ui.add(
             egui::TextEdit::singleline(&mut view.input)
-                .hint_text("Nueva idea… (Enter para anotar)")
+                .hint_text(tr!("Nueva idea… (Enter para anotar)"))
                 .desired_width(f32::INFINITY),
         );
         if std::mem::take(&mut view.focus) {
@@ -90,7 +91,7 @@ impl App {
         let done = view.items.iter().filter(|i| i.done()).count();
         if view.items.is_empty() {
             ui.label(
-                RichText::new("Sin ideas por ahora. Anota aquí lo que no quieras olvidar, o pídele a Claude: «guarda esta idea en Forge».")
+                RichText::new(tr!("Sin ideas por ahora. Anota aquí lo que no quieras olvidar, o pídele a Claude: «guarda esta idea en Forge»."))
                     .color(theme::TEXT_3),
             );
         }
@@ -100,9 +101,17 @@ impl App {
         if done > 0 {
             ui.add_space(4.0);
             let label = if view.show_done {
-                format!("{}  Ocultar hechas ({done})", icon::CARET_DOWN)
+                tr!(
+                    "{p0}  Ocultar hechas ({done})",
+                    p0 = icon::CARET_DOWN,
+                    done = done
+                )
             } else {
-                format!("{}  Mostrar hechas ({done})", icon::CARET_RIGHT)
+                tr!(
+                    "{p0}  Mostrar hechas ({done})",
+                    p0 = icon::CARET_RIGHT,
+                    done = done
+                )
             };
             if ui
                 .add(egui::Button::new(RichText::new(label).color(theme::TEXT_3)).frame(false))
@@ -130,15 +139,15 @@ impl App {
                 ui.add(egui::TextEdit::singleline(title).desired_width(f32::INFINITY));
                 ui.add(
                     egui::TextEdit::multiline(note)
-                        .hint_text("Detalle (opcional)")
+                        .hint_text(tr!("Detalle (opcional)"))
                         .desired_rows(3)
                         .desired_width(f32::INFINITY),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button("Guardar").clicked() {
+                    if ui.button(tr!("Guardar")).clicked() {
                         cmds.push(UiCmd::IdeaSave(target));
                     }
-                    if ui.button("Cancelar").clicked() {
+                    if ui.button(tr!("Cancelar")).clicked() {
                         cmds.push(UiCmd::IdeaEdit(target, None));
                     }
                 });
@@ -149,16 +158,21 @@ impl App {
             "done" => (
                 icon::CHECK_CIRCLE,
                 theme::GREEN,
-                "Volver a pendiente",
+                tr!("Volver a pendiente"),
                 "pending",
             ),
             "doing" => (
                 icon::CIRCLE_HALF,
                 theme::ORANGE,
-                "Marcar como hecha",
+                tr!("Marcar como hecha"),
                 "done",
             ),
-            _ => (icon::CIRCLE, theme::TEXT_3, "Marcar como hecha", "done"),
+            _ => (
+                icon::CIRCLE,
+                theme::TEXT_3,
+                tr!("Marcar como hecha"),
+                "done",
+            ),
         };
         ui.horizontal_top(|ui| {
             if theme::icon_button_sized(ui, glyph, &format!("{tip}: {}", idea.title), 22.0, color)
@@ -183,29 +197,30 @@ impl App {
                     store::ago(idea.created_at)
                 );
                 if idea.status == "doing" {
-                    meta += &format!(" · en curso ({})", idea.updated_by);
+                    meta += &tr!(" · en curso ({p0})", p0 = idea.updated_by);
                 } else if idea.done() {
-                    meta += &format!(
-                        " · hecha por {} {}",
-                        idea.updated_by,
-                        store::ago(idea.updated_at)
+                    meta += &tr!(
+                        " · hecha por {p0} {p1}",
+                        p0 = idea.updated_by,
+                        p1 = store::ago(idea.updated_at)
                     );
                 }
                 ui.label(RichText::new(meta).size(11.0).color(theme::TEXT_4));
                 response.context_menu(|ui| {
                     for (status, label) in forge_core::ideas::STATUSES {
-                        if status != idea.status && ui.button(label).clicked() {
+                        if status != idea.status && ui.button(forge_core::i18n::t(label)).clicked()
+                        {
                             cmds.push(UiCmd::IdeaSet(target, idea.id, status));
                         }
                     }
                     ui.separator();
                     if ui
-                        .button(format!("{}  Editar", icon::PENCIL_SIMPLE))
+                        .button(tr!("{p0}  Editar", p0 = icon::PENCIL_SIMPLE))
                         .clicked()
                     {
                         cmds.push(UiCmd::IdeaEdit(target, Some(idea.id)));
                     }
-                    if ui.button(format!("{}  Borrar", icon::TRASH)).clicked() {
+                    if ui.button(tr!("{p0}  Borrar", p0 = icon::TRASH)).clicked() {
                         cmds.push(UiCmd::IdeaDelete(target, idea.id));
                     }
                 });

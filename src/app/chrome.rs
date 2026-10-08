@@ -1,5 +1,6 @@
 // Marco de la ventana: inicio, barra de herramientas, barra de estado y avisos.
 use super::*;
+use forge_core::tr;
 
 impl App {
     /// Inicio: proyectos recientes como lista agrupada, con abrir y arrastrar carpeta.
@@ -18,33 +19,37 @@ impl App {
                 .strong(),
         );
         ui.label(
-            RichText::new("Proyectos con sus terminales, agentes, procesos y Project Guard.")
-                .size(14.0)
-                .color(theme::TEXT_3),
+            RichText::new(tr!(
+                "Proyectos con sus terminales, agentes, procesos y Project Guard."
+            ))
+            .size(14.0)
+            .color(theme::TEXT_3),
         );
         ui.add_space(18.0);
         ui.horizontal(|ui| {
-            if theme::primary(ui, format!("{}  Abrir proyecto…", icon::FOLDER_PLUS))
+            if theme::primary(ui, tr!("{p0}  Abrir proyecto…", p0 = icon::FOLDER_PLUS))
                 .on_hover_text("⌘O")
                 .clicked()
             {
                 cmds.push(UiCmd::OpenFolder);
             }
-            ui.label(RichText::new("o arrastra una carpeta a la ventana").color(theme::TEXT_3));
+            ui.label(
+                RichText::new(tr!("o arrastra una carpeta a la ventana")).color(theme::TEXT_3),
+            );
         });
         ui.add_space(22.0);
         // Ideas generales (no son de ningún proyecto).
         ui.horizontal(|ui| {
             ui.label(RichText::new(icon::LIGHTBULB).color(theme::YELLOW));
             ui.label(
-                RichText::new("Ideas generales")
+                RichText::new(tr!("Ideas generales"))
                     .size(13.0)
                     .color(theme::TEXT_2)
                     .strong(),
             );
             if self.general.open_count > 0 {
                 ui.label(
-                    RichText::new(format!("{} pendientes", self.general.open_count))
+                    RichText::new(tr!("{p0} pendientes", p0 = self.general.open_count))
                         .size(12.0)
                         .color(theme::TEXT_3),
                 );
@@ -62,7 +67,7 @@ impl App {
             return;
         }
         ui.label(
-            RichText::new("Recientes")
+            RichText::new(tr!("Recientes"))
                 .size(13.0)
                 .color(theme::TEXT_2)
                 .strong(),
@@ -125,7 +130,7 @@ impl App {
                             let sub = if exists {
                                 tilde(&row.path)
                             } else {
-                                format!("{} · carpeta no encontrada", tilde(&row.path))
+                                tr!("{p0} · carpeta no encontrada", p0 = tilde(&row.path))
                             };
                             painter.text(
                                 egui::pos2(rect.min.x + 52.0, rect.min.y + 39.0),
@@ -156,7 +161,7 @@ impl App {
                             if let Some(i) = open {
                                 let running = self.workspaces[i].processes.active_count();
                                 let text = if running > 0 {
-                                    format!("● abierto · {running} en marcha")
+                                    tr!("● abierto · {running} en marcha", running = running)
                                 } else {
                                     "● abierto".into()
                                 };
@@ -170,7 +175,7 @@ impl App {
                             }
                             response.context_menu(|ui| {
                                 if ui
-                                    .button(format!("{}  Quitar de recientes", icon::TRASH))
+                                    .button(tr!("{p0}  Quitar de recientes", p0 = icon::TRASH))
                                     .clicked()
                                 {
                                     if let Some(i) = open {
@@ -183,9 +188,11 @@ impl App {
                     });
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("Clic derecho en un proyecto para quitarlo de recientes.")
-                        .size(11.0)
-                        .color(theme::TEXT_4),
+                    RichText::new(tr!(
+                        "Clic derecho en un proyecto para quitarlo de recientes."
+                    ))
+                    .size(11.0)
+                    .color(theme::TEXT_4),
                 );
             });
     }
@@ -207,9 +214,9 @@ impl App {
         );
         ui.spacing_mut().item_spacing.x = 4.0;
         let tip = if self.sidebar {
-            "Ocultar barra lateral (⌘B)"
+            tr!("Ocultar barra lateral (⌘B)")
         } else {
-            "Mostrar barra lateral (⌘B)"
+            tr!("Mostrar barra lateral (⌘B)")
         };
         if theme::icon_button(&mut ui, icon::SIDEBAR_SIMPLE, tip).clicked() {
             self.sidebar = !self.sidebar;
@@ -217,7 +224,7 @@ impl App {
         ui.add_space(6.0);
         let Some(i) = self.active else {
             ui.label(
-                RichText::new("Inicio")
+                RichText::new(tr!("Inicio"))
                     .size(14.0)
                     .color(theme::TEXT)
                     .strong(),
@@ -245,7 +252,8 @@ impl App {
             );
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::icon_button(ui, icon::BRAIN, "Memoria del proyecto (⌘⇧M)").clicked() {
+            if theme::icon_button(ui, icon::BRAIN, tr!("Memoria del proyecto (⌘⇧M)")).clicked()
+            {
                 cmds.push(UiCmd::ToggleMemory);
             }
             let (text, color) = match &ws.guard.run {
@@ -272,20 +280,22 @@ impl App {
                 cmds.push(UiCmd::ToggleGuard);
             }
             ui.add_space(6.0);
-            if theme::icon_button(ui, icon::SQUARE_SPLIT_VERTICAL, "Dividir abajo (⌘⇧D)").clicked()
+            if theme::icon_button(ui, icon::SQUARE_SPLIT_VERTICAL, tr!("Dividir abajo (⌘⇧D)"))
+                .clicked()
             {
                 cmds.push(UiCmd::Ws(WsAction::Split(Dir::Column)));
             }
             if theme::icon_button(
                 ui,
                 icon::SQUARE_SPLIT_HORIZONTAL,
-                "Dividir a la derecha (⌘D)",
+                tr!("Dividir a la derecha (⌘D)"),
             )
             .clicked()
             {
                 cmds.push(UiCmd::Ws(WsAction::Split(Dir::Row)));
             }
-            if theme::icon_button(ui, icon::TERMINAL_WINDOW, "Nueva terminal (⌘T)").clicked() {
+            if theme::icon_button(ui, icon::TERMINAL_WINDOW, tr!("Nueva terminal (⌘T)")).clicked()
+            {
                 cmds.push(UiCmd::Ws(WsAction::NewTerminal));
             }
             if let Some(bytes) = bytes {
@@ -295,9 +305,9 @@ impl App {
                         .size(12.0)
                         .color(theme::TEXT_3),
                 )
-                .on_hover_text(
-                    "Memoria de los procesos de este proyecto (terminales, agentes y procesos)",
-                );
+                .on_hover_text(tr!(
+                    "Memoria de los procesos de este proyecto (terminales, agentes y procesos)"
+                ));
             }
         });
     }
@@ -311,9 +321,11 @@ impl App {
             egui::Stroke::new(1.0, theme::SEPARATOR),
         );
         let hints = if self.active.is_some() {
-            "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
+            tr!(
+                "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente"
+            )
         } else {
-            "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral"
+            tr!("⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral")
         };
         ui.painter().text(
             egui::pos2(rect.min.x + 12.0, rect.center().y),
@@ -411,7 +423,7 @@ impl App {
         painter.galley(rect.min + Vec2::new(34.0, 10.0), galley, theme::TEXT);
         let response = ui
             .interact(rect, egui::Id::new("error"), Sense::click())
-            .on_hover_text("Clic para cerrar");
+            .on_hover_text(tr!("Clic para cerrar"));
         if response.clicked() {
             self.error = None;
         }

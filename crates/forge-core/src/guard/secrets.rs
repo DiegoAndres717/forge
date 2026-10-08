@@ -55,7 +55,7 @@ pub fn scan_secrets(lines: &[(String, usize, String)]) -> Vec<SecretFinding> {
                 Some(SecretFinding {
                     path: path.clone(),
                     line: *line,
-                    kind,
+                    kind: crate::i18n::t(kind),
                     preview,
                 })
             })

@@ -1,4 +1,5 @@
 // Workspace de un proyecto: paneles (terminales y logs de procesos), layout, foco y procesos.
+use forge_core::tr;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -464,9 +465,10 @@ impl Workspace {
                 true
             }
             Err(e) => {
-                self.error = Some(format!(
-                    "no se pudo abrir la terminal en {}: {e}",
-                    cwd.display()
+                self.error = Some(tr!(
+                    "no se pudo abrir la terminal en {p0}: {e}",
+                    p0 = cwd.display(),
+                    e = e
                 ));
                 false
             }
@@ -932,7 +934,7 @@ impl Workspace {
                             painter.text(
                                 body.center(),
                                 Align2::CENTER_CENTER,
-                                "Proceso detenido. Pulsa ▶ en la cabecera para iniciarlo.",
+                                tr!("Proceso detenido. Pulsa ▶ en la cabecera para iniciarlo."),
                                 FontId::proportional(14.0),
                                 Color32::from_gray(0x90),
                             );
@@ -1023,7 +1025,7 @@ impl Workspace {
             theme::paint_icon_button(ui, r, glyph, &response, color);
             response.clicked()
         };
-        if button(icon::X, "Cerrar panel (⌘W)", "close") {
+        if button(icon::X, tr!("Cerrar panel (⌘W)"), "close") {
             actions.push(HeaderAction::Close);
         }
         if self.panels.len() > 1 {
@@ -1043,14 +1045,14 @@ impl Workspace {
         };
         if let Some(m) = process {
             let pid = m.def.id.clone();
-            if button(icon::ARROW_CLOCKWISE, "Reiniciar", "restart") {
+            if button(icon::ARROW_CLOCKWISE, tr!("Reiniciar"), "restart") {
                 actions.push(HeaderAction::Restart(pid.clone()));
             }
             if m.is_active() {
-                if button(icon::STOP, "Detener (Ctrl+C)", "stop") {
+                if button(icon::STOP, tr!("Detener (Ctrl+C)"), "stop") {
                     actions.push(HeaderAction::Stop(pid));
                 }
-            } else if button(icon::PLAY, "Iniciar", "start") {
+            } else if button(icon::PLAY, tr!("Iniciar"), "start") {
                 actions.push(HeaderAction::Start(pid));
             }
         }
@@ -1128,7 +1130,7 @@ impl Workspace {
                 }
             }
             if self.maximized == Some(id) {
-                detail.push(format!("maximizado · {} paneles", self.panels.len()));
+                detail.push(tr!("maximizado · {p0} paneles", p0 = self.panels.len()));
             }
             let mut job = egui::text::LayoutJob::default();
             let title_color = if focused { theme::TEXT } else { theme::TEXT_3 };

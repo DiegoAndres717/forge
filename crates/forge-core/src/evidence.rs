@@ -1,4 +1,5 @@
 // Evidencias: resultado de cada validación ligado a su candidato, historial y reporte exportable.
+use crate::tr;
 use serde::{Deserialize, Serialize};
 
 use crate::candidate::Candidate;
@@ -68,15 +69,15 @@ pub fn verdict_label(verdict: Verdict, stage: Stage) -> String {
     let target = match stage {
         Stage::Commit => "commit",
         Stage::Push => "push",
-        Stage::PullRequest => "pull request",
+        Stage::PullRequest => tr!("pull request"),
     };
     match verdict {
-        Verdict::Ready => format!("Listo para {target}"),
-        Verdict::Warnings => format!("Listo para {target} con advertencias"),
-        Verdict::Blocked => "Bloqueado".into(),
-        Verdict::Running => "Sin terminar".into(),
-        Verdict::Pending => "Pendiente de revisión".into(),
-        Verdict::NothingToCheck => "Sin cambios".into(),
+        Verdict::Ready => tr!("Listo para {target}", target = target),
+        Verdict::Warnings => tr!("Listo para {target} con advertencias", target = target),
+        Verdict::Blocked => tr!("Bloqueado").into(),
+        Verdict::Running => tr!("Sin terminar").into(),
+        Verdict::Pending => tr!("Pendiente de revisión").into(),
+        Verdict::NothingToCheck => tr!("Sin cambios").into(),
     }
 }
 
@@ -133,33 +134,37 @@ impl Report {
             self.project,
             self.stage.label()
         );
-        md += &format!(
-            "**{}** ({} de {} controles)\n\n",
-            verdict_label(self.verdict, self.stage),
-            self.progress.0,
-            self.progress.1
+        md += &tr!(
+            "**{p0}** ({p1} de {p2} controles)\n\n",
+            p0 = verdict_label(self.verdict, self.stage),
+            p1 = self.progress.0,
+            p2 = self.progress.1
         );
         if let Some(c) = &self.candidate {
-            md += &format!("- Candidato: `{}`\n", c.id);
-            md += &format!(
-                "- HEAD: `{}` · rama `{}`\n",
-                c.head.chars().take(10).collect::<String>(),
-                self.branch
+            md += &tr!("- Candidato: `{p0}`\n", p0 = c.id);
+            md += &tr!(
+                "- HEAD: `{p0}` · rama `{p1}`\n",
+                p0 = c.head.chars().take(10).collect::<String>(),
+                p1 = self.branch
             );
-            md += &format!("- Árbol: `{}`\n- Diff: `{}`\n", c.tree, c.diff_hash);
-            md += &format!(
-                "- Checks ejecutados en: {}\n",
-                if c.isolated {
+            md += &tr!(
+                "- Árbol: `{p0}`\n- Diff: `{p1}`\n",
+                p0 = c.tree,
+                p1 = c.diff_hash
+            );
+            md += &tr!(
+                "- Checks ejecutados en: {p0}\n",
+                p0 = if c.isolated {
                     "copia aislada del candidato"
                 } else {
                     "el árbol de trabajo (idéntico al candidato)"
                 }
             );
         }
-        md += &format!(
-            "- Fecha: {} (duración {} s)\n\n",
-            utc(self.started_at),
-            (self.finished_at - self.started_at).max(0)
+        md += &tr!(
+            "- Fecha: {p0} (duración {p1} s)\n\n",
+            p0 = utc(self.started_at),
+            p1 = (self.finished_at - self.started_at).max(0)
         );
         if let Some(e) = &self.error {
             md += &format!("> ✕ {e}\n\n");
@@ -172,10 +177,12 @@ impl Report {
             }
         }
         if !self.checks.is_empty() {
-            md += "\n## Checks\n\n| | Check | Resultado | Duración | Comando |\n|---|---|---|---|---|\n";
+            md += tr!(
+                "\n## Checks\n\n| | Check | Resultado | Duración | Comando |\n|---|---|---|---|---|\n"
+            );
             for c in &self.checks {
                 let status = match c.reused_at {
-                    Some(at) => format!("{} (evidencia del {})", c.status, utc(at)),
+                    Some(at) => tr!("{p0} (evidencia del {p1})", p0 = c.status, p1 = utc(at)),
                     None => c.status.clone(),
                 };
                 md += &format!(
@@ -192,7 +199,11 @@ impl Report {
                 .iter()
                 .filter(|c| matches!(c.level, Level::Block | Level::Warn) && !c.output.is_empty())
             {
-                md += &format!("\n### Salida de {}\n\n```text\n{}\n```\n", c.name, c.output);
+                md += &tr!(
+                    "\n### Salida de {p0}\n\n```text\n{p1}\n```\n",
+                    p0 = c.name,
+                    p1 = c.output
+                );
             }
         }
         md

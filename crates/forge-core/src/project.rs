@@ -1,4 +1,5 @@
 // Configuración versionable del proyecto: `.forge/project.toml` y `.forge/layouts.toml`.
+use crate::tr;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -206,9 +207,10 @@ impl Project {
         if let Some(name) = &config.workspace.default_layout
             && !config.layouts.contains_key(name)
         {
-            return Err(format!(
-                "{}: default_layout \"{name}\" no está definido",
-                dir.display()
+            return Err(tr!(
+                "{p0}: default_layout \"{name}\" no está definido",
+                p0 = dir.display(),
+                name = name
             ));
         }
         if config.memory.provider == MemoryProvider::Mcp
@@ -218,9 +220,9 @@ impl Project {
                 .as_deref()
                 .is_none_or(|c| c.trim().is_empty())
         {
-            return Err(format!(
-                "{}: [memory] provider = \"mcp\" necesita `command` (p. ej. \"engram mcp\")",
-                dir.join("project.toml").display()
+            return Err(tr!(
+                "{p0}: [memory] provider = \"mcp\" necesita `command` (p. ej. \"engram mcp\")",
+                p0 = dir.join("project.toml").display()
             ));
         }
         validate_processes(&config.processes)
@@ -265,7 +267,7 @@ impl Project {
         std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let file = dir.join("project.toml");
         if file.exists() {
-            return Err(format!("{} ya existe", file.display()));
+            return Err(tr!("{p0} ya existe", p0 = file.display()));
         }
         std::fs::write(&file, template(&self.name(), &detect_commands(&self.path)))
             .map_err(|e| format!("{}: {e}", file.display()))
@@ -276,20 +278,20 @@ fn validate_processes(processes: &[ProcessDef]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for p in processes {
         if !seen.insert(&p.id) {
-            return Err(format!("el proceso \"{}\" está repetido", p.id));
+            return Err(tr!("el proceso \"{p0}\" está repetido", p0 = p.id));
         }
         if let Some(h) = &p.health_check {
             let kinds = [h.port.is_some(), h.url.is_some(), h.command.is_some()];
             if kinds.iter().filter(|k| **k).count() != 1 {
-                return Err(format!(
-                    "health_check de \"{}\": usa exactamente uno de port, url o command",
-                    p.id
+                return Err(tr!(
+                    "health_check de \"{p0}\": usa exactamente uno de port, url o command",
+                    p0 = p.id
                 ));
             }
             if h.url.as_ref().is_some_and(|u| !u.starts_with("http://")) {
-                return Err(format!(
-                    "health_check de \"{}\": url debe empezar por http:// (para https usa port o command)",
-                    p.id
+                return Err(tr!(
+                    "health_check de \"{p0}\": url debe empezar por http:// (para https usa port o command)",
+                    p0 = p.id
                 ));
             }
         }

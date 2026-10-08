@@ -9,6 +9,8 @@ const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
 #[test]
 fn mcp_server_shares_memory_between_clients() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let base = std::env::temp_dir().join(format!("forge-it-mcp-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let project = base.join("proyecto");

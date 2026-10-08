@@ -1,4 +1,5 @@
 // Línea de comandos: `forge guard …` y `forge hooks …` (sin abrir la ventana).
+use forge_core::tr;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -41,6 +42,47 @@ Uso:
 Opciones:
   --project <carpeta>   proyecto (por defecto: la carpeta con .forge/ más cercana o la raíz del repo)
   --hook                modo hook de Git (lo usan los hooks instalados)
+";
+
+/// Ayuda en el idioma actual.
+pub fn usage() -> &'static str {
+    match forge_core::i18n::lang() {
+        forge_core::i18n::Lang::En => USAGE_EN,
+        forge_core::i18n::Lang::Es => USAGE,
+    }
+}
+
+pub const USAGE_EN: &str = "\
+Forge — project workspace with terminals, agents and Project Guard
+
+Usage:
+  forge [folder]                        opens the app (and that project)
+  forge guard commit|push|pr            checks whether the project is ready
+  forge guard status                    project rules, hooks and exceptions
+  forge guard explain [commit|push|pr]  what each stage requires
+  forge guard allow <rule> --reason \"reason\" [--scope commit|pull-request|session] [--stage commit|push|pr]
+  forge guard exceptions                exception history
+  forge guard revoke <id>               disables an exception
+  forge guard history                   latest project validations
+  forge guard report [id] [--output f]  Markdown report (latest by default)
+  forge hooks install|uninstall|status  pre-commit and pre-push hooks
+  forge agent list                      detected agents, version and capabilities
+  forge agent open <id> [--resume]      opens the project agent in this terminal
+  forge doctor                          checks git, database, settings, hooks and agents
+  forge ai route [commit|push|pr]       change risk and which models would review it (free)
+  forge ai usage                        model usage this month
+  forge ai init                         creates .forge/routing.toml
+  forge memory search <text> [--kind k]    searches the project memory
+  forge memory add <kind> \"title\" \"text\" [--tags a,b]
+  forge memory list [--kind k] · forge memory delete <id>
+  forge ideas [--all] [--general]          ideas and to-dos (outside the repository)
+  forge ideas add \"title\" [\"note\"] [--general]
+  forge ideas done|doing|pending|delete <id> [--general]
+  forge mcp                             MCP server (memory and context) for agents
+
+Options:
+  --project <folder>    project (default: nearest folder with .forge/ or the repo root)
+  --hook                Git hook mode (used by the installed hooks)
 ";
 
 /// Salida con colores solo si es un terminal.
@@ -128,7 +170,7 @@ fn find_project(args: &[String]) -> PathBuf {
 
 fn open_store() -> Result<Store, String> {
     Store::default_path()
-        .ok_or_else(|| "no se encontró $HOME".to_string())
+        .ok_or_else(|| tr!("no se encontró $HOME").to_string())
         .and_then(|p| Store::open(&p))
 }
 
@@ -193,7 +235,7 @@ pub fn run(args: &[String]) -> i32 {
             0
         }),
         _ => {
-            out.line(USAGE);
+            out.line(usage());
             Ok(2)
         }
     };
@@ -208,9 +250,9 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
     let project = Project::load(project_dir)?;
     let rules = Rules::load(project_dir)?.unwrap_or_default();
     if !rules.stage(stage).enabled {
-        out.line(&format!(
-            "Forge Guard: {} desactivado en .forge/rules.toml",
-            stage.label()
+        out.line(&tr!(
+            "Forge Guard: {p0} desactivado en .forge/rules.toml",
+            p0 = stage.label()
         ));
         return Ok(0);
     }
@@ -237,9 +279,10 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
             store.evidence(project_dir).unwrap_or_default(),
         ),
         Err(e) => {
-            out.line(&format!(
-                "{} sin excepciones ni evidencias guardadas: {e}",
-                out.paint("33", "⚠")
+            out.line(&tr!(
+                "{p0} sin excepciones ni evidencias guardadas: {e}",
+                p0 = out.paint("33", "⚠"),
+                e = e
             ));
             (Vec::new(), Vec::new())
         }
@@ -277,11 +320,14 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
                 }
                 if let Some(c) = &r.frozen {
                     let place = if c.isolated {
-                        " · checks en copia aislada del candidato"
+                        tr!(" · checks en copia aislada del candidato")
                     } else {
                         ""
                     };
-                    out.line(&out.paint("2", &format!("  candidato {}{place}", c.id)));
+                    out.line(&out.paint(
+                        "2",
+                        &tr!("  candidato {p0}{place}", p0 = c.id, place = place),
+                    ));
                 }
                 // Las revisiones con IA se muestran al final, cuando terminan.
                 for item in r.items.iter().filter(|i| !is_ai(&i.id)) {
@@ -295,7 +341,7 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
                 shown_checks = vec![false; r.checks.len()];
                 if !r.checks.is_empty() {
                     let names: Vec<&str> = r.checks.iter().map(|c| c.check.id.as_str()).collect();
-                    out.line(&out.paint("2", &format!("  … ejecutando {}", names.join(", "))));
+                    out.line(&out.paint("2", &tr!("  … ejecutando {p0}", p0 = names.join(", "))));
                 }
             }
             for (i, c) in r.checks.iter().enumerate() {
@@ -338,40 +384,46 @@ fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, 
             Verdict::Ready => (
                 out.paint(
                     "32;1",
-                    &format!("LISTO PARA {}", stage.label().to_uppercase()),
+                    &tr!("LISTO PARA {p0}", p0 = stage.label().to_uppercase()),
                 ),
                 0,
             ),
-            Verdict::Warnings => (out.paint("33;1", "LISTO CON ADVERTENCIAS"), 0),
-            Verdict::NothingToCheck => (out.paint("2", "SIN CAMBIOS QUE EVALUAR"), 0),
+            Verdict::Warnings => (out.paint("33;1", tr!("LISTO CON ADVERTENCIAS")), 0),
+            Verdict::NothingToCheck => (out.paint("2", tr!("SIN CAMBIOS QUE EVALUAR")), 0),
             Verdict::Pending => (
                 out.paint(
                     "33;1",
-                    "PENDIENTE: faltan revisiones que aún no están disponibles",
+                    tr!("PENDIENTE: faltan revisiones que aún no están disponibles"),
                 ),
                 1,
             ),
-            Verdict::Blocked | Verdict::Running => (out.paint("31;1", "BLOQUEADO"), 1),
+            Verdict::Blocked | Verdict::Running => (out.paint("31;1", tr!("BLOQUEADO")), 1),
         };
-        out.line(&format!("{text}  ({done} de {total} controles)"));
+        out.line(&tr!(
+            "{text}  ({done} de {total} controles)",
+            text = text,
+            done = done,
+            total = total
+        ));
         if code != 0 {
             let what = match stage {
-                Stage::Commit => "El commit no se creó.",
-                Stage::Push => "El push no se envió.",
-                Stage::PullRequest => "No crees el pull request todavía.",
+                Stage::Commit => tr!("El commit no se creó."),
+                Stage::Push => tr!("El push no se envió."),
+                Stage::PullRequest => tr!("No crees el pull request todavía."),
             };
             if hook {
                 out.line(what);
             }
             let rules = r.blocking_rules();
             if !rules.is_empty() {
-                out.line(&out.paint("2", "Para omitir una regla, con motivo registrado:"));
+                out.line(&out.paint("2", tr!("Para omitir una regla, con motivo registrado:")));
                 for rule in rules {
                     out.line(&out.paint(
                         "2",
-                        &format!(
-                            "  forge guard allow {rule} --stage {} --reason \"motivo\"",
-                            stage.as_str()
+                        &tr!(
+                            "  forge guard allow {rule} --stage {p0} --reason \"motivo\"",
+                            p0 = stage.as_str(),
+                            rule = rule
                         ),
                     ));
                 }
@@ -393,15 +445,15 @@ fn print_check(out: &Out, r: &GuardRun, c: &guard::CheckRun) {
     let level = r.check_level(c).unwrap_or(Level::Pending);
     let status = match &c.state {
         CheckState::Passed if c.reused.is_some() => {
-            format!(
-                "evidencia reutilizada ({})",
-                store::ago_precise(c.reused.unwrap_or_default())
+            tr!(
+                "evidencia reutilizada ({p0})",
+                p0 = store::ago_precise(c.reused.unwrap_or_default())
             )
         }
         CheckState::Passed => secs,
-        CheckState::Failed(code) => format!("código {code} · {secs}"),
+        CheckState::Failed(code) => tr!("código {code} · {secs}", code = code, secs = secs),
         CheckState::TimedOut => format!("tiempo agotado ({} s)", c.check.timeout_seconds),
-        CheckState::Cancelled => "cancelado".into(),
+        CheckState::Cancelled => tr!("cancelado").into(),
         CheckState::Error(e) => e.clone(),
         _ => String::new(),
     };
@@ -436,40 +488,45 @@ fn valid_rule(rule: &str, rules: &Rules, project: &Path) -> Result<(), String> {
         let reviewers = forge_core::reviewers::load(project)?;
         return match reviewers.iter().any(|r| r.id == id) {
             true => Ok(()),
-            false => Err(format!("no hay revisor \"{id}\" (forge ai route)")),
+            false => Err(tr!("no hay revisor \"{id}\" (forge ai route)", id = id)),
         };
     }
     if let Some(id) = rule.strip_prefix("check:") {
         return match rules.checks.iter().any(|c| c.id == id) {
             true => Ok(()),
-            false => Err(format!("no hay [[checks]] con id = \"{id}\"")),
+            false => Err(tr!("no hay [[checks]] con id = \"{id}\"", id = id)),
         };
     }
-    Err(format!(
-        "regla desconocida \"{rule}\". Válidas: {}, check:<id>, missing:<id>, reviewer:<id>",
-        fixed.join(", ")
+    Err(tr!(
+        "regla desconocida \"{rule}\". Válidas: {p0}, check:<id>, missing:<id>, reviewer:<id>",
+        p0 = fixed.join(", "),
+        rule = rule
     ))
 }
 
 fn allow(out: &Out, project: &Path, args: &[String], rule: Option<&str>) -> Result<i32, String> {
-    let rule = rule.ok_or("falta la regla: forge guard allow <regla> --reason \"motivo\"")?;
+    let rule = rule.ok_or(tr!(
+        "falta la regla: forge guard allow <regla> --reason \"motivo\""
+    ))?;
     let reason = flag(args, "--reason")
         .map(|r| r.trim().to_string())
         .unwrap_or_default();
     if reason.chars().count() < 5 {
-        return Err(
-            "toda excepción necesita un motivo: --reason \"…\" (al menos 5 caracteres)".into(),
-        );
+        return Err(tr!(
+            "toda excepción necesita un motivo: --reason \"…\" (al menos 5 caracteres)"
+        )
+        .into());
     }
     let scope = match flag(args, "--scope") {
-        Some(s) => Scope::parse(&s).ok_or(format!(
-            "--scope inválido \"{s}\": commit, pull-request o session"
+        Some(s) => Scope::parse(&s).ok_or(tr!(
+            "--scope inválido \"{s}\": commit, pull-request o session",
+            s = s
         ))?,
         None => Scope::Commit,
     };
     let stage = match flag(args, "--stage") {
         Some(s) => {
-            Stage::parse(&s).ok_or(format!("--stage inválido \"{s}\": commit, push o pr"))?
+            Stage::parse(&s).ok_or(tr!("--stage inválido \"{s}\": commit, push o pr", s = s))?
         }
         None => Stage::Commit,
     };
@@ -491,12 +548,14 @@ fn allow(out: &Out, project: &Path, args: &[String], rule: Option<&str>) -> Resu
         revoked: false,
     };
     let id = open_store()?.add_exception(project, &exception)?;
-    out.line(&format!(
-        "{} Excepción #{id} registrada: {rule} · {} · «{}» ({})",
-        out.paint("33", "↷"),
-        scope.label(),
-        exception.reason,
-        exception.user
+    out.line(&tr!(
+        "{p0} Excepción #{id} registrada: {rule} · {p1} · «{p2}» ({p3})",
+        p0 = out.paint("33", "↷"),
+        p1 = scope.label(),
+        p2 = exception.reason,
+        p3 = exception.user,
+        id = id,
+        rule = rule
     ));
     Ok(0)
 }
@@ -504,7 +563,7 @@ fn allow(out: &Out, project: &Path, args: &[String], rule: Option<&str>) -> Resu
 fn exceptions(out: &Out, project: &Path) -> Result<i32, String> {
     let list = open_store()?.exceptions(project)?;
     if list.is_empty() {
-        out.line("Sin excepciones registradas.");
+        out.line(tr!("Sin excepciones registradas."));
     }
     for e in list {
         let state = if e.revoked {
@@ -528,12 +587,13 @@ fn exceptions(out: &Out, project: &Path) -> Result<i32, String> {
 fn revoke(out: &Out, project: &Path, id: Option<&str>) -> Result<i32, String> {
     let id: i64 = id
         .and_then(|i| i.trim_start_matches('#').parse().ok())
-        .ok_or("uso: forge guard revoke <id>")?;
+        .ok_or(tr!("uso: forge guard revoke <id>"))?;
     match open_store()?.revoke_exception(project, id)? {
-        true => out.line(&format!(
-            "Excepción #{id} revocada (sigue en el historial)."
+        true => out.line(&tr!(
+            "Excepción #{id} revocada (sigue en el historial).",
+            id = id
         )),
-        false => return Err(format!("no hay excepción #{id} en este proyecto")),
+        false => return Err(tr!("no hay excepción #{id} en este proyecto", id = id)),
     }
     Ok(0)
 }
@@ -541,7 +601,7 @@ fn revoke(out: &Out, project: &Path, id: Option<&str>) -> Result<i32, String> {
 fn history(out: &Out, project: &Path) -> Result<i32, String> {
     let list = open_store()?.validations(project, 20)?;
     if list.is_empty() {
-        out.line("Sin validaciones todavía (forge guard commit).");
+        out.line(tr!("Sin validaciones todavía (forge guard commit)."));
     }
     for (id, r) in list {
         let candidate = r
@@ -571,18 +631,18 @@ fn report(
         .map(|i| {
             i.trim_start_matches('#')
                 .parse()
-                .map_err(|_| format!("id inválido: {i}"))
+                .map_err(|_| tr!("id inválido: {i}", i = i))
         })
         .transpose()?;
     let (_, r) = list
         .into_iter()
         .find(|(vid, _)| wanted.is_none_or(|w| w == *vid))
-        .ok_or("no hay esa validación (forge guard history)")?;
+        .ok_or(tr!("no hay esa validación (forge guard history)"))?;
     let md = r.markdown();
     match output {
         Some(path) => {
             std::fs::write(&path, &md).map_err(|e| format!("{path}: {e}"))?;
-            out.line(&format!("Reporte guardado en {path}"));
+            out.line(&tr!("Reporte guardado en {path}", path = path));
         }
         None => out.line(&md),
     }
@@ -619,9 +679,9 @@ fn agent_list(out: &Out, project: &Path) -> Result<i32, String> {
                 a.id,
                 out.paint(
                     "2",
-                    &format!(
-                        "no instalado — {}",
-                        a.install_hint.clone().unwrap_or_default()
+                    &tr!(
+                        "no instalado — {p0}",
+                        p0 = a.install_hint.clone().unwrap_or_default()
                     )
                 )
             )),
@@ -636,7 +696,7 @@ fn agent_list(out: &Out, project: &Path) -> Result<i32, String> {
 /// Sustituye este proceso por el agente, en la raíz del proyecto y con su entorno.
 fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, String> {
     use std::os::unix::process::CommandExt;
-    let id = id.ok_or("uso: forge agent open <id> [--resume]")?;
+    let id = id.ok_or(tr!("uso: forge agent open <id> [--resume]"))?;
     let agents = forge_core::agents::load(project)?;
     let agent = agents
         .iter()
@@ -644,7 +704,7 @@ fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, Str
         .ok_or(format!("agente desconocido \"{id}\" (forge agent list)"))?;
     let command = match (&agent.resume, resume) {
         (Some(r), true) => r.clone(),
-        (None, true) => return Err(format!("{} no permite reanudar sesiones", agent.name)),
+        (None, true) => return Err(tr!("{p0} no permite reanudar sesiones", p0 = agent.name)),
         _ => agent.command.clone(),
     };
     let root = Project::load(project)
@@ -656,7 +716,11 @@ fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, Str
         .current_dir(root)
         .envs(&agent.environment)
         .exec();
-    Err(format!("no se pudo abrir {}: {err}", agent.name))
+    Err(tr!(
+        "no se pudo abrir {p0}: {err}",
+        p0 = agent.name,
+        err = err
+    ))
 }
 
 fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
@@ -673,23 +737,23 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
     let git = std::process::Command::new("git").arg("--version").output();
     healthy &= ok(
         git.as_ref().is_ok_and(|o| o.status.success()),
-        "git instalado",
+        tr!("git instalado"),
     );
     healthy &= ok(
         guard::repo_root(project).is_ok(),
-        &format!("{} es un repositorio Git", project.display()),
+        &tr!("{p0} es un repositorio Git", p0 = project.display()),
     );
     match open_store() {
         Ok(_) => ok(
             true,
-            &format!(
-                "base de datos: {}",
-                Store::default_path().unwrap_or_default().display()
+            &tr!(
+                "base de datos: {p0}",
+                p0 = Store::default_path().unwrap_or_default().display()
             ),
         ),
         Err(e) => {
             healthy = false;
-            ok(false, &format!("base de datos: {e}"))
+            ok(false, &tr!("base de datos: {e}", e = e))
         }
     };
     for (name, result) in [
@@ -700,7 +764,7 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
         ("rules.toml", Rules::load(project).map(drop)),
     ] {
         match result {
-            Ok(()) => ok(true, &format!("configuración válida: {name}")),
+            Ok(()) => ok(true, &tr!("configuración válida: {name}", name = name)),
             Err(e) => {
                 healthy = false;
                 ok(false, &e)
@@ -711,10 +775,16 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
         Ok(list) => {
             for (name, state) in list {
                 let text = match state {
-                    HookState::Installed => format!("hook {name} instalado"),
-                    HookState::Missing => format!("hook {name} no instalado (forge hooks install)"),
+                    HookState::Installed => tr!("hook {name} instalado", name = name),
+                    HookState::Missing => tr!(
+                        "hook {name} no instalado (forge hooks install)",
+                        name = name
+                    ),
                     HookState::Foreign => {
-                        format!("hook {name}: hay otro hook (Forge lo encadenará)")
+                        tr!(
+                            "hook {name}: hay otro hook (Forge lo encadenará)",
+                            name = name
+                        )
                     }
                 };
                 out.line(&format!(
@@ -727,7 +797,7 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
                 ));
             }
         }
-        Err(e) => out.line(&format!("{} hooks: {e}", out.paint("33", "○"))),
+        Err(e) => out.line(&tr!("{p0} hooks: {e}", p0 = out.paint("33", "○"), e = e)),
     }
     let agents = project_agents(project);
     let programs: Vec<String> = agents.iter().map(|a| a.program().to_string()).collect();
@@ -739,9 +809,9 @@ fn doctor(out: &Out, project: &Path) -> Result<i32, String> {
         .collect();
     healthy &= ok(
         !installed.is_empty(),
-        &format!(
-            "agentes instalados: {}",
-            if installed.is_empty() {
+        &tr!(
+            "agentes instalados: {p0}",
+            p0 = if installed.is_empty() {
                 "ninguno".into()
             } else {
                 installed.join(", ")
@@ -763,13 +833,13 @@ fn ideas_cli(
     let id = || -> Result<i64, String> {
         rest.first()
             .and_then(|i| i.trim_start_matches('#').parse().ok())
-            .ok_or_else(|| format!("uso: forge ideas {action} <id>"))
+            .ok_or_else(|| tr!("uso: forge ideas {action} <id>", action = action))
     };
     match action {
         "list" => {
             let ideas = store.list_ideas(list, args.iter().any(|a| a == "--all"))?;
             if ideas.is_empty() {
-                out.line("No hay ideas pendientes.");
+                out.line(tr!("No hay ideas pendientes."));
             }
             for idea in ideas {
                 out.line(&forge_core::ideas::render(&idea));
@@ -777,7 +847,7 @@ fn ideas_cli(
         }
         "add" => {
             let [title, note @ ..] = rest else {
-                return Err("uso: forge ideas add \"título\" [\"nota\"]".into());
+                return Err(tr!("uso: forge ideas add \"título\" [\"nota\"]").into());
             };
             let id = store.add_idea(list, title, &note.join(" "), "usuario")?;
             out.line(&format!("Anotada como idea #{id}."));
@@ -785,20 +855,21 @@ fn ideas_cli(
         "done" | "doing" | "pending" => {
             let id = id()?;
             if !store.update_idea(list, id, Some(action), None, None, "usuario")? {
-                return Err(format!("no existe la idea #{id} en esta lista"));
+                return Err(tr!("no existe la idea #{id} en esta lista", id = id));
             }
             out.line(&format!("Idea #{id}: {action}."));
         }
         "delete" => {
             let id = id()?;
             if !store.delete_idea(list, id)? {
-                return Err(format!("no existe la idea #{id} en esta lista"));
+                return Err(tr!("no existe la idea #{id} en esta lista", id = id));
             }
             out.line(&format!("Idea #{id} borrada."));
         }
         _ => {
-            return Err(format!(
-                "acción desconocida \"{action}\": list, add, done, doing, pending o delete"
+            return Err(tr!(
+                "acción desconocida \"{action}\": list, add, done, doing, pending o delete",
+                action = action
             ));
         }
     }
@@ -819,7 +890,7 @@ fn memory_cli(
         "list" => store.list_memories(project, kind.as_deref(), 30)?,
         "add" => {
             let [k, title, body @ ..] = rest else {
-                return Err("uso: forge memory add <tipo> \"título\" \"texto\"".into());
+                return Err(tr!("uso: forge memory add <tipo> \"título\" \"texto\"").into());
             };
             let tags = flag(args, "--tags").unwrap_or_default();
             let id = store.add_memory(project, k, title, &body.join(" "), &tags, "usuario")?;
@@ -830,23 +901,24 @@ fn memory_cli(
             let id: i64 = rest
                 .first()
                 .and_then(|i| i.trim_start_matches('#').parse().ok())
-                .ok_or("uso: forge memory delete <id>")?;
+                .ok_or(tr!("uso: forge memory delete <id>"))?;
             return match store.delete_memory(project, id)? {
                 true => {
-                    out.line(&format!("Memoria #{id} borrada."));
+                    out.line(&tr!("Memoria #{id} borrada.", id = id));
                     Ok(0)
                 }
-                false => Err(format!("no existe la memoria #{id}")),
+                false => Err(tr!("no existe la memoria #{id}", id = id)),
             };
         }
         _ => {
-            return Err(format!(
-                "acción desconocida \"{action}\": search, add, list o delete"
+            return Err(tr!(
+                "acción desconocida \"{action}\": search, add, list o delete",
+                action = action
             ));
         }
     };
     if found.is_empty() {
-        out.line("Sin resultados.");
+        out.line(tr!("Sin resultados."));
     }
     for m in found {
         out.line(&forge_core::memory::render(&m));
@@ -866,11 +938,11 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
     let local = router::local_available();
     out.line(&out.paint(
         "1",
-        &format!(
-            "Riesgo {} ({} puntos) · {} archivos",
-            risk.level.label(),
-            risk.score,
-            diff.files.len()
+        &tr!(
+            "Riesgo {p0} ({p1} puntos) · {p2} archivos",
+            p0 = risk.level.label(),
+            p1 = risk.score,
+            p2 = diff.files.len()
         ),
     ));
     for signal in &risk.signals {
@@ -882,7 +954,7 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
         if local {
             "disponible (ollama)"
         } else {
-            "no disponible"
+            tr!("no disponible")
         },
         if config.allow_escalation {
             "permitido"
@@ -905,7 +977,7 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
     }
     out.line(&out.paint(
         "2",
-        "El nivel 3 también se activa si hay poca confianza o desacuerdo entre revisores.",
+        tr!("El nivel 3 también se activa si hay poca confianza o desacuerdo entre revisores."),
     ));
     if rules.stage(stage).require_ai_review {
         let reviewers = forge_core::reviewers::load(project)?;
@@ -914,18 +986,19 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
             &guard::counted_files(&rules, &diff.files),
             &risk,
         );
-        out.line(&out.paint("1", "Revisores especializados"));
+        out.line(&out.paint("1", tr!("Revisores especializados")));
         for a in &active {
             let kind = if a.reviewer.blocking {
                 "bloqueante"
             } else {
                 "informativo"
             };
-            out.line(&format!(
-                "  ✓ {} ({kind}) · {} · {} archivos",
-                a.reviewer.name,
-                router::reviewer_route(&config, &a.reviewer, local).label(),
-                a.files.len()
+            out.line(&tr!(
+                "  ✓ {p0} ({kind}) · {p1} · {p2} archivos",
+                p0 = a.reviewer.name,
+                p1 = router::reviewer_route(&config, &a.reviewer, local).label(),
+                p2 = a.files.len(),
+                kind = kind
             ));
         }
         for (name, why) in skipped {
@@ -944,7 +1017,7 @@ fn ai_usage(out: &Out, project: &Path) -> Result<i32, String> {
     let store = open_store()?;
     let rows = store.month_usage(project)?;
     if rows.is_empty() {
-        out.line("Sin consumo de modelos este mes.");
+        out.line(tr!("Sin consumo de modelos este mes."));
     }
     for (provider, model, task, calls, input, output, cost) in rows {
         out.line(&format!("{provider:<10} {model:<14} {task:<15} {calls:>3} llamadas  {input:>9} → {output:<7} tokens  ${cost:.3}"));
@@ -966,7 +1039,7 @@ fn hooks_install(out: &Out, project: &Path) -> Result<i32, String> {
     for line in hooks::install(&project, &exe)? {
         out.line(&line);
     }
-    out.line(&out.paint("2", &format!("Los hooks llaman a {}", exe.display())));
+    out.line(&out.paint("2", &tr!("Los hooks llaman a {p0}", p0 = exe.display())));
     Ok(0)
 }
 
@@ -974,8 +1047,8 @@ fn hooks_status(out: &Out, project: &Path) -> Result<i32, String> {
     for (name, state) in hooks::status(project)? {
         let text = match state {
             HookState::Installed => out.paint("32", "instalado"),
-            HookState::Missing => out.paint("2", "no instalado"),
-            HookState::Foreign => out.paint("33", "hay otro hook (Forge lo encadenará)"),
+            HookState::Missing => out.paint("2", tr!("no instalado")),
+            HookState::Foreign => out.paint("33", tr!("hay otro hook (Forge lo encadenará)")),
         };
         out.line(&format!("{name}: {text}"));
     }
@@ -983,14 +1056,16 @@ fn hooks_status(out: &Out, project: &Path) -> Result<i32, String> {
 }
 
 fn status(out: &Out, project: &Path) -> Result<i32, String> {
-    out.line(&out.paint("1", &format!("Proyecto: {}", project.display())));
+    out.line(&out.paint("1", &tr!("Proyecto: {p0}", p0 = project.display())));
     let rules_file = project.join(".forge/rules.toml");
     match Rules::load(project)? {
-        Some(_) => out.line(&format!("Reglas: {}", rules_file.display())),
-        None => out.line("Reglas: sin .forge/rules.toml (valores por defecto, sin checks)"),
+        Some(_) => out.line(&tr!("Reglas: {p0}", p0 = rules_file.display())),
+        None => out.line(tr!(
+            "Reglas: sin .forge/rules.toml (valores por defecto, sin checks)"
+        )),
     }
     if let Err(e) = hooks_status(out, project) {
-        out.line(&format!("Hooks: {e}"));
+        out.line(&tr!("Hooks: {e}", e = e));
     }
     let active = open_store()?
         .exceptions(project)?
@@ -1000,8 +1075,9 @@ fn status(out: &Out, project: &Path) -> Result<i32, String> {
                 && (e.scope != Scope::Session || store::now() - e.created_at < guard::SESSION_SECS)
         })
         .count();
-    out.line(&format!(
-        "Excepciones activas: {active} (forge guard exceptions)"
+    out.line(&tr!(
+        "Excepciones activas: {active} (forge guard exceptions)",
+        active = active
     ));
     Ok(0)
 }
@@ -1010,13 +1086,13 @@ fn explain(out: &Out, project: &Path, only: Option<Stage>) -> Result<i32, String
     let rules = Rules::load(project)?.unwrap_or_default();
     let q = &rules.quality;
     out.line(&out.paint("1", "Calidad"));
-    out.line(&format!(
-        "  líneas: advertencia > {}, bloqueo > {} · archivos: máximo {}",
-        guard::thousands(q.warning_changed_lines),
-        guard::thousands(q.max_changed_lines),
-        q.max_files_changed
+    out.line(&tr!(
+        "  líneas: advertencia > {p0}, bloqueo > {p1} · archivos: máximo {p2}",
+        p0 = guard::thousands(q.warning_changed_lines),
+        p1 = guard::thousands(q.max_changed_lines),
+        p2 = q.max_files_changed
     ));
-    out.line(&format!("  no cuentan: {}", q.lines.exclude.join(", ")));
+    out.line(&tr!("  no cuentan: {p0}", p0 = q.lines.exclude.join(", ")));
     out.line(&format!(
         "  prohibidos: {}{}",
         if q.block_env_files {
@@ -1031,7 +1107,7 @@ fn explain(out: &Out, project: &Path, only: Option<Stage>) -> Result<i32, String
         if q.block_secrets {
             "bloquean"
         } else {
-            "no se revisan"
+            tr!("no se revisan")
         }
     ));
     for stage in Stage::ALL
@@ -1046,22 +1122,27 @@ fn explain(out: &Out, project: &Path, only: Option<Stage>) -> Result<i32, String
         }
         let (checks, missing) = rules.checks_for(stage);
         for c in checks {
-            out.line(&format!(
-                "  {} — {} (máx. {} s)",
-                c.id, c.command, c.timeout_seconds
+            out.line(&tr!(
+                "  {p0} — {p1} (máx. {p2} s)",
+                p0 = c.id,
+                p1 = c.command,
+                p2 = c.timeout_seconds
             ));
         }
         for m in missing {
-            out.line(&format!(
-                "  {} require_{m} activo pero falta [[checks]] id = \"{m}\"",
-                out.paint("31", "✕")
+            out.line(&tr!(
+                "  {p0} require_{m} activo pero falta [[checks]] id = \"{m}\"",
+                p0 = out.paint("31", "✕"),
+                m = m
             ));
         }
         if s.require_ai_review {
-            out.line("  revisión de IA (pendiente: aún no disponible)");
+            out.line(tr!("  revisión de IA (pendiente: aún no disponible)"));
         }
         if s.require_security_review {
-            out.line("  revisión de seguridad (pendiente: aún no disponible)");
+            out.line(tr!(
+                "  revisión de seguridad (pendiente: aún no disponible)"
+            ));
         }
     }
     Ok(0)

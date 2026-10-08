@@ -1,4 +1,5 @@
 // Ventana principal: inicio con proyectos recientes, barra lateral y workspaces abiertos.
+use forge_core::tr;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -133,6 +134,8 @@ enum UiCmd {
     Home,
     Activate(usize),
     Close(usize),
+    /// Cambia el idioma de la interfaz (se guarda para la próxima vez).
+    SetLang(forge_core::i18n::Lang),
     /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
     Sleep(usize),
     OpenFolder,
@@ -229,7 +232,7 @@ impl App {
         open: Option<PathBuf>,
     ) -> Self {
         let store = Store::default_path()
-            .ok_or_else(|| "no se encontró $HOME".to_string())
+            .ok_or_else(|| tr!("no se encontró $HOME").to_string())
             .and_then(|p| Store::open(&p));
         Self::with_store(ctx, settings, error, open, store)
     }
@@ -276,7 +279,7 @@ impl App {
         }
         match store {
             Ok(store) => app.store = Some(store),
-            Err(e) => app.error = Some(format!("{e} (los workspaces no se guardarán)")),
+            Err(e) => app.error = Some(tr!("{e} (los workspaces no se guardarán)", e = e)),
         }
 
         // Restaura los proyectos que estaban abiertos al cerrar.
@@ -320,7 +323,7 @@ impl App {
             return;
         }
         if !path.is_dir() {
-            self.error = Some(format!("{} no es una carpeta", path.display()));
+            self.error = Some(tr!("{p0} no es una carpeta", p0 = path.display()));
             return;
         }
         // Configuración inválida: se abre igual con valores por defecto y se avisa.
@@ -490,6 +493,10 @@ impl App {
             UiCmd::Home => self.active = None,
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
+            UiCmd::SetLang(lang) => {
+                forge_core::i18n::set_lang(lang);
+                self.db(|s| s.set_setting("language", lang.code()));
+            }
             UiCmd::Sleep(i) => {
                 self.save();
                 if let Some(ws) = self.workspaces.get_mut(i) {
@@ -594,8 +601,10 @@ impl App {
                         Some(id) => ws.open_agent(ctx, &id, false, area),
                         None => {
                             self.error = Some(
-                                "No hay ningún agente instalado (Claude Code, Codex, OpenCode…)"
-                                    .into(),
+                                tr!(
+                                    "No hay ningún agente instalado (Claude Code, Codex, OpenCode…)"
+                                )
+                                .into(),
                             )
                         }
                     }
@@ -675,8 +684,10 @@ impl App {
                                         &ws.project.path,
                                     )
                                     .map_err(|e| {
-                                        ws.guard.notice =
-                                            Some(format!("✕ {e} (revisiones con IA desactivadas)"))
+                                        ws.guard.notice = Some(tr!(
+                                            "✕ {e} (revisiones con IA desactivadas)",
+                                            e = e
+                                        ))
                                     })
                                     .ok(),
                                     month_spent,
@@ -746,7 +757,7 @@ impl App {
                         match forge_core::pr::command(&ws.project.path, &draft) {
                             Ok(command) => {
                                 let command = SavedCommand {
-                                    name: "pull request".into(),
+                                    name: tr!("pull request").into(),
                                     command,
                                     working_directory: None,
                                 };
@@ -829,7 +840,11 @@ impl App {
                     .arg(&file)
                     .spawn()
                 {
-                    self.error = Some(format!("no se pudo abrir {}: {e}", file.display()));
+                    self.error = Some(tr!(
+                        "no se pudo abrir {p0}: {e}",
+                        p0 = file.display(),
+                        e = e
+                    ));
                 }
             }
             UiCmd::Start(_)
@@ -1012,7 +1027,7 @@ impl eframe::App for App {
             ui.painter().text(
                 full.center(),
                 egui::Align2::CENTER_CENTER,
-                "Suelta la carpeta para abrirla como proyecto",
+                tr!("Suelta la carpeta para abrirla como proyecto"),
                 FontId::proportional(20.0),
                 Color32::WHITE,
             );

@@ -1,5 +1,6 @@
 // Servidor MCP (stdio, JSON-RPC 2.0 por líneas): la memoria y el contexto del proyecto
 // como herramientas para Claude Code, Codex, OpenCode u otro cliente MCP.
+use crate::tr;
 use std::io::{BufRead, Write};
 use std::path::Path;
 
@@ -16,11 +17,11 @@ fn tools() -> Value {
     json!([
         {
             "name": "memory_search",
-            "description": "Busca en la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió.",
+            "description": tr!("Busca en la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Palabras a buscar (sin tildes también vale)"},
+                    "query": {"type": "string", "description": tr!("Palabras a buscar (sin tildes también vale)")},
                     "kind": {"type": "string", "enum": kinds},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 50}
                 },
@@ -29,21 +30,21 @@ fn tools() -> Value {
         },
         {
             "name": "memory_save",
-            "description": "Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa idea_add.",
+            "description": tr!("Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa idea_add."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "kind": {"type": "string", "enum": kinds},
                     "title": {"type": "string"},
                     "body": {"type": "string"},
-                    "tags": {"type": "string", "description": "Separadas por comas"}
+                    "tags": {"type": "string", "description": tr!("Separadas por comas")}
                 },
                 "required": ["kind", "title", "body"]
             }
         },
         {
             "name": "memory_list",
-            "description": "Lista las memorias más recientes del proyecto, opcionalmente de un tipo.",
+            "description": tr!("Lista las memorias más recientes del proyecto, opcionalmente de un tipo."),
             "inputSchema": {
                 "type": "object",
                 "properties": {"kind": {"type": "string", "enum": kinds}, "limit": {"type": "integer", "minimum": 1, "maximum": 50}}
@@ -51,36 +52,36 @@ fn tools() -> Value {
         },
         {
             "name": "memory_delete",
-            "description": "Borra una memoria que ya no es cierta (por id).",
+            "description": tr!("Borra una memoria que ya no es cierta (por id)."),
             "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}
         },
         {
             "name": "ideas_list",
-            "description": "Lista de ideas y pendientes del proyecto (o la lista general con scope=general): en curso, pendientes y, si se pide, las hechas. Consúltala al empezar a trabajar o cuando el usuario pregunte qué falta.",
+            "description": tr!("Lista de ideas y pendientes del proyecto (o la lista general con scope=general): en curso, pendientes y, si se pide, las hechas. Consúltala al empezar a trabajar o cuando el usuario pregunte qué falta."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "include_done": {"type": "boolean", "description": "Incluir las ya hechas"},
+                    "include_done": {"type": "boolean", "description": tr!("Incluir las ya hechas")},
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 }
             }
         },
         {
             "name": "idea_add",
-            "description": "Anota una idea o pendiente para no perderla (propia o del usuario). Úsala cuando surja algo para hacer después, en vez de dejarlo solo en la conversación.",
+            "description": tr!("Anota una idea o pendiente para no perderla (propia o del usuario). Úsala cuando surja algo para hacer después, en vez de dejarlo solo en la conversación."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": "Qué hacer, en una línea"},
-                    "note": {"type": "string", "description": "Detalle o criterio de terminado (opcional)"},
-                    "scope": {"type": "string", "enum": ["project", "general"], "description": "general = no es de este proyecto"}
+                    "title": {"type": "string", "description": tr!("Qué hacer, en una línea")},
+                    "note": {"type": "string", "description": tr!("Detalle o criterio de terminado (opcional)")},
+                    "scope": {"type": "string", "enum": ["project", "general"], "description": tr!("general = no es de este proyecto")}
                 },
                 "required": ["title"]
             }
         },
         {
             "name": "idea_update",
-            "description": "Cambia una idea: márcala doing al empezarla y done al terminarla (queda tachada), o corrige título y nota.",
+            "description": tr!("Cambia una idea: márcala doing al empezarla y done al terminarla (queda tachada), o corrige título y nota."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -95,7 +96,7 @@ fn tools() -> Value {
         },
         {
             "name": "idea_delete",
-            "description": "Borra una idea descartada (por id). Si se hizo, mejor márcala done.",
+            "description": tr!("Borra una idea descartada (por id). Si se hizo, mejor márcala done."),
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "integer"}, "scope": {"type": "string", "enum": ["project", "general"]}},
@@ -104,7 +105,7 @@ fn tools() -> Value {
         },
         {
             "name": "project_context",
-            "description": "Resumen del proyecto: reglas y checks del Guard, procesos, últimas validaciones y decisiones recientes.",
+            "description": tr!("Resumen del proyecto: reglas y checks del Guard, procesos, últimas validaciones y decisiones recientes."),
             "inputSchema": {"type": "object", "properties": {}}
         }
     ])
@@ -141,7 +142,7 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": "Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Las cosas por hacer van en la lista de ideas (ideas_list, idea_add, idea_update): márcalas doing al empezar y done al terminar."
+                    "instructions": tr!("Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Las cosas por hacer van en la lista de ideas (ideas_list, idea_add, idea_update): márcalas doing al empezar y done al terminar.")
                 }))
             }
             "ping" => Ok(json!({})),
@@ -150,7 +151,9 @@ impl<'a> Server<'a> {
                 params["name"].as_str().unwrap_or_default(),
                 &params["arguments"],
             )),
-            _ => Err(json!({"code": -32601, "message": format!("método no soportado: {method}")})),
+            _ => Err(
+                json!({"code": -32601, "message": tr!("método no soportado: {method}", method = method)}),
+            ),
         };
         Some(match result {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
@@ -172,11 +175,11 @@ impl<'a> Server<'a> {
                     kind,
                     limit,
                 )
-                .map(|found| listing(&found, "No hay memorias que coincidan.")),
+                .map(|found| listing(&found, tr!("No hay memorias que coincidan."))),
             "memory_list" => self
                 .store
                 .list_memories(self.project, kind, limit)
-                .map(|found| listing(&found, "La memoria está vacía.")),
+                .map(|found| listing(&found, tr!("La memoria está vacía."))),
             "memory_save" => self
                 .store
                 .add_memory(
@@ -191,19 +194,19 @@ impl<'a> Server<'a> {
             "memory_delete" => match args["id"].as_i64() {
                 Some(id) => self.store.delete_memory(self.project, id).map(|ok| {
                     if ok {
-                        format!("Memoria #{id} borrada.")
+                        tr!("Memoria #{id} borrada.", id = id)
                     } else {
-                        format!("No existe la memoria #{id}.")
+                        tr!("No existe la memoria #{id}.", id = id)
                     }
                 }),
-                None => Err("falta `id`".into()),
+                None => Err(tr!("falta `id`").into()),
             },
             "ideas_list" => self
                 .store
                 .list_ideas(list, args["include_done"].as_bool().unwrap_or(false))
                 .map(|ideas| {
                     if ideas.is_empty() {
-                        "No hay ideas pendientes.".into()
+                        tr!("No hay ideas pendientes.").into()
                     } else {
                         ideas
                             .iter()
@@ -236,20 +239,20 @@ impl<'a> Server<'a> {
                         if ok {
                             format!("Idea #{id} actualizada.")
                         } else {
-                            format!("No existe la idea #{id} en esta lista.")
+                            tr!("No existe la idea #{id} en esta lista.", id = id)
                         }
                     }),
-                None => Err("falta `id`".into()),
+                None => Err(tr!("falta `id`").into()),
             },
             "idea_delete" => match args["id"].as_i64() {
                 Some(id) => self.store.delete_idea(list, id).map(|ok| {
                     if ok {
                         format!("Idea #{id} borrada.")
                     } else {
-                        format!("No existe la idea #{id} en esta lista.")
+                        tr!("No existe la idea #{id} en esta lista.", id = id)
                     }
                 }),
-                None => Err("falta `id`".into()),
+                None => Err(tr!("falta `id`").into()),
             },
             "project_context" => Ok(project_context(self.project, self.store)),
             _ => Err(format!("herramienta desconocida: {tool}")),
@@ -279,8 +282,13 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         .map(|p| p.name())
         .unwrap_or_else(|_| crate::project::folder_name(project));
     let branch =
-        crate::project::git_branch(project).map_or(String::new(), |b| format!(" · rama {b}"));
-    out.push(format!("Proyecto {name} ({}){branch}", project.display()));
+        crate::project::git_branch(project).map_or(String::new(), |b| tr!(" · rama {b}", b = b));
+    out.push(tr!(
+        "Proyecto {name} ({p0}){branch}",
+        p0 = project.display(),
+        name = name,
+        branch = branch
+    ));
 
     if let Ok(Some(rules)) = crate::guard::Rules::load(project) {
         out.push("Project Guard:".into());
@@ -294,15 +302,15 @@ pub fn project_context(project: &Path, store: &Store) -> String {
                 out.push(format!("  {}: {}", stage.label(), list.join(", ")));
             }
         }
-        out.push(format!(
-            "  máximo {} líneas por cambio",
-            rules.quality.max_changed_lines
+        out.push(tr!(
+            "  máximo {p0} líneas por cambio",
+            p0 = rules.quality.max_changed_lines
         ));
     }
     if let Ok(p) = crate::project::Project::load(project)
         && !p.config.processes.is_empty()
     {
-        out.push("Procesos:".into());
+        out.push(tr!("Procesos:").into());
         out.extend(
             p.config
                 .processes
@@ -313,7 +321,7 @@ pub fn project_context(project: &Path, store: &Store) -> String {
     if let Ok(history) = store.validations(project, 5)
         && !history.is_empty()
     {
-        out.push("Últimas validaciones:".into());
+        out.push(tr!("Últimas validaciones:").into());
         out.extend(history.iter().map(|(id, r)| {
             format!(
                 "  #{id} {} · {} · {}",
@@ -333,13 +341,14 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         .collect();
     if !important.is_empty() {
         out.push(
-            "Memoria (decisiones, arquitectura, convenciones; detalle con memory_search):".into(),
+            tr!("Memoria (decisiones, arquitectura, convenciones; detalle con memory_search):")
+                .into(),
         );
         out.extend(important);
     }
     let open = store.list_ideas(Some(project), false).unwrap_or_default();
     if !open.is_empty() {
-        out.push("Ideas pendientes (ideas_list para el detalle):".into());
+        out.push(tr!("Ideas pendientes (ideas_list para el detalle):").into());
         out.extend(
             open.iter()
                 .take(12)

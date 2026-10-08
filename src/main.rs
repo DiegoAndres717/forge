@@ -166,6 +166,8 @@ fn main() -> eframe::Result {
     {
         forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
     }
+    // Idioma: el guardado por el usuario; si no, inglés.
+    forge_core::i18n::init_from_store();
     // `forge [carpeta]` abre (o activa) ese proyecto.
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
@@ -174,7 +176,7 @@ fn main() -> eframe::Result {
             std::process::exit(cli::run(&args))
         }
         Some("help" | "--help" | "-h") => {
-            print!("{}", cli::USAGE);
+            print!("{}", cli::usage());
             return Ok(());
         }
         _ => {}

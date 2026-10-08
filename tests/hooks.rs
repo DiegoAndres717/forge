@@ -89,6 +89,8 @@ fn text(out: &Output) -> String {
 
 #[test]
 fn commit_blocked_outside_forge_and_exception_is_scoped() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("commit");
     repo.write(
         ".forge/rules.toml",
@@ -171,6 +173,8 @@ fn commit_blocked_outside_forge_and_exception_is_scoped() {
 
 #[test]
 fn secrets_and_push_are_blocked() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("push");
     repo.write(
         ".forge/rules.toml",
@@ -216,6 +220,8 @@ fn secrets_and_push_are_blocked() {
 /// y los checks prueban lo que se commitea aunque haya cambios sin preparar.
 #[test]
 fn hook_reuses_evidence_of_same_candidate() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("evidence");
     let counter = repo.dir.parent().unwrap().join("runs");
     repo.write(
@@ -262,6 +268,8 @@ fn hook_reuses_evidence_of_same_candidate() {
 /// Fase 9: revisión con IA en el hook, con proveedores simulados (sin gastar).
 #[test]
 fn ai_review_in_hook_with_fake_providers() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("ai");
     let verdict_file = repo.dir.parent().unwrap().join("veredicto");
     std::fs::write(&verdict_file, "approve").unwrap();
@@ -314,6 +322,8 @@ fn ai_review_in_hook_with_fake_providers() {
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.
 #[test]
 fn specialist_reviewers_by_path() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("reviewers");
     let dir = repo.dir.parent().unwrap().to_path_buf();
     // Proveedor simulado: guarda el prompt y responde el veredicto que se le indica.

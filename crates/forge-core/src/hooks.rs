@@ -1,5 +1,6 @@
 // Hooks de Git (pre-commit y pre-push) que llaman a `forge guard`, para que las reglas
 // se apliquen aunque el commit se haga desde VS Code, Warp, otro agente o un script.
+use crate::tr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -34,13 +35,14 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
 fn hooks_dir(project: &Path) -> Result<PathBuf, String> {
     let repo = PathBuf::from(
         git(project, &["rev-parse", "--show-toplevel"])
-            .map_err(|_| "no es un repositorio Git".to_string())?,
+            .map_err(|_| tr!("no es un repositorio Git").to_string())?,
     );
     if let Ok(path) = git(&repo, &["config", "core.hooksPath"])
         && !path.is_empty()
     {
-        return Err(format!(
-            "core.hooksPath = {path} (¿husky?). Añade `forge guard commit` a tu pre-commit y `forge guard push` a tu pre-push."
+        return Err(tr!(
+            "core.hooksPath = {path} (¿husky?). Añade `forge guard commit` a tu pre-commit y `forge guard push` a tu pre-push.",
+            path = path
         ));
     }
     let dir = PathBuf::from(git(&repo, &["rev-parse", "--git-path", "hooks"])?);
@@ -123,21 +125,26 @@ pub fn install(project: &Path, forge: &Path) -> Result<Vec<String>, String> {
         if path.exists() && !is_managed(&path) {
             let bak = backup(&path);
             if bak.exists() {
-                return Err(format!(
-                    "ya existe {}: revísalo antes de instalar",
-                    bak.display()
+                return Err(tr!(
+                    "ya existe {p0}: revísalo antes de instalar",
+                    p0 = bak.display()
                 ));
             }
             std::fs::rename(&path, &bak).map_err(|e| format!("{}: {e}", path.display()))?;
-            report.push(format!(
-                "{name}: el hook anterior se conserva y se ejecuta antes ({})",
-                bak.display()
+            report.push(tr!(
+                "{name}: el hook anterior se conserva y se ejecuta antes ({p0})",
+                p0 = bak.display(),
+                name = name
             ));
         }
         std::fs::write(&path, script(name, stage, forge, project))
             .map_err(|e| format!("{}: {e}", path.display()))?;
         set_executable(&path)?;
-        report.push(format!("{name}: instalado ({})", path.display()));
+        report.push(tr!(
+            "{name}: instalado ({p0})",
+            p0 = path.display(),
+            name = name
+        ));
     }
     Ok(report)
 }
@@ -150,7 +157,7 @@ pub fn uninstall(project: &Path) -> Result<Vec<String>, String> {
         let path = dir.join(name);
         if !is_managed(&path) {
             if path.exists() {
-                report.push(format!("{name}: no es de Forge, no se toca"));
+                report.push(tr!("{name}: no es de Forge, no se toca", name = name));
             }
             continue;
         }
@@ -158,7 +165,10 @@ pub fn uninstall(project: &Path) -> Result<Vec<String>, String> {
         let bak = backup(&path);
         if bak.exists() {
             std::fs::rename(&bak, &path).map_err(|e| format!("{}: {e}", bak.display()))?;
-            report.push(format!("{name}: quitado; restaurado el hook anterior"));
+            report.push(tr!(
+                "{name}: quitado; restaurado el hook anterior",
+                name = name
+            ));
         } else {
             report.push(format!("{name}: quitado"));
         }

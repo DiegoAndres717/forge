@@ -1,5 +1,6 @@
 // Barra lateral: proyectos, Guard, memoria, agentes y procesos.
 use super::*;
+use forge_core::tr;
 
 /// Con más proyectos que esto, la lista se compacta.
 const COMPACT_AFTER: usize = 6;
@@ -48,7 +49,7 @@ impl App {
                     ui,
                     icon::HOUSE,
                     theme::TEXT_2,
-                    "Inicio",
+                    tr!("Inicio"),
                     "⌘⇧H",
                     self.active.is_none(),
                 )
@@ -68,8 +69,8 @@ impl App {
                     let running = ws.processes.active_count();
                     let detail = match (running, i) {
                         _ if attention[i].is_some() => String::new(),
-                        _ if dormant => "dormido".to_string(),
-                        (n, _) if n > 0 => format!("{n} en marcha"),
+                        _ if dormant => tr!("dormido").to_string(),
+                        (n, _) if n > 0 => tr!("{n} en marcha", n = n),
                         (_, i) if i < 9 => format!("⌘{}", i + 1),
                         _ => String::new(),
                     };
@@ -83,21 +84,22 @@ impl App {
                         tip += &format!("\nMemoria: {}", human_bytes(*bytes));
                     }
                     if dormant {
-                        tip += "\nDormido: sus terminales y procesos arrancan al entrar.";
+                        tip += tr!("\nDormido: sus terminales y procesos arrancan al entrar.");
                     }
                     let row = theme::row(ui, glyph, color, &ws.project.name(), &detail, selected);
                     // Aviso: punto de color a la derecha.
                     if let Some(a) = &attention[i] {
                         use crate::workspace::Attention;
                         let (color, text) = match a {
-                            Attention::Agent(name) => {
-                                (theme::ORANGE, format!("{name} terminó o espera respuesta"))
-                            }
+                            Attention::Agent(name) => (
+                                theme::ORANGE,
+                                tr!("{name} terminó o espera respuesta", name = name),
+                            ),
                             Attention::Failed(name) => {
-                                (theme::RED, format!("El proceso {name} falló"))
+                                (theme::RED, tr!("El proceso {name} falló", name = name))
                             }
                             Attention::Blocked => {
-                                (theme::RED, "Guard bloqueó la validación".to_string())
+                                (theme::RED, tr!("Guard bloqueó la validación").to_string())
                             }
                         };
                         ui.painter().circle_filled(
@@ -113,16 +115,19 @@ impl App {
                     }
                     row.context_menu(|ui| {
                         if dormant {
-                            if ui.button(format!("{}  Despertar", icon::SUN)).clicked() {
+                            if ui.button(tr!("{p0}  Despertar", p0 = icon::SUN)).clicked() {
                                 cmds.push(UiCmd::Activate(i));
                             }
                         } else if ui
-                            .button(format!("{}  Dormir (libera memoria)", icon::MOON))
+                            .button(tr!("{p0}  Dormir (libera memoria)", p0 = icon::MOON))
                             .clicked()
                         {
                             cmds.push(UiCmd::Sleep(i));
                         }
-                        if ui.button(format!("{}  Cerrar proyecto", icon::X)).clicked() {
+                        if ui
+                            .button(tr!("{p0}  Cerrar proyecto", p0 = icon::X))
+                            .clicked()
+                        {
                             cmds.push(UiCmd::Close(i));
                         }
                     });
@@ -130,19 +135,26 @@ impl App {
                 let hidden = self.workspaces.len() - visible.len();
                 if hidden > 0 || self.show_all {
                     let label = if self.show_all {
-                        "Mostrar menos".to_string()
+                        tr!("Mostrar menos").to_string()
                     } else {
-                        format!("{hidden} más…")
+                        tr!("{hidden} más…", hidden = hidden)
                     };
                     if theme::row(ui, icon::DOTS_THREE, theme::TEXT_3, &label, "⌘K", false)
-                        .on_hover_text("Todos los proyectos abiertos (o búscalos con ⌘K)")
+                        .on_hover_text(tr!("Todos los proyectos abiertos (o búscalos con ⌘K)"))
                         .clicked()
                     {
                         self.show_all = !self.show_all;
                     }
                 }
-                if theme::row(ui, icon::PLUS, theme::TEXT_3, "Abrir carpeta…", "⌘O", false)
-                    .clicked()
+                if theme::row(
+                    ui,
+                    icon::PLUS,
+                    theme::TEXT_3,
+                    tr!("Abrir carpeta…"),
+                    "⌘O",
+                    false,
+                )
+                .clicked()
                 {
                     cmds.push(UiCmd::OpenFolder);
                 }
@@ -156,7 +168,7 @@ impl App {
 
                 if !ws.project.config.commands.is_empty() {
                     ui.add_space(12.0);
-                    theme::section(ui, "Comandos");
+                    theme::section(ui, tr!("Comandos"));
                     for command in &ws.project.config.commands {
                         let row =
                             theme::row(ui, icon::PLAY, theme::TEXT_3, &command.name, "", false)
@@ -168,9 +180,9 @@ impl App {
                 }
 
                 ui.add_space(12.0);
-                theme::section(ui, "Proyecto");
+                theme::section(ui, tr!("Proyecto"));
                 let (guard_text, guard_color) = match &ws.guard.run {
-                    None => ("sin ejecutar".to_string(), theme::TEXT_3),
+                    None => (tr!("sin ejecutar").to_string(), theme::TEXT_3),
                     Some(run) => run.snapshot(|r| verdict_short(r.verdict())),
                 };
                 if theme::row(
@@ -200,7 +212,7 @@ impl App {
                     ui,
                     icon::LIGHTBULB,
                     theme::YELLOW,
-                    "Ideas",
+                    tr!("Ideas"),
                     &open,
                     ws.ideas.open,
                 )
@@ -213,7 +225,7 @@ impl App {
                     ui,
                     icon::BRAIN,
                     theme::PURPLE,
-                    "Memoria",
+                    tr!("Memoria"),
                     &notes,
                     ws.memory.open,
                 )
@@ -222,29 +234,40 @@ impl App {
                 {
                     cmds.push(UiCmd::ToggleMemory);
                 }
-                let config = theme::row(ui, icon::GEAR, theme::TEXT_3, "Configuración", "", false);
+                let config = theme::row(
+                    ui,
+                    icon::GEAR,
+                    theme::TEXT_3,
+                    tr!("Configuración"),
+                    "",
+                    false,
+                );
                 egui::Popup::menu(&config).show(|ui| {
                     ui.set_min_width(220.0);
-                    if !ws.project.has_config() && ui.button("Crear .forge/project.toml").clicked()
+                    if !ws.project.has_config()
+                        && ui.button(tr!("Crear .forge/project.toml")).clicked()
                     {
                         cmds.push(UiCmd::CreateConfig);
                     }
                     if ws.project.has_config() {
                         if ui
-                            .button(format!("{}  Editar project.toml", icon::NOTE_PENCIL))
+                            .button(tr!("{p0}  Editar project.toml", p0 = icon::NOTE_PENCIL))
                             .clicked()
                         {
                             cmds.push(UiCmd::EditConfig);
                         }
                         if ui
-                            .button(format!("{}  Recargar configuración", icon::ARROW_CLOCKWISE))
+                            .button(tr!(
+                                "{p0}  Recargar configuración",
+                                p0 = icon::ARROW_CLOCKWISE
+                            ))
                             .clicked()
                         {
                             cmds.push(UiCmd::ReloadConfig);
                         }
                     }
                     if ws.project.default_layout().is_some()
-                        && ui.button("Restablecer layout").clicked()
+                        && ui.button(tr!("Restablecer layout")).clicked()
                     {
                         cmds.push(UiCmd::ResetLayout);
                     }
@@ -261,14 +284,14 @@ impl App {
         cmds: &mut Vec<UiCmd>,
     ) {
         ui.horizontal(|ui| {
-            theme::section(ui, "Agentes");
+            theme::section(ui, tr!("Agentes"));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if detecting {
                     ui.spinner();
                 } else if theme::icon_button_sized(
                     ui,
                     icon::ARROW_CLOCKWISE,
-                    "Volver a detectar agentes",
+                    tr!("Volver a detectar agentes"),
                     20.0,
                     theme::TEXT_4,
                 )
@@ -304,12 +327,12 @@ impl App {
                 theme::TEXT_4
             };
             let tip = match found.and_then(|d| d.path.as_ref()) {
-                Some(path) => format!(
-                    "{}\n{}\nClic: abrir · clic derecho: reanudar y más",
-                    agent.command,
-                    path.display()
+                Some(path) => tr!(
+                    "{p0}\n{p1}\nClic: abrir · clic derecho: reanudar y más",
+                    p0 = agent.command,
+                    p1 = path.display()
                 ),
-                None => format!("{} no está instalado", agent.program()),
+                None => tr!("{p0} no está instalado", p0 = agent.program()),
             };
             let has_logo = matches!(agent.program(), "claude" | "codex" | "opencode");
             let glyph = if has_logo { "" } else { icon::ROBOT };
@@ -337,16 +360,16 @@ impl App {
                 if ui
                     .add_enabled(
                         installed,
-                        egui::Button::new(format!("{}  Abrir", icon::TERMINAL_WINDOW)),
+                        egui::Button::new(tr!("{p0}  Abrir", p0 = icon::TERMINAL_WINDOW)),
                     )
                     .clicked()
                 {
                     cmds.push(UiCmd::OpenAgent(agent.id.clone(), false));
                 }
                 if let Some(resume) = &agent.resume {
-                    let button = egui::Button::new(format!(
-                        "{}  Reanudar última sesión",
-                        icon::CLOCK_COUNTER_CLOCKWISE
+                    let button = egui::Button::new(tr!(
+                        "{p0}  Reanudar última sesión",
+                        p0 = icon::CLOCK_COUNTER_CLOCKWISE
                     ));
                     if ui
                         .add_enabled(installed, button)
@@ -357,7 +380,7 @@ impl App {
                     }
                 }
                 if ui
-                    .button(format!("{}  Copiar comando", icon::COPY))
+                    .button(tr!("{p0}  Copiar comando", p0 = icon::COPY))
                     .clicked()
                 {
                     ui.ctx().copy_text(agent.command.clone());
@@ -372,7 +395,7 @@ impl App {
                 }
                 if !installed && let Some(hint) = &agent.install_hint {
                     ui.label(
-                        RichText::new(format!("Instalar: {hint}"))
+                        RichText::new(tr!("Instalar: {hint}", hint = hint))
                             .small()
                             .monospace(),
                     );
@@ -387,7 +410,7 @@ impl App {
                 .collect();
             ui.add_space(2.0);
             ui.label(
-                RichText::new(format!("   No instalados: {}", names.join(", ")))
+                RichText::new(tr!("   No instalados: {p0}", p0 = names.join(", ")))
                     .size(11.0)
                     .color(theme::TEXT_4),
             )
@@ -398,13 +421,13 @@ impl App {
     /// Sección PROCESOS: estado, puerto y controles (aparecen al pasar el ratón).
     pub(super) fn processes_ui(ws: &Workspace, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
         ui.horizontal(|ui| {
-            theme::section(ui, "Procesos");
+            theme::section(ui, tr!("Procesos"));
             if !ws.processes.list.is_empty() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if theme::icon_button_sized(
                         ui,
                         icon::STOP,
-                        "Detener todos",
+                        tr!("Detener todos"),
                         20.0,
                         theme::TEXT_4,
                     )
@@ -415,7 +438,7 @@ impl App {
                     if theme::icon_button_sized(
                         ui,
                         icon::PLAY,
-                        "Iniciar todos",
+                        tr!("Iniciar todos"),
                         20.0,
                         theme::TEXT_4,
                     )
@@ -428,7 +451,7 @@ impl App {
         });
         if ws.processes.list.is_empty() {
             ui.label(
-                RichText::new("   Define [[processes]] en .forge/project.toml")
+                RichText::new(tr!("   Define [[processes]] en .forge/project.toml"))
                     .size(11.0)
                     .color(theme::TEXT_4),
             );
@@ -441,9 +464,10 @@ impl App {
                 None => status.clone(),
             };
             let row = theme::row(ui, "●", tone_color(tone), m.def.label(), &detail, false)
-                .on_hover_text(format!(
-                    "{}\n{status}\nClic: ver logs · clic derecho: más opciones",
-                    m.def.command
+                .on_hover_text(tr!(
+                    "{p0}\n{status}\nClic: ver logs · clic derecho: más opciones",
+                    p0 = m.def.command,
+                    status = status
                 ));
             if row.clicked() {
                 cmds.push(UiCmd::ShowProcess(id.clone()));
@@ -469,36 +493,41 @@ impl App {
                 };
                 button(
                     icon::ARROW_CLOCKWISE,
-                    "Reiniciar",
+                    tr!("Reiniciar"),
                     UiCmd::Restart(id.clone()),
                     ui,
                 );
                 if m.is_active() {
-                    button(icon::STOP, "Detener (Ctrl+C)", UiCmd::Stop(id.clone()), ui);
+                    button(
+                        icon::STOP,
+                        tr!("Detener (Ctrl+C)"),
+                        UiCmd::Stop(id.clone()),
+                        ui,
+                    );
                 } else {
-                    button(icon::PLAY, "Iniciar", UiCmd::Start(id.clone()), ui);
+                    button(icon::PLAY, tr!("Iniciar"), UiCmd::Start(id.clone()), ui);
                 }
             }
             row.context_menu(|ui| {
                 ui.set_min_width(240.0);
                 if ui
-                    .button(format!("{}  Ver logs", icon::TERMINAL_WINDOW))
+                    .button(tr!("{p0}  Ver logs", p0 = icon::TERMINAL_WINDOW))
                     .clicked()
                 {
                     cmds.push(UiCmd::ShowProcess(id.clone()));
                 }
                 if ui
-                    .button(format!("{}  Copiar comando", icon::COPY))
+                    .button(tr!("{p0}  Copiar comando", p0 = icon::COPY))
                     .clicked()
                 {
                     ui.ctx().copy_text(m.def.command.clone());
                 }
                 ui.menu_button(
-                    format!("{}  Variables de entorno", icon::LIST_CHECKS),
+                    tr!("{p0}  Variables de entorno", p0 = icon::LIST_CHECKS),
                     |ui| {
                         let env = ws.processes.environment(&m.def);
                         if env.is_empty() {
-                            ui.label("Sin variables propias");
+                            ui.label(tr!("Sin variables propias"));
                         }
                         let mut keys: Vec<_> = env.keys().collect();
                         keys.sort();
@@ -512,17 +541,17 @@ impl App {
                 );
                 ui.separator();
                 let restart = match m.def.auto_restart {
-                    AutoRestart::Never => "no",
-                    AutoRestart::OnFailure => "si falla",
-                    AutoRestart::Always => "siempre",
+                    AutoRestart::Never => tr!("no"),
+                    AutoRestart::OnFailure => tr!("si falla"),
+                    AutoRestart::Always => tr!("siempre"),
                 };
                 ui.label(
-                    RichText::new(format!("Estado: {status}"))
+                    RichText::new(tr!("Estado: {status}", status = status))
                         .small()
                         .color(theme::TEXT_3),
                 );
                 ui.label(
-                    RichText::new(format!("Reinicio automático: {restart}"))
+                    RichText::new(tr!("Reinicio automático: {restart}", restart = restart))
                         .small()
                         .color(theme::TEXT_3),
                 );

@@ -1,5 +1,6 @@
 // Paleta de comandos (⌘K): busca y ejecuta cualquier acción escribiendo parte de su nombre.
 use super::*;
+use forge_core::tr;
 
 /// Paleta abierta.
 #[derive(Default)]
@@ -112,7 +113,10 @@ impl App {
             // Detalles largos (rutas) se recortan por la izquierda para no tapar el nombre.
             let chars: Vec<char> = hint.chars().collect();
             let hint = if chars.len() > 36 {
-                format!("…{}", chars[chars.len() - 35..].iter().collect::<String>())
+                tr!(
+                    "…{p0}",
+                    p0 = chars[chars.len() - 35..].iter().collect::<String>()
+                )
             } else {
                 hint.to_string()
             };
@@ -129,7 +133,7 @@ impl App {
         for (i, ws) in self.workspaces.iter().enumerate() {
             if Some(i) != self.active {
                 let hint = match i {
-                    _ if ws.is_dormant() => "dormido".to_string(),
+                    _ if ws.is_dormant() => tr!("dormido").to_string(),
                     0..9 => format!("⌘{}", i + 1),
                     _ => String::new(),
                 };
@@ -145,7 +149,7 @@ impl App {
             for (name, path) in &palette.recent {
                 add(
                     icon::FOLDER_OPEN,
-                    format!("Abrir proyecto {name}"),
+                    tr!("Abrir proyecto {name}", name = name),
                     &tilde(path),
                     cmd(UiCmd::Open(path.clone())),
                 );
@@ -171,15 +175,15 @@ impl App {
                 };
                 add(
                     icon::ROBOT,
-                    format!("Abrir {}", agent.name),
+                    tr!("Abrir {p0}", p0 = agent.name),
                     hint,
                     cmd(UiCmd::OpenAgent(agent.id.clone(), false)),
                 );
                 if agent.resume.is_some() {
                     add(
                         icon::ROBOT,
-                        format!("Reanudar {}", agent.name),
-                        "última sesión",
+                        tr!("Reanudar {p0}", p0 = agent.name),
+                        tr!("última sesión"),
                         cmd(UiCmd::OpenAgent(agent.id.clone(), true)),
                     );
                 }
@@ -191,41 +195,41 @@ impl App {
                 if m.is_active() {
                     add(
                         icon::STOP,
-                        format!("Detener {name}"),
-                        "proceso",
+                        tr!("Detener {name}", name = name),
+                        tr!("proceso"),
                         cmd(UiCmd::Stop(id.clone())),
                     );
                     add(
                         icon::ARROW_CLOCKWISE,
-                        format!("Reiniciar {name}"),
-                        "proceso",
+                        tr!("Reiniciar {name}", name = name),
+                        tr!("proceso"),
                         cmd(UiCmd::Restart(id.clone())),
                     );
                 } else {
                     add(
                         icon::PLAY,
-                        format!("Iniciar {name}"),
-                        "proceso",
+                        tr!("Iniciar {name}", name = name),
+                        tr!("proceso"),
                         cmd(UiCmd::Start(id.clone())),
                     );
                 }
                 add(
                     icon::SCROLL,
-                    format!("Ver logs de {name}"),
-                    "proceso",
+                    tr!("Ver logs de {name}", name = name),
+                    tr!("proceso"),
                     cmd(UiCmd::ShowProcess(id.clone())),
                 );
             }
             if !ws.processes.list.is_empty() {
                 add(
                     icon::PLAY,
-                    "Iniciar todos los procesos".into(),
+                    tr!("Iniciar todos los procesos").into(),
                     "",
                     cmd(UiCmd::StartAll),
                 );
                 add(
                     icon::STOP,
-                    "Detener todos los procesos".into(),
+                    tr!("Detener todos los procesos").into(),
                     "",
                     cmd(UiCmd::StopAll),
                 );
@@ -235,7 +239,7 @@ impl App {
             for c in &ws.project.config.commands {
                 add(
                     icon::TERMINAL,
-                    format!("Ejecutar {}", c.name),
+                    tr!("Ejecutar {p0}", p0 = c.name),
                     &c.command,
                     cmd(UiCmd::RunCommand(c.clone())),
                 );
@@ -244,34 +248,34 @@ impl App {
             // Guard.
             add(
                 icon::SHIELD_CHECK,
-                "Guard: mostrar u ocultar".into(),
+                tr!("Guard: mostrar u ocultar").into(),
                 "⌘G",
                 cmd(UiCmd::ToggleGuard),
             );
             for stage in Stage::ALL {
                 add(
                     icon::SHIELD_CHECK,
-                    format!("Guard: validar {}", stage.label().to_lowercase()),
+                    tr!("Guard: validar {p0}", p0 = stage.label().to_lowercase()),
                     "",
                     Run::Cmds(vec![UiCmd::GuardStage(stage), UiCmd::GuardRun]),
                 );
             }
             add(
                 icon::GIT_BRANCH,
-                "Guard: instalar hooks de Git".into(),
+                tr!("Guard: instalar hooks de Git").into(),
                 "",
                 cmd(UiCmd::HooksInstall),
             );
             add(
                 icon::GIT_BRANCH,
-                "Guard: quitar hooks de Git".into(),
+                tr!("Guard: quitar hooks de Git").into(),
                 "",
                 cmd(UiCmd::HooksUninstall),
             );
             if !ws.project.path.join(".forge/rules.toml").exists() {
                 add(
                     icon::FILE_PLUS,
-                    "Guard: crear rules.toml".into(),
+                    tr!("Guard: crear rules.toml").into(),
                     "",
                     cmd(UiCmd::CreateRules),
                 );
@@ -280,19 +284,19 @@ impl App {
             // Memoria.
             add(
                 icon::BRAIN,
-                "Memoria: mostrar u ocultar".into(),
+                tr!("Memoria: mostrar u ocultar").into(),
                 "⌘⇧M",
                 cmd(UiCmd::ToggleMemory),
             );
             add(
                 icon::NOTE_PENCIL,
-                "Memoria: nueva nota".into(),
+                tr!("Memoria: nueva nota").into(),
                 "",
                 cmd(UiCmd::NewNote),
             );
             add(
                 icon::LIGHTBULB,
-                "Ideas: mostrar u ocultar".into(),
+                tr!("Ideas: mostrar u ocultar").into(),
                 "⌘⇧I",
                 cmd(UiCmd::ToggleIdeas),
             );
@@ -300,49 +304,49 @@ impl App {
             // Paneles.
             add(
                 icon::TERMINAL_WINDOW,
-                "Nueva terminal".into(),
+                tr!("Nueva terminal").into(),
                 "⌘T",
                 act(Action::Ws(WsAction::NewTerminal)),
             );
             add(
                 icon::SQUARE_SPLIT_HORIZONTAL,
-                "Dividir a la derecha".into(),
+                tr!("Dividir a la derecha").into(),
                 "⌘D",
                 act(Action::Ws(WsAction::Split(Dir::Row))),
             );
             add(
                 icon::SQUARE_SPLIT_VERTICAL,
-                "Dividir hacia abajo".into(),
+                tr!("Dividir hacia abajo").into(),
                 "⌘⇧D",
                 act(Action::Ws(WsAction::Split(Dir::Column))),
             );
             add(
                 icon::ARROWS_OUT,
-                "Maximizar o restaurar panel".into(),
+                tr!("Maximizar o restaurar panel").into(),
                 "⌘↩",
                 act(Action::Ws(WsAction::ToggleMaximize)),
             );
             add(
                 icon::ARROW_RIGHT,
-                "Panel siguiente".into(),
+                tr!("Panel siguiente").into(),
                 "⌘]",
                 act(Action::Ws(WsAction::Cycle(1))),
             );
             add(
                 icon::ARROW_LEFT,
-                "Panel anterior".into(),
+                tr!("Panel anterior").into(),
                 "⌘[",
                 act(Action::Ws(WsAction::Cycle(-1))),
             );
             add(
                 icon::X,
-                "Cerrar panel".into(),
+                tr!("Cerrar panel").into(),
                 "⌘W",
                 act(Action::Ws(WsAction::Close)),
             );
             add(
                 icon::LAYOUT,
-                "Restablecer layout".into(),
+                tr!("Restablecer layout").into(),
                 "",
                 cmd(UiCmd::ResetLayout),
             );
@@ -350,26 +354,26 @@ impl App {
             // Proyecto.
             add(
                 icon::GEAR,
-                "Editar configuración del proyecto".into(),
+                tr!("Editar configuración del proyecto").into(),
                 "",
                 cmd(UiCmd::EditConfig),
             );
             add(
                 icon::ARROW_CLOCKWISE,
-                "Recargar configuración del proyecto".into(),
+                tr!("Recargar configuración del proyecto").into(),
                 "",
                 cmd(UiCmd::ReloadConfig),
             );
             add(
                 icon::X_CIRCLE,
-                "Cerrar proyecto".into(),
+                tr!("Cerrar proyecto").into(),
                 "⌘⇧W",
                 act(Action::CloseProject),
             );
             if let Some(i) = self.active {
                 add(
                     icon::MOON,
-                    "Dormir proyecto (libera memoria)".into(),
+                    tr!("Dormir proyecto (libera memoria)").into(),
                     "",
                     cmd(UiCmd::Sleep(i)),
                 );
@@ -379,40 +383,51 @@ impl App {
         // Ideas: del proyecto activo o, en Inicio, la lista general.
         add(
             icon::LIGHTBULB,
-            "Nueva idea".into(),
+            tr!("Nueva idea").into(),
             "",
             cmd(UiCmd::NewIdea),
         );
 
         // Ventana.
+        // Idioma: cada opción en su propio idioma, para encontrarla en cualquiera de los dos.
+        {
+            use forge_core::i18n::{Lang, lang};
+            for (l, label) in [
+                (Lang::En, "Language: English"),
+                (Lang::Es, "Idioma: Español"),
+            ] {
+                let hint = if lang() == l { "✓" } else { "" };
+                add(icon::TRANSLATE, label.into(), hint, cmd(UiCmd::SetLang(l)));
+            }
+        }
         add(
             icon::FOLDER_PLUS,
-            "Abrir carpeta…".into(),
+            tr!("Abrir carpeta…").into(),
             "⌘O",
             act(Action::OpenFolder),
         );
-        add(icon::HOUSE, "Inicio".into(), "⌘⇧H", act(Action::Home));
+        add(icon::HOUSE, tr!("Inicio").into(), "⌘⇧H", act(Action::Home));
         add(
             icon::SIDEBAR,
-            "Mostrar u ocultar barra lateral".into(),
+            tr!("Mostrar u ocultar barra lateral").into(),
             "⌘B",
             act(Action::ToggleSidebar),
         );
         add(
             icon::MAGNIFYING_GLASS_PLUS,
-            "Aumentar texto".into(),
+            tr!("Aumentar texto").into(),
             "⌘+",
             act(Action::FontBigger),
         );
         add(
             icon::MAGNIFYING_GLASS_MINUS,
-            "Reducir texto".into(),
+            tr!("Reducir texto").into(),
             "⌘-",
             act(Action::FontSmaller),
         );
         add(
             icon::TEXT_AA,
-            "Tamaño de texto normal".into(),
+            tr!("Tamaño de texto normal").into(),
             "⌘0",
             act(Action::FontReset),
         );
@@ -485,7 +500,9 @@ impl App {
                             );
                             let edit = ui.add(
                                 egui::TextEdit::singleline(&mut palette.query)
-                                    .hint_text("Buscar acciones, proyectos, agentes, procesos…")
+                                    .hint_text(tr!(
+                                        "Buscar acciones, proyectos, agentes, procesos…"
+                                    ))
                                     .font(FontId::proportional(16.0))
                                     .frame(egui::Frame::NONE)
                                     .desired_width(f32::INFINITY),
@@ -499,7 +516,7 @@ impl App {
                         ui.separator();
                         if matches.is_empty() {
                             ui.add_space(6.0);
-                            ui.label(RichText::new("Sin resultados").color(theme::TEXT_3));
+                            ui.label(RichText::new(tr!("Sin resultados")).color(theme::TEXT_3));
                             ui.add_space(6.0);
                         }
                         for (i, (_, entry)) in matches.iter().enumerate() {
