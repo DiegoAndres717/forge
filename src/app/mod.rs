@@ -186,6 +186,20 @@ impl App {
         error: Option<String>,
         open: Option<PathBuf>,
     ) -> Self {
+        let store = Store::default_path()
+            .ok_or_else(|| "no se encontró $HOME".to_string())
+            .and_then(|p| Store::open(&p));
+        Self::with_store(ctx, settings, error, open, store)
+    }
+
+    /// Como `new`, con la base de datos indicada (los tests usan una en memoria).
+    pub fn with_store(
+        ctx: &egui::Context,
+        settings: Settings,
+        error: Option<String>,
+        open: Option<PathBuf>,
+        store: Result<Store, String>,
+    ) -> Self {
         let mut app = Self {
             workspaces: Vec::new(),
             active: None,
@@ -201,10 +215,7 @@ impl App {
             ram: Arc::default(),
             ram_checked: None,
         };
-        match Store::default_path()
-            .ok_or_else(|| "no se encontró $HOME".to_string())
-            .and_then(|p| Store::open(&p))
-        {
+        match store {
             Ok(store) => app.store = Some(store),
             Err(e) => app.error = Some(format!("{e} (los workspaces no se guardarán)")),
         }
@@ -852,5 +863,7 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod e2e;
 #[cfg(test)]
 mod preview;

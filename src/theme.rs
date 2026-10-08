@@ -166,6 +166,10 @@ pub fn row(
         galley,
         TEXT,
     );
+    // Nombre accesible (VoiceOver y tests de interfaz).
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, label)
+    });
     response.on_hover_cursor(CursorIcon::Default)
 }
 
@@ -183,6 +187,7 @@ pub fn icon_button_sized(
 ) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
     paint_icon_button(ui, rect, glyph, &response, color);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tooltip));
     response.on_hover_text(tooltip)
 }
 
