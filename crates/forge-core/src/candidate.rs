@@ -71,11 +71,15 @@ fn git_clean(repo: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Ruta temporal única: el contador evita choques entre hilos en el mismo instante (el
+/// reloj de macOS solo da microsegundos).
 fn temp_path(tag: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    std::env::temp_dir().join(format!("forge-{tag}-{}-{nanos}", std::process::id()))
+    std::env::temp_dir().join(format!("forge-{tag}-{}-{nanos}-{n}", std::process::id()))
 }
 
 /// Árbol con el contenido actual del árbol de trabajo (incluidos archivos nuevos no ignorados),
