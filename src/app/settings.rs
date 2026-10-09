@@ -8,6 +8,11 @@ impl App {
             return;
         }
         let mut changed = false;
+        // A la medida de la ventana: más ancho si cabe, y nunca más alto que ella (el
+        // contenido se desplaza y la cabecera queda fija).
+        let screen = ctx.content_rect();
+        let width = (screen.width() - 64.0).clamp(340.0, 760.0);
+        let max_height = (screen.height() - 140.0).max(200.0);
         let modal = egui::Modal::new(egui::Id::new("settings"))
             .frame(
                 egui::Frame::new()
@@ -17,7 +22,7 @@ impl App {
                     .inner_margin(20.0),
             )
             .show(ctx, |ui| {
-                ui.set_width(460.0);
+                ui.set_width(width);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(icon::GEAR).size(18.0).color(theme::TEXT_2));
                     ui.label(RichText::new(tr!("Ajustes")).size(16.0).strong());
@@ -28,7 +33,13 @@ impl App {
                     });
                 });
                 ui.add_space(8.0);
-
+                egui::ScrollArea::vertical()
+                    .id_salt("settings-scroll")
+                    .max_height(max_height)
+                    // Si no cabe, que use toda la altura disponible (por defecto se encoge).
+                    .min_scrolled_height(max_height)
+                    .auto_shrink([false, true])
+                    .show(ui, |ui| {
                 theme::section(ui, tr!("General"));
                 theme::card(ui, |ui| {
                     egui::Grid::new("settings-general").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
@@ -238,6 +249,7 @@ impl App {
                         cmds.push(UiCmd::CheckUpdates);
                     }
                 });
+                    });
             });
         if modal.should_close() {
             self.settings_open = false;
