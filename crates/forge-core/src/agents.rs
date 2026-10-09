@@ -36,6 +36,10 @@ pub enum McpStyle {
     ClaudeJson,
     /// `codex -c mcp_servers.<n>.command=… -c mcp_servers.<n>.args=[…]`
     CodexConfig,
+    /// `OPENCODE_CONFIG_CONTENT='{"mcp":{…}}' opencode --standalone`: la configuración se
+    /// suma a la del usuario sin tocarla; `--standalone` porque el servicio de fondo de
+    /// OpenCode no ve el entorno de esta terminal.
+    OpenCodeEnv,
 }
 
 /// Servidor MCP que se conecta a los agentes (la memoria de Forge u otro proveedor).
@@ -61,6 +65,19 @@ impl AgentSpec {
             McpStyle::ClaudeJson => {
                 let config = serde_json::json!({"mcpServers": {&server.name: {"command": server.command, "args": server.args}}});
                 format!("--mcp-config {}", quote(&config.to_string()))
+            }
+            McpStyle::OpenCodeEnv => {
+                let mut command_line = vec![server.command.clone()];
+                command_line.extend(server.args.iter().cloned());
+                let config = serde_json::json!({"mcp": {&server.name: {"type": "local", "command": command_line, "enabled": true}}});
+                let flagged = match command.split_once(' ') {
+                    Some((program, rest)) => format!("{program} --standalone {rest}"),
+                    None => format!("{command} --standalone"),
+                };
+                return format!(
+                    "OPENCODE_CONFIG_CONTENT={} {flagged}",
+                    quote(&config.to_string())
+                );
             }
             McpStyle::CodexConfig => {
                 // Cadenas TOML con escapes compatibles con JSON.
@@ -96,7 +113,8 @@ impl AgentSpec {
                     serde_json::to_string(&[forge, "agent-event", "stop"]).unwrap_or_default();
                 format!("-c {}", quote(&format!("notify={notify}")))
             }
-            None => return command.to_string(),
+            // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
+            Some(McpStyle::OpenCodeEnv) | None => return command.to_string(),
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -120,8 +138,22 @@ impl AgentSpec {
     }
 
     /// El agente avisa él mismo cuando termina o espera (ver `with_events`).
+    /// Comando que abre el agente con `prompt` como primer mensaje: argumento suelto
+    /// (Claude Code, Codex, agentes propios), `--prompt` en OpenCode (que toma el argumento
+    /// suelto como carpeta); `None` en los integrados sin verificar.
+    pub fn with_prompt(&self, command: &str, prompt: &str) -> Option<String> {
+        match self.mcp_style {
+            Some(McpStyle::OpenCodeEnv) => Some(format!("{command} --prompt {}", quote(prompt))),
+            None if matches!(self.id.as_str(), "gemini" | "qwen" | "pi") => None,
+            _ => Some(format!("{command} {}", quote(prompt))),
+        }
+    }
+
     pub fn sends_events(&self) -> bool {
-        self.mcp_style.is_some()
+        matches!(
+            self.mcp_style,
+            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig)
+        )
     }
 
     /// Programa a buscar en el PATH (primera palabra del comando).
@@ -163,7 +195,7 @@ pub fn builtins() -> Vec<AgentSpec> {
         mcp_style: match id {
             "claude" => Some(McpStyle::ClaudeJson),
             "codex" => Some(McpStyle::CodexConfig),
-            // OpenCode solo admite MCP en su configuración (opencode mcp add): conexión manual.
+            "opencode" => Some(McpStyle::OpenCodeEnv),
             _ => None,
         },
         install_hint: Some(hint.into()),
@@ -561,9 +593,24 @@ mod tests {
         );
         assert!(codex.ends_with(" resume --last"), "{codex}");
         assert_eq!(
-            get("opencode").with_mcp("opencode", &server),
-            "opencode",
-            "sin conexión automática"
+            get("claude")
+                .with_prompt("claude", "planifica #7")
+                .as_deref(),
+            Some("claude 'planifica #7'")
+        );
+        assert_eq!(
+            get("opencode").with_prompt("opencode", "it's").as_deref(),
+            Some(r"opencode --prompt 'it'\''s'")
+        );
+        assert_eq!(get("gemini").with_prompt("gemini", "x"), None);
+        let opencode = get("opencode").with_mcp("opencode --continue", &server);
+        assert!(
+            opencode.starts_with("OPENCODE_CONFIG_CONTENT='{\"mcp\":{\"forge\":"),
+            "{opencode}"
+        );
+        assert!(
+            opencode.ends_with(" opencode --standalone --continue"),
+            "{opencode}"
         );
     }
 

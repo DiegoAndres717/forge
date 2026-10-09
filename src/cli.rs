@@ -34,9 +34,13 @@ Uso:
   forge memory search <texto> [--kind k]   busca en la memoria del proyecto
   forge memory add <tipo> \"título\" \"texto\" [--tags a,b]
   forge memory list [--kind k] · forge memory delete <id>
-  forge ideas [--all] [--general]          ideas y pendientes (fuera del repositorio)
-  forge ideas add \"título\" [\"nota\"] [--general]
-  forge ideas done|doing|pending|delete <id> [--general]
+  forge plans [--all] [--general]          planes y backlog (fuera del repositorio)
+  forge plans show <id>                    un plan con sus fases, ramas y tareas
+  forge plans add \"título\" [\"nota\"]      anota una idea en el backlog
+  forge plans start|done|backlog|delete <id>
+  forge plans phase <id> <n> start|done|backlog
+  forge plans task <id> <fase>.<tarea> [--undo]   tacha (o destacha) una tarea
+     (--general: la lista general; `forge ideas` también vale)
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -75,9 +79,13 @@ Usage:
   forge memory search <text> [--kind k]    searches the project memory
   forge memory add <kind> \"title\" \"text\" [--tags a,b]
   forge memory list [--kind k] · forge memory delete <id>
-  forge ideas [--all] [--general]          ideas and to-dos (outside the repository)
-  forge ideas add \"title\" [\"note\"] [--general]
-  forge ideas done|doing|pending|delete <id> [--general]
+  forge plans [--all] [--general]          plans and backlog (outside the repository)
+  forge plans show <id>                    a plan with its phases, branches and tasks
+  forge plans add \"title\" [\"note\"]       adds an idea to the backlog
+  forge plans start|done|backlog|delete <id>
+  forge plans phase <id> <n> start|done|backlog
+  forge plans task <id> <phase>.<task> [--undo]   ticks (or unticks) a task
+     (--general: the general list; `forge ideas` works too)
   forge mcp                             MCP server (memory and context) for agents
 
 Options:
@@ -225,9 +233,13 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
-        (Some("ideas"), action) => {
-            ideas_cli(&out, &project, action.unwrap_or("list"), &pos[2..], args)
-        }
+        (Some("plans" | "ideas"), action) => plans_cli(
+            &out,
+            &project,
+            action.unwrap_or("list"),
+            pos.get(2..).unwrap_or(&[]),
+            args,
+        ),
         (Some("ai"), Some("init")) => forge_core::router::write_template(&project).map(|_| {
             out.line(&format!(
                 "Creado {}",
@@ -837,16 +849,19 @@ fn status_json(project: &Path) -> Result<i32, String> {
         Some(Verdict::NothingToCheck) => "no changes",
         Some(Verdict::Pending | Verdict::Running) => "pending",
     };
+    let plans = store.list_ideas(Some(project), false)?;
     let status = serde_json::json!({
         "guard": guard,
         "ideas": store.open_ideas(Some(project))?,
+        "plans_in_progress": plans.iter().filter(|i| i.status == "doing").count(),
+        "backlog": plans.iter().filter(|i| i.status == "pending").count(),
         "memories": store.count_memories(project)?,
     });
     println!("{status}");
     Ok(0)
 }
 
-fn ideas_cli(
+fn plans_cli(
     out: &Out,
     project: &Path,
     action: &str,
@@ -855,45 +870,104 @@ fn ideas_cli(
 ) -> Result<i32, String> {
     let store = open_store()?;
     let list = (!args.iter().any(|a| a == "--general")).then_some(project);
-    let id = || -> Result<i64, String> {
-        rest.first()
-            .and_then(|i| i.trim_start_matches('#').parse().ok())
-            .ok_or_else(|| tr!("uso: forge ideas {action} <id>", action = action))
+    let number = |i: usize, what: &str| -> Result<i64, String> {
+        rest.get(i)
+            .and_then(|n| n.trim_start_matches('#').parse().ok())
+            .ok_or_else(|| {
+                tr!(
+                    "uso: forge plans {action} {what}",
+                    action = action,
+                    what = what
+                )
+            })
+    };
+    let missing = |id: i64| tr!("no existe el plan #{id} en esta lista", id = id);
+    let show = |id: i64| -> Result<(), String> {
+        let plan = store.get_idea(list, id)?.ok_or_else(|| missing(id))?;
+        out.line(&forge_core::ideas::render(&plan));
+        Ok(())
     };
     match action {
         "list" => {
-            let ideas = store.list_ideas(list, args.iter().any(|a| a == "--all"))?;
-            if ideas.is_empty() {
-                out.line(tr!("No hay ideas pendientes."));
+            let plans = store.list_ideas(list, args.iter().any(|a| a == "--all"))?;
+            if plans.is_empty() {
+                out.line(tr!("No hay planes ni ideas en el backlog."));
             }
-            for idea in ideas {
-                out.line(&forge_core::ideas::render(&idea));
+            for plan in plans {
+                out.line(&forge_core::ideas::render(&plan));
             }
         }
+        "show" => show(number(0, "<id>")?)?,
         "add" => {
             let [title, note @ ..] = rest else {
-                return Err(tr!("uso: forge ideas add \"título\" [\"nota\"]").into());
+                return Err(tr!("uso: forge plans add \"título\" [\"nota\"]").into());
             };
             let id = store.add_idea(list, title, &note.join(" "), "usuario")?;
-            out.line(&format!("Anotada como idea #{id}."));
+            out.line(&tr!("Anotada en el backlog como #{id}.", id = id));
         }
-        "done" | "doing" | "pending" => {
-            let id = id()?;
-            if !store.update_idea(list, id, Some(action), None, None, "usuario")? {
-                return Err(tr!("no existe la idea #{id} en esta lista", id = id));
+        // Estado de una idea o plan (con fases, lo dan sus fases).
+        "start" | "done" | "backlog" | "doing" | "pending" => {
+            let id = number(0, "<id>")?;
+            let status = match action {
+                "start" => "in_progress",
+                other => other,
+            };
+            if !store.update_idea(list, id, Some(status), None, None, "usuario")? {
+                return Err(missing(id));
             }
-            out.line(&format!("Idea #{id}: {action}."));
+            show(id)?;
+        }
+        "phase" => {
+            let (id, n) = (
+                number(0, "<id> <n> start|done|backlog")?,
+                number(1, "<id> <n> start|done|backlog")?,
+            );
+            let status = match rest.get(2).copied() {
+                Some("start") => "in_progress",
+                Some(s @ ("done" | "backlog")) => s,
+                _ => return Err(tr!("uso: forge plans phase <id> <n> start|done|backlog").into()),
+            };
+            let change = forge_core::ideas::PhaseChange {
+                status: Some(status),
+                ..Default::default()
+            };
+            let index = (n as usize)
+                .checked_sub(1)
+                .ok_or_else(|| tr!("las fases se numeran desde 1").to_string())?;
+            if !store.update_phase(list, id, index, change, "usuario")? {
+                return Err(missing(id));
+            }
+            show(id)?;
+        }
+        "task" => {
+            let id = number(0, "<id> <fase>.<tarea>")?;
+            let (phase, task) = rest
+                .get(1)
+                .and_then(|t| t.split_once('.'))
+                .and_then(|(p, t)| Some((p.parse::<usize>().ok()?, t.parse::<usize>().ok()?)))
+                .filter(|(p, t)| *p > 0 && *t > 0)
+                .ok_or_else(|| {
+                    tr!("uso: forge plans task <id> <fase>.<tarea> (p. ej. 2.3)").to_string()
+                })?;
+            let change = forge_core::ideas::PhaseChange {
+                task: Some((task - 1, !args.iter().any(|a| a == "--undo"))),
+                ..Default::default()
+            };
+            if !store.update_phase(list, id, phase - 1, change, "usuario")? {
+                return Err(missing(id));
+            }
+            show(id)?;
         }
         "delete" => {
-            let id = id()?;
+            let id = number(0, "<id>")?;
             if !store.delete_idea(list, id)? {
-                return Err(tr!("no existe la idea #{id} en esta lista", id = id));
+                return Err(missing(id));
             }
-            out.line(&format!("Idea #{id} borrada."));
+            out.line(&tr!("Plan #{id} borrado.", id = id));
         }
         _ => {
             return Err(tr!(
-                "acción desconocida \"{action}\": list, add, done, doing, pending o delete",
+                "acción desconocida \"{action}\": list, show, add, start, done, backlog, phase, task o delete",
                 action = action
             ));
         }

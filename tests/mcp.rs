@@ -214,4 +214,31 @@ fn mcp_server_shares_memory_between_clients() {
         "{all}"
     );
     assert!(ideas(&["--general"]).contains("App para talleres"));
+
+    // `forge plans`: ver un plan, tachar una tarea, reabrir una fase.
+    let plans = |args: &[&str]| {
+        let mut all = vec!["plans"];
+        all.extend(args);
+        all.extend(["--project", project_arg.as_str()]);
+        let out = Command::new(FORGE)
+            .args(&all)
+            .env("FORGE_DB", &db)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    assert!(plans(&["show", "3"]).contains("1.2 [ ] Migración"));
+    assert!(plans(&["task", "3", "1.2"]).contains("1.2 [x] Migración"));
+    let reopened = plans(&["phase", "3", "2", "backlog"]);
+    assert!(
+        reopened.starts_with("#3 ◐"),
+        "una fase reabierta: en progreso de nuevo\n{reopened}"
+    );
+    assert!(plans(&["add", "Modo oscuro"]).contains("backlog"));
+    assert!(plans(&[]).contains("Modo oscuro"));
 }

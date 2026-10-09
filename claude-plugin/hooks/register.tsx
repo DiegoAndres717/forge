@@ -7,9 +7,9 @@
 //   is billed to Haiku.
 // - Reports every turn's tokens by model to Forge (subagents included), so Forge can
 //   show where the tokens go.
-// - A band above the prompt with the project's Guard status, pending ideas and the
+// - A band above the prompt with the project's Guard status, plans and the
 //   session's tokens by model.
-// - /ideas, /guard and /remember answered by Forge's CLI, without a model call.
+// - /plans, /guard and /remember answered by Forge's CLI, without a model call.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -38,6 +38,18 @@ function resetsIn(at: string | undefined, now: number) {
   if (!(ms > 0)) return ''
   const hours = Math.round(ms / 3_600_000)
   return hours >= 48 ? `in ${Math.round(hours / 24)}d` : `in ${Math.max(1, hours)}h`
+}
+
+/** "2 in progress · 3 backlog" (older Forge: "N ideas pending"). */
+function plansLabel(status: Band) {
+  if (status.plans_in_progress === undefined || status.backlog === undefined) {
+    return { text: `${status.ideas} ${status.ideas === 1 ? 'idea' : 'ideas'} pending`, busy: status.ideas > 0 }
+  }
+  const parts = [
+    status.plans_in_progress > 0 ? `${status.plans_in_progress} in progress` : '',
+    status.backlog > 0 ? `${status.backlog} backlog` : '',
+  ].filter(Boolean)
+  return { text: parts.length ? parts.join(' · ') : 'no plans', busy: status.plans_in_progress > 0 }
 }
 
 /** Theme colors (they follow the user's Claude theme). */
@@ -141,7 +153,7 @@ export const register: Register = on => {
     for (const agent of agents) {
       await $.agent.register(agent)
     }
-    await $.command.register({ name: 'ideas', description: 'Forge ideas for this project', argumentHint: '[add <text> | done <id>]' })
+    await $.command.register({ name: 'plans', description: "This project's Forge plans and backlog", argumentHint: '[add <text> | show <id>]' })
     await $.command.register({ name: 'guard', description: 'Check the commit with Forge Guard' })
     await $.command.register({ name: 'remember', description: 'Save a note to the project memory', argumentHint: '<text>' })
     void refreshBand($)
@@ -255,9 +267,7 @@ export const register: Register = on => {
         {status ? <Text color={GUARD_COLOR[status.guard] ?? 'subtle'}>{status.guard}</Text> : null}
         {status ? sep : null}
         {status ? (
-          <Text color={status.ideas > 0 ? 'warning' : 'subtle'}>
-            {status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending
-          </Text>
+          <Text color={plansLabel(status).busy ? 'warning' : 'subtle'}>{plansLabel(status).text}</Text>
         ) : null}
         {models.map(model => {
           const n = spent[model] ?? { fresh: 0, cache: 0 }
@@ -299,12 +309,12 @@ export const register: Register = on => {
     )
   })
 
-  on('command.run', { command: 'ideas' }, async ($, e) => {
+  on('command.run', { command: 'plans' }, async ($, e) => {
     const [action, ...rest] = e.args.trim().split(/\s+/)
     const text = rest.join(' ')
-    if (action === 'add' && text) return run($, ['ideas', 'add', text])
-    if (action === 'done' && text) return run($, ['ideas', 'done', text])
-    return run($, ['ideas'])
+    if (action === 'add' && text) return run($, ['plans', 'add', text])
+    if (action === 'show' && text) return run($, ['plans', 'show', text])
+    return run($, ['plans'])
   })
 
   on('command.run', { command: 'guard' }, async $ => {

@@ -699,11 +699,13 @@ impl Workspace {
         let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
             return;
         };
-        let quoted = format!("'{}'", prompt.replace('\'', r"'\''"));
+        let Some(command) = spec.with_prompt(&spec.command, prompt) else {
+            return;
+        };
         let state = PanelState {
             name: Some(spec.name.clone()),
             cwd: self.project.root(),
-            command: Some(format!("{} {quoted}", spec.command)),
+            command: Some(command),
             process: None,
             agent: Some(spec.id.clone()),
         };
