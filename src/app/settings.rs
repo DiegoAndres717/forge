@@ -171,6 +171,16 @@ impl App {
                         });
                     });
                 }
+
+                // Versión instalada, al pie (como "Acerca de").
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        RichText::new(format!("Forge {}", env!("CARGO_PKG_VERSION")))
+                            .size(11.5)
+                            .color(theme::TEXT_3),
+                    );
+                });
             });
         if modal.should_close() {
             self.settings_open = false;
