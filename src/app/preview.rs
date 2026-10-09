@@ -207,22 +207,75 @@ fn ui_preview() {
         store
             .add_idea(Some(&project), "Export orders to CSV", "", "user")
             .unwrap();
-        let b = store
-            .add_idea(
+        // Un plan en progreso (fase 2 de 3) y otro planificado en el backlog.
+        use forge_core::ideas::{Phase, Task};
+        let phase = |title: &str, status: &str, branch: Option<&str>, tasks: &[(&str, bool)]| {
+            let mut p = Phase::new(title);
+            p.status = status.into();
+            p.branch = branch.map(str::to_string);
+            p.tasks = tasks
+                .iter()
+                .map(|(text, done)| Task {
+                    text: text.to_string(),
+                    done: *done,
+                })
+                .collect();
+            p
+        };
+        store
+            .add_plan(
                 Some(&project),
                 "Email a receipt after payment",
                 "Use the Stripe webhook, not the redirect.",
+                &[
+                    phase(
+                        "Webhook and receipt model",
+                        "done",
+                        Some("feat/receipt-webhook"),
+                        &[
+                            ("Verify the Stripe signature", true),
+                            ("Store receipts", true),
+                        ],
+                    ),
+                    phase(
+                        "Email template and sending",
+                        "doing",
+                        Some("feat/receipt-email"),
+                        &[
+                            ("React Email template", true),
+                            ("Send through Resend", false),
+                            ("Retry on failure", false),
+                        ],
+                    ),
+                    phase(
+                        "Tests and QA",
+                        "pending",
+                        None,
+                        &[("Webhook e2e test", false)],
+                    ),
+                ],
                 "claude-code",
             )
             .unwrap();
         store
-            .add_idea(Some(&project), "Offline cart for mobile", "", "codex")
+            .add_plan(
+                Some(&project),
+                "Offline cart for mobile",
+                "",
+                &[
+                    phase(
+                        "Local storage sync",
+                        "pending",
+                        Some("feat/offline-cart"),
+                        &[],
+                    ),
+                    phase("Conflict resolution", "pending", None, &[]),
+                ],
+                "codex",
+            )
             .unwrap();
         let c = store
             .add_idea(Some(&project), "Coupon codes at checkout", "", "user")
-            .unwrap();
-        store
-            .update_idea(Some(&project), b, Some("doing"), None, None, "claude-code")
             .unwrap();
         store
             .update_idea(Some(&project), c, Some("done"), None, None, "claude-code")

@@ -202,6 +202,14 @@ enum UiCmd {
     IdeaEdit(IdeasTarget, Option<i64>),
     IdeaSave(IdeasTarget),
     IdeaDelete(IdeasTarget, i64),
+    /// Estado de una fase de un plan (índice desde 0).
+    PhaseSet(IdeasTarget, i64, usize, &'static str),
+    /// Tachar o destachar una tarea: (plan, fase, tarea, hecha).
+    TaskToggle(IdeasTarget, i64, usize, usize, bool),
+    /// Añadir la fase escrita en "Añadir fase".
+    PhaseAdd(IdeasTarget, i64),
+    /// Pedir al agente por defecto que planifique por fases una idea del backlog.
+    PlanWithAgent(i64),
     MemorySave,
     /// Abre la memoria con el formulario de nota nueva.
     NewNote,
@@ -667,7 +675,11 @@ impl App {
             | UiCmd::IdeaSet(..)
             | UiCmd::IdeaEdit(..)
             | UiCmd::IdeaSave(_)
-            | UiCmd::IdeaDelete(..) => self.apply_idea(cmd),
+            | UiCmd::IdeaDelete(..)
+            | UiCmd::PhaseSet(..)
+            | UiCmd::TaskToggle(..)
+            | UiCmd::PhaseAdd(..) => self.apply_idea(cmd),
+            UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
             UiCmd::ToggleMemory | UiCmd::NewNote | UiCmd::MemorySave | UiCmd::MemoryDelete(_) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
@@ -1097,6 +1109,7 @@ impl eframe::App for App {
         self.ram_tick(&ctx);
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).
         if let Some(i) = self.active {
+            let planner = self.planner(i).map(|(_, name)| name);
             let ws = &mut self.workspaces[i];
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open {
                 let (rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
@@ -1105,7 +1118,8 @@ impl eframe::App for App {
                 } else if ws.memory.open {
                     Self::memory_ui(ws, ui, drawer, &mut cmds);
                 } else if ws.ideas.open {
-                    Self::ideas_ui(ws, Some(i), ui, drawer, &mut cmds);
+                    let planner = planner.as_deref();
+                    Self::ideas_ui(ws, Some(i), planner, ui, drawer, &mut cmds);
                 } else {
                     Self::git_ui(ws, ui, drawer, &mut cmds);
                 }

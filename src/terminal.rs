@@ -946,6 +946,20 @@ impl Terminal {
         (term.grid().display_offset(), term.selection_to_string())
     }
 
+    /// Escribe un mensaje y lo envía, como si se pegara y se pulsara Enter (p. ej. una
+    /// petición a un agente abierto).
+    pub fn submit(&self, text: &str) {
+        let mode = *self.term.lock().unwrap().mode();
+        let text = text.replace(['\r', '\n'], " ");
+        if mode.contains(TermMode::BRACKETED_PASTE) {
+            let text = text.replace('\x1b', "");
+            self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
+        } else {
+            self.send(text.as_bytes());
+        }
+        self.send(b"\r");
+    }
+
     fn scroll_to_bottom(&self) {
         self.term.lock().unwrap().scroll_display(Scroll::Bottom);
     }

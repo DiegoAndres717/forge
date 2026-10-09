@@ -232,9 +232,9 @@ impl App {
                 };
                 if theme::row(
                     ui,
-                    icon::LIGHTBULB,
-                    theme::YELLOW,
-                    tr!("Ideas"),
+                    icon::LIST_CHECKS,
+                    theme::ACCENT,
+                    tr!("Planes"),
                     &open,
                     ws.ideas.open,
                 )

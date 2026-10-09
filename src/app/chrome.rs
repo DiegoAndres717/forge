@@ -48,11 +48,11 @@ impl App {
             );
         });
         ui.add_space(22.0);
-        // Ideas generales (no son de ningún proyecto).
+        // Planes generales (no son de ningún proyecto).
         ui.horizontal(|ui| {
-            ui.label(RichText::new(icon::LIGHTBULB).color(theme::YELLOW));
+            ui.label(RichText::new(icon::LIST_CHECKS).color(theme::ACCENT));
             ui.label(
-                RichText::new(tr!("Ideas generales"))
+                RichText::new(tr!("Planes generales"))
                     .size(13.0)
                     .color(theme::TEXT_2)
                     .strong(),
@@ -70,7 +70,9 @@ impl App {
             egui::ScrollArea::vertical()
                 .id_salt("general-ideas")
                 .max_height(220.0)
-                .show(ui, |ui| Self::ideas_list(&mut self.general, None, ui, cmds));
+                .show(ui, |ui| {
+                    Self::ideas_list(&mut self.general, None, None, ui, cmds)
+                });
         });
         ui.add_space(22.0);
         if recent.is_empty() {
