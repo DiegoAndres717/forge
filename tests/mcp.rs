@@ -239,6 +239,14 @@ fn mcp_server_shares_memory_between_clients() {
         reopened.starts_with("#3 ◐"),
         "una fase reabierta: en progreso de nuevo\n{reopened}"
     );
+    // Recordatorio por mensaje (hook del mod): el plan en curso y la memoria.
+    let reminder = plans(&["reminder"]);
+    assert!(
+        reminder.contains("Plan #3")
+            && reminder.contains("plan_update")
+            && reminder.contains("memory_save"),
+        "{reminder}"
+    );
     assert!(plans(&["add", "Modo oscuro"]).contains("backlog"));
     assert!(plans(&[]).contains("Modo oscuro"));
 }
