@@ -180,6 +180,12 @@ impl App {
                             .size(11.5)
                             .color(theme::TEXT_3),
                     );
+                    if ui
+                        .link(RichText::new(tr!("Buscar actualizaciones")).size(11.5))
+                        .clicked()
+                    {
+                        cmds.push(UiCmd::CheckUpdates);
+                    }
                 });
             });
         if modal.should_close() {
