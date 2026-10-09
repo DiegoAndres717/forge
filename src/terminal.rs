@@ -173,6 +173,9 @@ impl Terminal {
 
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
+        // Enlaces "de verdad" (OSC 8): Claude Code y otros los envían solo si los saben
+        // soportados, y Forge no está en sus listas.
+        cmd.env("FORCE_HYPERLINK", "1");
         cmd.env("TERM_PROGRAM", "Forge");
         for (key, value) in env.iter().chain(SHELL_ENV.get().into_iter().flatten()) {
             cmd.env(key, value);
@@ -1399,13 +1402,25 @@ fn mouse_report(button: u8, col: usize, line: usize, pressed: bool, mode: TermMo
 }
 
 /// Texto de la fila en `point` y la URL que cubre su columna.
+/// Enlace bajo el puntero: primero el enlace "de verdad" de la celda (OSC 8, con la
+/// dirección completa aunque se vea partida en varias líneas, p. ej. el de Claude Code);
+/// si no, una URL escrita en esa fila.
 fn url_at_point<T>(term: &Term<T>, point: Point) -> Option<String> {
+    if let Some(link) = term.grid()[point].hyperlink() {
+        // Solo esquemas seguros: un programa podría marcar como enlace otro que abra apps.
+        let uri = link.uri();
+        let safe = ["https://", "http://", "file://", "mailto:"]
+            .iter()
+            .any(|s| uri.starts_with(s));
+        return safe.then(|| uri.to_string());
+    }
     let row = &term.grid()[point.line];
     let chars: Vec<char> = (0..term.columns()).map(|c| row[Column(c)].c).collect();
     url_at(&chars, point.column.0)
 }
 
-// ponytail: URLs de una sola fila; las que el shell parte en dos líneas no se detectan.
+// ponytail: URLs escritas en una sola fila; las partidas en dos solo se abren enteras si el
+// programa las envía como enlace (OSC 8, ver url_at_point).
 fn url_at(chars: &[char], col: usize) -> Option<String> {
     let stop = |c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '`' | '│');
     if col >= chars.len() || stop(chars[col]) {
@@ -1550,7 +1565,7 @@ const PALETTE: [(u8, u8, u8); 16] = [
     (0x0a, 0x84, 0xff), // azul
     (0xbf, 0x5a, 0xf2), // magenta
     (0x64, 0xd2, 0xff), // cian
-    (0xd1, 0xd1, 0xd6), // blanco
+    (0xf2, 0xf2, 0xf7), // blanco (casi puro: el gris claro se veía apagado)
     (0x63, 0x63, 0x66), // negro brillante
     (0xff, 0x69, 0x61), // rojo brillante
     (0x5b, 0xe3, 0x7a), // verde brillante
@@ -1560,8 +1575,8 @@ const PALETTE: [(u8, u8, u8); 16] = [
     (0x8e, 0xdc, 0xff), // cian brillante
     (0xff, 0xff, 0xff), // blanco brillante
 ];
-// Casi blanco (el texto de macOS): nítido sin deslumbrar.
-const FOREGROUND: (u8, u8, u8) = (0xf5, 0xf5, 0xf7);
+// Blanco puro: el casi blanco se veía pálido sobre el fondo oscuro.
+const FOREGROUND: (u8, u8, u8) = (0xff, 0xff, 0xff);
 const BACKGROUND: (u8, u8, u8) = (0x1c, 0x1c, 0x1e);
 const CURSOR: (u8, u8, u8) = (0xf2, 0xf2, 0xf7);
 
@@ -1719,6 +1734,33 @@ mod tests {
         assert_eq!(indexed(16), (0, 0, 0));
         assert_eq!(indexed(231), (255, 255, 255));
         assert_eq!(indexed(232), (8, 8, 8));
+    }
+
+    #[test]
+    fn hyperlinks_open_the_full_address_even_when_wrapped() {
+        use alacritty_terminal::event::VoidListener;
+        let size = Size { cols: 20, rows: 5 };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser: Processor = Processor::new();
+        let url = "https://mcp.example.com/authorize?code_challenge=lXOXvrnEF2KAB";
+        // Texto enlazado que ocupa dos filas, y un enlace con un esquema no permitido.
+        let bytes = format!(
+            "\x1b]8;;{url}\x1b\\abrir el enlace de autorizacion\x1b]8;;\x1b\\\r\n\x1b]8;;javascript:alert(1)\x1b\\malo\x1b]8;;\x1b\\"
+        );
+        parser.advance(&mut term, bytes.as_bytes());
+        let at = |line: i32, col: usize| {
+            url_at_point(
+                &term,
+                Point::new(alacritty_terminal::index::Line(line), Column(col)),
+            )
+        };
+        assert_eq!(at(0, 2).as_deref(), Some(url), "primera fila del enlace");
+        assert_eq!(
+            at(1, 3).as_deref(),
+            Some(url),
+            "segunda fila: la misma dirección completa"
+        );
+        assert_eq!(at(2, 1), None, "javascript: no se abre");
     }
 
     #[test]
