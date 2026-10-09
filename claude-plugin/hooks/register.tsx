@@ -96,7 +96,14 @@ and keep your context clean:
   failures; reviewing a finished change.
 - forge:architect (strongest model): only for genuinely hard design decisions or bugs
   that resisted the obvious fixes.
-Keep doing the actual editing yourself.`
+Keep doing the actual editing yourself.
+
+Forge plans: the user's plans and backlog live in Forge, reachable through the forge MCP
+tools (plans_list, plan_add, plan_update). When the user asks to save or put a plan "in
+Forge" / "en planes de Forge", call plan_add with its phases (a branch only where it
+deserves one, and tasks); never look for or write plan files. Ideas for later: plan_add
+without phases (backlog). While working a plan, mark the phase in_progress, tick tasks
+and mark it done.`
 
 /** "claude-opus-5-5" → "opus"; unknown ids are kept. */
 const alias = (model: string) =>
