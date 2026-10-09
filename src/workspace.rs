@@ -238,6 +238,8 @@ pub struct NoteForm {
 enum HeaderAction {
     Close,
     Maximize,
+    /// Con un panel maximizado: maximizar este otro en su lugar.
+    Show(PanelId),
     Start(String),
     Stop(String),
     Restart(String),
@@ -903,6 +905,11 @@ impl Workspace {
     }
 
     #[cfg(test)]
+    pub fn maximized(&self) -> Option<PanelId> {
+        self.maximized
+    }
+
+    #[cfg(test)]
     pub fn panel_count(&self) -> usize {
         self.panels.len()
     }
@@ -1207,6 +1214,10 @@ impl Workspace {
                         Some(id)
                     };
                 }
+                HeaderAction::Show(other) => {
+                    self.focus = other;
+                    self.maximized = Some(other);
+                }
                 HeaderAction::Start(p) => self.processes.start(&ctx, &p),
                 HeaderAction::Stop(p) => self.processes.stop(&p),
                 HeaderAction::Restart(p) => self.processes.restart(&ctx, &p),
@@ -1288,6 +1299,82 @@ impl Workspace {
             } else if button(icon::PLAY, tr!("Iniciar"), "start") {
                 actions.push(HeaderAction::Start(pid));
             }
+        }
+
+        // Maximizado: los demás paneles siguen ahí; un desplegable los muestra y permite
+        // saltar a otro (maximizado) o volver a verlos todos.
+        if self.maximized == Some(id) {
+            let others: Vec<PanelId> = self.layout.ids().into_iter().filter(|p| *p != id).collect();
+            let text = format!(
+                "{}  {}  {}",
+                icon::SQUARES_FOUR,
+                tr!("{n} más", n = others.len()),
+                icon::CARET_DOWN
+            );
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(text, FontId::proportional(11.5), theme::TEXT_3);
+            let chip = Rect::from_min_max(
+                egui::pos2(right - galley.size().x - 16.0, rect.center().y - 11.0),
+                egui::pos2(right - 2.0, rect.center().y + 11.0),
+            );
+            right = chip.min.x - 4.0;
+            let response = ui
+                .interact(
+                    chip,
+                    egui::Id::new(("hidden-panels", &key, id)),
+                    Sense::click(),
+                )
+                .on_hover_text(tr!("Paneles ocultos mientras este está maximizado"))
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            response.widget_info(|| {
+                let label = tr!("Paneles ocultos ({n})", n = others.len());
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)
+            });
+            let fill = if response.hovered() {
+                theme::SURFACE_HOVER
+            } else {
+                theme::SURFACE
+            };
+            painter.rect(
+                chip,
+                11.0,
+                fill,
+                egui::Stroke::new(1.0, theme::SEPARATOR),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(
+                egui::pos2(chip.min.x + 8.0, chip.center().y - galley.size().y / 2.0),
+                galley,
+                theme::TEXT_3,
+            );
+            egui::Popup::menu(&response).show(|ui| {
+                ui.set_min_width(240.0);
+                for other in &others {
+                    let glyph = match self.panels.get(other) {
+                        Some(p) if matches!(p.content, Content::Process(_)) => icon::PULSE,
+                        Some(p) if p.agent.is_some() => icon::ROBOT,
+                        _ => icon::TERMINAL_WINDOW,
+                    };
+                    if ui
+                        .button(format!("{glyph}  {}", self.label(*other)))
+                        .clicked()
+                    {
+                        actions.push(HeaderAction::Show(*other));
+                    }
+                }
+                ui.separator();
+                if ui
+                    .button(format!(
+                        "{}  {}",
+                        icon::ARROWS_IN,
+                        tr!("Mostrar todos (⌘Enter)")
+                    ))
+                    .clicked()
+                {
+                    actions.push(HeaderAction::Maximize);
+                }
+            });
         }
 
         // Icono: punto de estado (proceso), robot (agente) o terminal.
@@ -1404,9 +1491,6 @@ impl Workspace {
                 if let Some(url) = m.urls().first() {
                     detail.push(url.clone());
                 }
-            }
-            if self.maximized == Some(id) {
-                detail.push(tr!("maximizado · {p0} paneles", p0 = self.panels.len()));
             }
             let mut job = egui::text::LayoutJob::default();
             let title_color = if focused { theme::TEXT } else { theme::TEXT_3 };

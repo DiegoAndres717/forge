@@ -135,6 +135,24 @@ pub fn record_usage() {
     }
 }
 
+/// Los avisos de espera de Claude Code llegan en inglés: los conocidos se traducen al idioma
+/// de Forge; el resto pasa tal cual.
+fn waiting_text(name: &str, message: &str) -> String {
+    if let Some(tool) = message.strip_prefix("Claude needs your permission to use ") {
+        crate::tr!(
+            "{name} necesita permiso para usar {tool}",
+            name = name,
+            tool = tool.trim()
+        )
+    } else if message.starts_with("Claude is waiting for your input") {
+        crate::tr!("{name} espera tu respuesta", name = name)
+    } else if message.contains("permission") {
+        crate::tr!("{name} necesita tu permiso", name = name)
+    } else {
+        message.to_string()
+    }
+}
+
 /// Lo que ejecuta el hook (`forge agent-event stop|waiting [json]`). Nunca falla: un
 /// error aquí no debe interrumpir al agente.
 pub fn record(kind: &str, json_arg: Option<&str>) {
@@ -163,7 +181,7 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
         .or_else(|| std::env::var("FORGE_ORIGIN").ok())
         .unwrap_or_else(|| "Agente".into());
     let text = match (kind, message) {
-        ("waiting", Some(message)) => message,
+        ("waiting", Some(message)) => waiting_text(&name, &message),
         ("waiting", None) => crate::tr!("{name} espera tu respuesta", name = name),
         // El mod de Forge manda la primera línea de la respuesta como resumen.
         (_, Some(summary)) => format!("{name}: {summary}"),
@@ -208,4 +226,23 @@ pub fn drain(dir: &Path) -> Vec<AgentEvent> {
             event
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_waiting_messages_are_translated() {
+        // Los tests corren en español.
+        assert_eq!(
+            waiting_text("Claude Code", "Claude needs your permission to use Bash"),
+            "Claude Code necesita permiso para usar Bash"
+        );
+        assert_eq!(
+            waiting_text("Claude Code", "Claude is waiting for your input"),
+            "Claude Code espera tu respuesta"
+        );
+        assert_eq!(waiting_text("Codex", "Otro aviso"), "Otro aviso");
+    }
 }

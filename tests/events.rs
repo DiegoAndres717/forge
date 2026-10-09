@@ -40,7 +40,8 @@ fn agent_event_records_the_agent_message() {
     assert_eq!(
         texts,
         [
-            "Claude needs your permission to use Bash",
+            // El aviso de Claude Code (en inglés) llega en el idioma de Forge.
+            "Claude Code necesita permiso para usar Bash",
             "Claude Code terminó"
         ]
     );

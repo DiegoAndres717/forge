@@ -851,3 +851,31 @@ fn a_new_split_terminal_receives_the_keyboard() {
         ws(a).shell_text().contains("zznueva42")
     });
 }
+
+/// Con un panel maximizado, la cabecera lista los demás: se salta a otro (también
+/// maximizado) o se vuelven a mostrar todos.
+#[test]
+fn maximized_panel_lists_the_hidden_ones() {
+    let _serial = serial();
+    let mut h = app(project("maximize"));
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, Key::D);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).panel_count(), 2);
+    h.key_press_modifiers(CMD, Key::Enter);
+    h.run_steps(3);
+    let first = ws(h.state()).maximized().expect("⌘Enter maximiza");
+    h.get_by_label("Paneles ocultos (1)").click();
+    h.run_steps(3);
+    // La otra terminal, en el desplegable: maximizarla en su lugar.
+    h.get_by_label_contains(crate::theme::icon::TERMINAL_WINDOW)
+        .click();
+    h.run_steps(3);
+    let second = ws(h.state()).maximized().expect("sigue maximizado");
+    assert_ne!(first, second, "se maximizó el otro panel");
+    h.get_by_label("Paneles ocultos (1)").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Mostrar todos").click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).maximized(), None, "vuelven a verse todos");
+}
