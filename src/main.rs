@@ -3,6 +3,7 @@ mod claude_plugin;
 mod cli;
 mod layout;
 mod processes;
+mod suggest;
 mod terminal;
 mod theme;
 #[cfg(target_os = "macos")]

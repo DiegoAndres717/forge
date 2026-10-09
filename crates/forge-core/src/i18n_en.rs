@@ -1204,4 +1204,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Copiar", "Copy"),
     ("Copiado", "Copied"),
+    (
+        "Tab completar   ↑↓ elegir   Esc cerrar",
+        "Tab complete   ↑↓ choose   Esc close",
+    ),
 ];

@@ -784,3 +784,70 @@ fn dragging_a_selection_past_the_edge_scrolls_and_offers_copy() {
     h.run_steps(2);
     h.get_by_label_contains("Copiado");
 }
+
+/// Mientras se escribe una ruta, la terminal sugiere carpetas sin distinguir mayúsculas y
+/// Tab escribe la elegida. (El zsh de Forge manda la línea en una secuencia invisible; aquí
+/// la imprime el propio shell para no depender de su configuración.)
+#[test]
+fn typing_a_path_suggests_folders_and_tab_completes() {
+    let _serial = serial();
+    let dir = project("suggest");
+    std::fs::create_dir_all(dir.join("Programar")).unwrap();
+    std::fs::create_dir_all(dir.join("proyectos")).unwrap();
+    let mut h = app(dir.clone());
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let osc = format!("printf '\\e]7777;cd progr\\x1f{}\\a'", dir.display());
+    h.event(egui::Event::Text(osc));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "lista de sugerencias", |a| {
+        ws(a).shell_text().contains("printf") && a.workspaces[0].panel_count() > 0
+    });
+    for _ in 0..20 {
+        h.run_steps(2);
+        if h.query_by_label("Programar/").is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.get_by_label("Programar/");
+    assert!(
+        h.query_by_label("proyectos/").is_none(),
+        "no empieza ni contiene «progr»"
+    );
+    h.key_press(Key::Tab);
+    // (zsh-autosuggestions puede pintar texto fantasma detrás de lo escrito)
+    wait_until(&mut h, "Tab escribe la carpeta", |a| {
+        ws(a).shell_text().contains("Programar/")
+    });
+    assert!(
+        h.query_by_label("Programar/").is_none(),
+        "la lista se cierra al aceptar"
+    );
+    // Tab no se lleva el foco a otro control: la terminal sigue recibiendo el teclado.
+    h.event(egui::Event::Text("zzsigo".into()));
+    wait_until(&mut h, "la terminal sigue con el teclado", |a| {
+        ws(a).shell_text().contains("zzsigo")
+    });
+}
+
+/// Al dividir (⌘D) el foco pasa a la terminal nueva y es ella la que recibe el teclado
+/// (la anterior suelta el foco).
+#[test]
+fn a_new_split_terminal_receives_the_keyboard() {
+    let _serial = serial();
+    let mut h = app(project("split-focus"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.key_press_modifiers(CMD, Key::D);
+    wait_until(&mut h, "dos terminales listas", |a| {
+        ws(a).panel_count() == 2 && ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.event(egui::Event::Text("echo zznueva$((40+2))".into()));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "la terminal nueva recibe el teclado", |a| {
+        ws(a).shell_text().contains("zznueva42")
+    });
+}
