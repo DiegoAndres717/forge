@@ -589,7 +589,17 @@ impl Workspace {
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
         }
         // Agentes que lo permiten: se les conecta la memoria del proyecto por MCP.
+        // Con el mod de Forge cargado, Claude ya trae el MCP de Forge (lo declara el mod, y
+        // así lo tiene también un `claude` escrito a mano): no se conecta dos veces.
+        let has_mod = crate::claude_plugin::PLUGIN_DIR.get().is_some();
         let typed = match (&spec, &state.command, self.mcp_server()) {
+            (Some(spec), Some(_), Some(server))
+                if has_mod
+                    && server.name == "forge"
+                    && spec.mcp_style == Some(forge_core::agents::McpStyle::ClaudeJson) =>
+            {
+                state.command.clone()
+            }
             (Some(spec), Some(command), Some(server)) => Some(spec.with_mcp(command, &server)),
             _ => state.command.clone(),
         };
@@ -599,7 +609,6 @@ impl Workspace {
             .map(|e| e.canonicalize().unwrap_or(e));
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
-                let has_mod = crate::claude_plugin::PLUGIN_DIR.get().is_some();
                 let model = crate::claude_plugin::CLAUDE_MODEL
                     .lock()
                     .map(|m| m.clone())
