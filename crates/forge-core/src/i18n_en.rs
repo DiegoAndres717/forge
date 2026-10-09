@@ -351,7 +351,6 @@ pub const EN: &[(&str, &str)] = &[
         "Process stopped. Press ▶ in the header to start it.",
     ),
     ("Cerrar panel (⌘W)", "Close panel (⌘W)"),
-    ("maximizado · {p0} paneles", "maximized · {p0} panels"),
     ("iniciando…", "starting…"),
     ("ejecutándose", "running"),
     ("deteniendo…", "stopping…"),
@@ -1208,4 +1207,16 @@ pub const EN: &[(&str, &str)] = &[
         "Tab completar   ↑↓ elegir   Esc cerrar",
         "Tab complete   ↑↓ choose   Esc close",
     ),
+    (
+        "{name} necesita permiso para usar {tool}",
+        "{name} needs permission to use {tool}",
+    ),
+    ("{name} necesita tu permiso", "{name} needs your permission"),
+    ("{n} más", "{n} more"),
+    ("Paneles ocultos ({n})", "Hidden panels ({n})"),
+    (
+        "Paneles ocultos mientras este está maximizado",
+        "Panels hidden while this one is maximized",
+    ),
+    ("Mostrar todos (⌘Enter)", "Show all (⌘Enter)"),
 ];

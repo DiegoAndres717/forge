@@ -2,6 +2,7 @@
 // `FORGE_PREVIEW_DIR=/ruta cargo test --release ui_preview -- --ignored --nocapture`
 use super::*;
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 
 fn save(harness: &mut Harness<'_, App>, dir: &Path, name: &str) {
     let image = harness.render().expect("render");
@@ -363,6 +364,22 @@ fn ui_preview() {
     harness.key_press(egui::Key::Enter);
     settle(&mut harness);
     save(&mut harness, &out, "15-sugerencias");
+    // Panel maximizado con el desplegable de los demás abierto.
+    harness.key_press_modifiers(
+        egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND,
+        egui::Key::Enter,
+    );
+    settle(&mut harness);
+    let hidden = forge_core::tr!("Paneles ocultos ({n})", n = 2);
+    harness.get_by_label(&hidden).click();
+    settle(&mut harness);
+    save(&mut harness, &out, "16-maximizado");
+    harness.key_press(egui::Key::Escape);
+    harness.key_press_modifiers(
+        egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND,
+        egui::Key::Enter,
+    );
+    settle(&mut harness);
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 
