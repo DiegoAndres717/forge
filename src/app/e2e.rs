@@ -459,13 +459,15 @@ fn background_process_failure_lights_the_project() {
     let dir = project("attention");
     std::fs::write(
         dir.join(".forge/project.toml"),
-        "[[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"sleep 1; exit 3\"\nrestart = \"on-workspace-open\"\n",
+        "[[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"while [ ! -f fail-now ]; do sleep 0.1; done; exit 3\"\nrestart = \"on-workspace-open\"\n",
     )
     .unwrap();
-    let mut h = app(dir);
+    let mut h = app(dir.clone());
     assert_eq!(ws(h.state()).attention(), None);
     h.key_press_modifiers(CMD_SHIFT, Key::H); // se sale del proyecto antes de que falle
     h.run_steps(2);
+    // Falla solo cuando ya no se está viendo (sin depender de lo que tarde el shell).
+    std::fs::write(dir.join("fail-now"), "").unwrap();
     wait_until(&mut h, "aviso del proceso fallido", |a| {
         ws(a).attention().is_some()
     });

@@ -827,10 +827,15 @@ mod orphan_tests {
     #[test]
     fn drop_kills_background_children() {
         let ctx = egui::Context::default();
+        // Duraciones únicas por ejecución: un huérfano de otra corrida no confunde a pgrep.
+        let (a, b) = (
+            format!("sleep 3{}1", std::process::id()),
+            format!("sleep 3{}2", std::process::id()),
+        );
         let def = ProcessDef {
             id: "bg".into(),
             name: None,
-            command: "sleep 3011 & sleep 3012".into(),
+            command: format!("{a} & {b}"),
             working_directory: None,
             environment: HashMap::new(),
             restart: Default::default(),
@@ -840,13 +845,13 @@ mod orphan_tests {
         let mut p = Processes::new(&[def], "/tmp".into(), HashMap::new());
         p.start(&ctx, "bg");
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !(alive("sleep 3011") && alive("sleep 3012")) {
+        while !(alive(&a) && alive(&b)) {
             assert!(Instant::now() < deadline, "no arrancó");
             std::thread::sleep(Duration::from_millis(50));
         }
         drop(p);
         let deadline = Instant::now() + Duration::from_secs(5);
-        while alive("sleep 3011") || alive("sleep 3012") {
+        while alive(&a) || alive(&b) {
             assert!(Instant::now() < deadline, "quedaron procesos huérfanos");
             std::thread::sleep(Duration::from_millis(50));
         }
