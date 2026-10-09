@@ -16,7 +16,7 @@ use crate::reviewers::Activation;
 use crate::router::{self, AiOutcome, AiVerdict, ReviewContext, RouterConfig, Usage};
 use sha2::{Digest, Sha256};
 
-mod diff;
+pub(crate) mod diff;
 mod evaluate;
 mod rules;
 mod run;
