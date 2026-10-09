@@ -728,3 +728,59 @@ fn typing_in_a_panel_field_does_not_reach_the_terminal() {
     });
     assert!(!ws(h.state()).shell_text().contains("zzsolonota"));
 }
+
+/// Seleccionar arrastrando por encima del borde desplaza la terminal hacia el historial y
+/// la selección sigue creciendo; al soltar aparece "Copiar".
+#[test]
+fn dragging_a_selection_past_the_edge_scrolls_and_offers_copy() {
+    let _serial = serial();
+    let mut h = app(project("select"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.event(egui::Event::Text("clear; seq 1 300".into()));
+    h.key_press(Key::Enter);
+    // "300" ya sale en el comando escrito: esperar a la salida completa y a que se calme.
+    wait_until(&mut h, "salida larga", |a| {
+        ws(a).shell_text().contains("\n299\n") && ws(a).is_quiet(Duration::from_millis(300))
+    });
+    let inside = egui::pos2(700.0, 500.0);
+    let press = |pressed| egui::Event::PointerButton {
+        pos: inside,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(egui::Event::PointerMoved(inside));
+    h.event(press(true));
+    h.run_steps(2);
+    h.event(egui::Event::PointerMoved(inside + Vec2::new(40.0, -40.0)));
+    h.run_steps(2);
+    // Fuera, por encima de la terminal: se desplaza sola mientras se mantiene ahí.
+    h.event(egui::Event::PointerMoved(egui::pos2(700.0, 20.0)));
+    for _ in 0..20 {
+        h.run_steps(1);
+        std::thread::sleep(Duration::from_millis(45));
+    }
+    let (offset, selected) = ws(h.state()).shell_view();
+    assert!(
+        offset > 20,
+        "no se desplazó al arrastrar fuera (offset {offset})"
+    );
+    let selected = selected.unwrap_or_default();
+    assert!(
+        selected.lines().count() > 40,
+        "la selección no siguió al desplazamiento: {} líneas",
+        selected.lines().count()
+    );
+    h.event(egui::Event::PointerButton {
+        pos: egui::pos2(700.0, 20.0),
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    });
+    h.run_steps(3);
+    h.get_by_label_contains("Copiar").click();
+    h.run_steps(2);
+    h.get_by_label_contains("Copiado");
+}

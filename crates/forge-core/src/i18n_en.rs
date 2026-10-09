@@ -1202,4 +1202,6 @@ pub const EN: &[(&str, &str)] = &[
         "la huella SHA-256 de la descarga no coincide con la publicada",
         "the download's SHA-256 checksum doesn't match the published one",
     ),
+    ("Copiar", "Copy"),
+    ("Copiado", "Copied"),
 ];
