@@ -1,7 +1,10 @@
 /** Project status shown in the band above the prompt (from `forge status --json`). */
 export type Band = {
   guard: string
+  /** Without phases or not started (older Forge: only `ideas`, the open count). */
   ideas: number
+  plans_in_progress?: number
+  backlog?: number
   memories: number
 }
 

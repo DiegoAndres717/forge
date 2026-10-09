@@ -1364,8 +1364,8 @@ pub const EN: &[(&str, &str)] = &[
         "New idea for the backlog… (Enter)",
     ),
     (
-        "Para planificar con IA hace falta Claude Code o Codex instalado",
-        "Planning with AI needs Claude Code or Codex installed",
+        "Para planificar con IA hace falta Claude Code, Codex u OpenCode instalado",
+        "Planning with AI needs Claude Code, Codex or OpenCode installed",
     ),
     ("Planes", "Plans"),
     ("Planes generales", "General plans"),
@@ -1383,4 +1383,28 @@ pub const EN: &[(&str, &str)] = &[
     ("{status} (según sus fases)", "{status} (from its phases)"),
     ("{status}: pasar a {next}", "{status}: move to {next}"),
     ("{total} fases completadas", "{total} phases completed"),
+    (
+        "acción desconocida \"{action}\": list, show, add, start, done, backlog, phase, task o delete",
+        "unknown action \"{action}\": list, show, add, start, done, backlog, phase, task or delete",
+    ),
+    (
+        "no existe el plan #{id} en esta lista",
+        "plan #{id} doesn't exist in this list",
+    ),
+    (
+        "uso: forge plans add \"título\" [\"nota\"]",
+        "usage: forge plans add \"title\" [\"note\"]",
+    ),
+    (
+        "uso: forge plans phase <id> <n> start|done|backlog",
+        "usage: forge plans phase <id> <n> start|done|backlog",
+    ),
+    (
+        "uso: forge plans task <id> <fase>.<tarea> (p. ej. 2.3)",
+        "usage: forge plans task <id> <phase>.<task> (e.g. 2.3)",
+    ),
+    (
+        "uso: forge plans {action} {what}",
+        "usage: forge plans {action} {what}",
+    ),
 ];

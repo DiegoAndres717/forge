@@ -355,7 +355,8 @@ impl App {
         let detected = self.agents.lock().ok()?.clone();
         let ws = self.workspaces.get(workspace)?;
         agents::default_agent(&ws.project.agents, &detected)
-            .filter(|a| matches!(a.program(), "claude" | "codex"))
+            // Se conecta a los planes (MCP) y sabe abrirse con un primer mensaje.
+            .filter(|a| a.mcp_style.is_some() && a.with_prompt(&a.command, "").is_some())
             .map(|a| (a.id.clone(), a.name.clone()))
     }
 
@@ -363,8 +364,10 @@ impl App {
     pub(super) fn plan_with_agent(&mut self, ctx: &egui::Context, id: i64, area: Rect) {
         let Some(i) = self.active else { return };
         let Some((agent, _)) = self.planner(i) else {
-            self.error =
-                Some(tr!("Para planificar con IA hace falta Claude Code o Codex instalado").into());
+            self.error = Some(
+                tr!("Para planificar con IA hace falta Claude Code, Codex u OpenCode instalado")
+                    .into(),
+            );
             return;
         };
         let ws = &mut self.workspaces[i];

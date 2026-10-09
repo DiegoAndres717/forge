@@ -27,7 +27,7 @@ Terminales, procesos, agentes, memoria del proyecto y un Guard que revisa cada c
 Cuando trabajas con Claude Code, Codex u OpenCode, el día se reparte entre pestañas de terminal, servidores de desarrollo, notas y "¿pasaron los tests antes del push?". Forge reúne cada proyecto en un solo lugar:
 
 - **Abres una carpeta y recuperas todo**: terminales, divisiones, servidores y agentes tal como los dejaste.
-- **Agentes con memoria**: decisiones, errores resueltos e ideas se comparten con todos los agentes vía MCP.
+- **Agentes que planifican y recuerdan**: los planes por fases, el backlog y la memoria del proyecto se comparten con todos los agentes vía MCP.
 - **Nada sale roto**: Project Guard aplica tus reglas (tamaño, secretos, lint, tests, build) antes de cada commit, push y pull request.
 - **Nativo y ligero**: escrito en Rust con interfaz dibujada en GPU; sin Electron ni navegador embebido.
 
@@ -64,11 +64,11 @@ Reglas deterministas antes de **commit / push / PR**: tamaño del cambio, archiv
 <tr>
 <td>
 
-### Ideas y memoria
-Lista de pendientes por proyecto **guardada fuera del repo**. Claude Code y Codex la leen, añaden ideas y las tachan. La memoria del proyecto (decisiones, errores resueltos, convenciones) se comparte con los agentes por MCP.
+### Planes y memoria
+Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**: cada fase con su estado, una rama de Git opcional y tareas que va tachando mientras trabaja. Lo que surja para después va al **backlog**; un clic en *Planificar con Claude Code* lo convierte en plan. Tres secciones (En progreso · Backlog · Completado), **guardado fuera del repo** y compartido por MCP con Claude Code, Codex y OpenCode, junto con la memoria del proyecto (decisiones, errores resueltos, convenciones).
 
 </td>
-<td><img src="docs/screenshots/ideas.png" alt="Ideas"></td>
+<td><img src="docs/screenshots/plans.png" alt="Planes"></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/approval.png" alt="Autorización de comandos peligrosos"></td>
@@ -136,16 +136,16 @@ El idioma se cambia en Ajustes (`⌘,`).
 Cualquier `claude` que se ejecute en una terminal de Forge (escrito a mano, `claude --resume`, `claude -c` o abierto desde la barra lateral) carga el mod de Forge automáticamente. No se instala nada en tu configuración de Claude ni se añade nada al repo; fuera de Forge, Claude funciona como siempre.
 
 - **Subagentes más baratos**: `forge:explorer` (Haiku) busca y lee código, `forge:reviewer` (Sonnet) corre tests y revisa, `forge:architect` (Opus) resuelve lo difícil. El modelo principal delega y conserva su contexto y su caché.
-- **Banda** encima del cuadro de texto: estado de Guard, ideas pendientes, tokens de la sesión (nuevos frente a caché) y barras de uso del plan (5 h y semanal).
+- **Banda en vivo** encima del cuadro de texto: estado de Guard, planes en progreso y backlog, el modelo que trabaja en ese momento (● opus / ↳ explorer: … (haiku)), tokens de la sesión (nuevos frente a caché) y barras de uso del plan (5 h y semanal).
 - **Consumo por modelo**: cada turno, subagentes incluidos, queda registrado; se ve en Ajustes.
-- **Comandos sin tokens**: `/ideas`, `/guard`, `/remember`.
+- **Comandos sin tokens**: `/plans`, `/guard`, `/remember`.
 
 ## Atajos de teclado
 
 | Atajo | Acción | Atajo | Acción |
 |---|---|---|---|
 | `⌘K` | Paleta de comandos | `⌘G` | Project Guard |
-| `⌘O` | Abrir carpeta | `⌘⇧M` | Memoria |
+| `⌘O` | Abrir carpeta | `⌘⇧M` / `⌘⇧I` | Memoria / Planes |
 | `⌘1`…`⌘9` | Cambiar de proyecto | `⌘⇧A` | Abrir agente |
 | `⌃Tab` | Proyecto reciente | `⌘F` | Buscar en la terminal |
 | `⌘T` | Nueva terminal | `⌘B` | Mostrar/ocultar barra lateral |
@@ -163,7 +163,7 @@ Por proyecto, en `.forge/` (súbelo al repo para compartirlo con tu equipo):
 | `agents.toml` | Agentes y cómo se lanzan |
 | `routing.toml` | Enrutado de modelos para revisiones con IA (`forge ai init`) |
 
-La configuración global está en `~/.config/forge/config.toml` (fuentes y más). Ideas, memoria e historial se guardan en la base de datos de Forge, nunca en el repo.
+La configuración global está en `~/.config/forge/config.toml` (fuentes y más). Planes, memoria e historial se guardan en la base de datos de Forge, nunca en el repo.
 
 La referencia completa de la CLI está en el [README en inglés](README.md#configuration) y en `forge help`.
 
@@ -176,7 +176,7 @@ No. Forge funciona en local; su única llamada de red es la comprobación de act
 Macs Intel: sí, la app es universal. Windows y Linux: por ahora no.
 
 **¿Necesito Claude Code?**
-No. Terminales, procesos, Guard, Git e ideas funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.
+No. Terminales, procesos, Guard, Git y planes funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.
 
 **¿Cómo reporto un error?**
 Abre un [issue](https://github.com/DiegoAndres717/forge/issues) con lo que hiciste, lo que esperabas y, si puedes, una captura.

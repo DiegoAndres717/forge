@@ -27,7 +27,7 @@ Terminals, processes, agents, project memory and a Guard that checks every chang
 When you work with Claude Code, Codex or OpenCode, your day is scattered across terminal tabs, dev servers, notes and "did the tests pass before I pushed?". Forge puts each project in one place:
 
 - **Open a folder, get your setup back** — terminals, splits, running dev servers and agents, exactly as you left them.
-- **Agents that remember** — decisions, fixed bugs and ideas are shared with every agent through MCP.
+- **Agents that plan and remember** — phased plans, the backlog and project memory are shared with every agent through MCP.
 - **Nothing ships broken** — Project Guard runs your rules (size, secrets, lint, tests, build) before each commit, push and pull request.
 - **Native and light** — written in Rust with a GPU-rendered UI; no Electron, no embedded browser.
 
@@ -64,11 +64,11 @@ Deterministic rules before **commit / push / PR**: change size, forbidden files,
 <tr>
 <td>
 
-### Ideas & memory
-Per-project to-do list **stored outside the repo**. Claude Code and Codex read it, add to it and check items off. Project memory (decisions, fixed errors, conventions) is shared with agents over MCP.
+### Plans & memory
+Tell the AI what you want to build and it saves a **plan in phases** — each phase with its status, an optional Git branch and tasks it ticks off as it works. Ideas for later go to the **backlog**; one click on *Plan with Claude Code* turns one into a plan. Three sections (In progress · Backlog · Completed), **stored outside the repo**, shared over MCP with Claude Code, Codex and OpenCode, together with the project memory (decisions, fixed errors, conventions).
 
 </td>
-<td><img src="docs/screenshots/ideas.png" alt="Ideas"></td>
+<td><img src="docs/screenshots/plans.png" alt="Plans"></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/approval.png" alt="Dangerous command approval"></td>
@@ -134,16 +134,16 @@ forge help
 Any `claude` started inside a Forge terminal — typed by hand, `claude --resume`, `claude -c` or opened from the sidebar — loads Forge's mod automatically. Nothing is installed into your Claude config and nothing is added to your repo; outside Forge, Claude behaves as usual.
 
 - **Cheaper subagents** — `forge:explorer` (Haiku) searches and reads code, `forge:reviewer` (Sonnet) runs tests and reviews, `forge:architect` (Opus) takes the hard problems. The main model delegates and keeps its context and cache.
-- **Status band** above the prompt — Guard status, pending ideas, session tokens (new vs. cached) and your plan usage bars (5h and weekly).
+- **Live status band** above the prompt — Guard status, plans in progress and backlog, the model working right now (● opus / ↳ explorer: … (haiku)), session tokens (new vs. cached) and your plan usage bars (5h and weekly).
 - **Usage per model** — every turn, subagents included, is recorded; see it in Settings.
-- **Zero-token commands** — `/ideas`, `/guard`, `/remember`.
+- **Zero-token commands** — `/plans`, `/guard`, `/remember`.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action | Shortcut | Action |
 |---|---|---|---|
 | `⌘K` | Command palette | `⌘G` | Project Guard |
-| `⌘O` | Open folder | `⌘⇧M` | Memory |
+| `⌘O` | Open folder | `⌘⇧M` / `⌘⇧I` | Memory / Plans |
 | `⌘1`…`⌘9` | Switch project | `⌘⇧A` | Open agent |
 | `⌃Tab` | Recent project | `⌘F` | Search in terminal |
 | `⌘T` | New terminal | `⌘B` | Toggle sidebar |
@@ -161,7 +161,7 @@ Per project, in `.forge/` (commit it to share with your team):
 | `agents.toml` | Agents and how to launch them |
 | `routing.toml` | Model routing for AI reviews (`forge ai init`) |
 
-Global settings live in `~/.config/forge/config.toml` (fonts and more). Ideas, memory and history are stored in Forge's own database, never in the repo.
+Global settings live in `~/.config/forge/config.toml` (fonts and more). Plans, memory and history are stored in Forge's own database, never in the repo.
 
 <details>
 <summary><b>CLI reference</b></summary>
@@ -177,7 +177,7 @@ forge agent list | open <id>          detected agents / open one here
 forge doctor                          checks git, database, settings, hooks and agents
 forge ai route | usage                change risk / model usage this month
 forge memory search|add|list|delete   project memory
-forge ideas [add|done|doing|delete]   ideas and to-dos (outside the repository)
+forge plans [show|add|start|done|phase|task]   plans and backlog (outside the repository)
 forge mcp                             MCP server for agents
 ```
 
@@ -194,7 +194,7 @@ No. Forge runs locally; its only network call is the update check against GitHub
 Intel Macs: yes, the app is universal. Windows and Linux: not for now.
 
 **Do I need Claude Code?**
-No. Terminals, processes, Guard, Git and ideas work without any agent. Forge detects Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Pi if they're installed.
+No. Terminals, processes, Guard, Git and plans work without any agent. Forge detects Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Pi if they're installed.
 
 **How do I report a bug?**
 Open an [issue](https://github.com/DiegoAndres717/forge/issues) with what you did, what you expected and a screenshot if possible.
