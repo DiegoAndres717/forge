@@ -338,6 +338,17 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "11-ajustes");
     harness.state_mut().settings_open = false;
+    *harness.state().update.lock().unwrap() = Some(super::update::Update::Available(
+        forge_core::updates::Release {
+            tag: "v0.2.0".into(),
+            page: String::new(),
+            dmg: None,
+        },
+    ));
+    settle(&mut harness);
+    save(&mut harness, &out, "14-actualizacion");
+    *harness.state().update.lock().unwrap() = None;
+    harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 
     harness.state_mut().active = None;
