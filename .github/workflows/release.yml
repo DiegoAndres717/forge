@@ -23,7 +23,9 @@ jobs:
           VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           test "v$VERSION" = "$GITHUB_REF_NAME"
       - run: ./scripts/make-dmg.sh
+      # Huella que la app comprueba antes de instalar una actualización.
+      - run: cd dist && for f in *.dmg; do shasum -a 256 "$f" > "$f.sha256"; done
       - name: Publicar
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.dmg --title "Forge $GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.dmg.sha256 --title "Forge $GITHUB_REF_NAME" --generate-notes

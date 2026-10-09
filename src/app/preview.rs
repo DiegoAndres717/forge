@@ -343,6 +343,7 @@ fn ui_preview() {
             tag: "v0.2.0".into(),
             page: String::new(),
             dmg: None,
+            checksum: None,
         },
     ));
     settle(&mut harness);

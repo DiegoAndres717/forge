@@ -673,6 +673,7 @@ fn update_pill_shows_in_the_toolbar_and_follows_the_download() {
         tag: "v9.9.9".into(),
         page: "https://example.invalid".into(),
         dmg: None,
+        checksum: None,
     };
     *h.state().update.lock().unwrap() = Some(super::update::Update::Available(release));
     h.run_steps(2);
