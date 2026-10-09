@@ -142,24 +142,75 @@ impl App {
                 if let Some(i) = self.active {
                     let ws = &self.workspaces[i];
                     ui.add_space(6.0);
-                    theme::section(ui, &tr!("Proyecto: {name}", name = ws.project.name()));
+                    theme::section(ui, &tr!("Este proyecto · {name}", name = ws.project.name()));
                     theme::card(ui, |ui| {
+                        ui.label(
+                            RichText::new(tr!("Se guarda en la carpeta .forge/ del proyecto: súbela al repositorio para compartirla con tu equipo."))
+                                .size(11.5)
+                                .color(theme::TEXT_3),
+                        );
+                        ui.add_space(4.0);
+                        // Cada archivo por lo que hace (el nombre técnico, en gris).
+                        let files = [
+                            (icon::SQUARES_FOUR, tr!("Distribución y procesos"), tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."), "project.toml"),
+                            (icon::SHIELD_CHECK, tr!("Reglas de Guard"), tr!("Qué se revisa antes de un commit, un push o un pull request."), "rules.toml"),
+                            (icon::ROBOT, tr!("Agentes"), tr!("Agentes propios y cómo se abren."), "agents.toml"),
+                            (icon::SPARKLE, tr!("Revisión con IA"), tr!("Qué modelos revisan los cambios y con qué presupuesto."), "routing.toml"),
+                        ];
+                        for (glyph, title, what, file) in files {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(glyph).size(16.0).color(theme::ACCENT));
+                                ui.vertical(|ui| {
+                                    ui.spacing_mut().item_spacing.y = 1.0;
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(title).color(theme::TEXT));
+                                        ui.label(RichText::new(file).size(11.0).color(theme::TEXT_4));
+                                    });
+                                    ui.label(RichText::new(what).size(11.5).color(theme::TEXT_3));
+                                });
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    // Sin project.toml: se crea con los scripts de package.json.
+                                    if file == "project.toml" && !ws.project.has_config() {
+                                        if theme::primary(ui, tr!("Crear")).on_hover_text(tr!("Detecta los scripts de package.json")).clicked() {
+                                            cmds.push(UiCmd::CreateConfig);
+                                        }
+                                    } else if theme::secondary(ui, tr!("Editar")).clicked() {
+                                        cmds.push(UiCmd::EditFile(file));
+                                    }
+                                });
+                            });
+                        }
+                        ui.add_space(4.0);
                         ui.horizontal_wrapped(|ui| {
-                            for file in ["project.toml", "rules.toml", "agents.toml", "routing.toml"] {
-                                if theme::secondary(ui, format!("{}  {file}", icon::FILE_TEXT)).clicked() {
-                                    cmds.push(UiCmd::EditFile(file));
-                                }
+                            if ws.project.has_config()
+                                && theme::secondary(ui, format!("{}  {}", icon::ARROW_CLOCKWISE, tr!("Recargar tras editar"))).clicked()
+                            {
+                                cmds.push(UiCmd::ReloadConfig);
+                            }
+                            if ws.project.default_layout().is_some()
+                                && theme::secondary(ui, format!("{}  {}", icon::SQUARES_FOUR, tr!("Restablecer la distribución de paneles"))).clicked()
+                            {
+                                cmds.push(UiCmd::ResetLayout);
                             }
                         });
+                        ui.separator();
                         let installed = matches!(
                             forge_core::hooks::status(&ws.project.path),
                             Ok(s) if s.iter().all(|(_, state)| matches!(state, forge_core::hooks::HookState::Installed))
                         );
                         ui.horizontal(|ui| {
-                            ui.label(if installed {
-                                tr!("Hooks de Git instalados")
-                            } else {
-                                tr!("Hooks de Git no instalados")
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 1.0;
+                                ui.label(if installed {
+                                    tr!("Hooks de Git instalados")
+                                } else {
+                                    tr!("Hooks de Git no instalados")
+                                });
+                                ui.label(
+                                    RichText::new(tr!("Pasan Guard solo antes de cada commit y push."))
+                                        .size(11.5)
+                                        .color(theme::TEXT_3),
+                                );
                             });
                             if installed {
                                 if theme::secondary(ui, tr!("Quitar")).clicked() {
