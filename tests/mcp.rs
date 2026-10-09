@@ -61,10 +61,10 @@ fn mcp_server_shares_memory_between_clients() {
             "memory_save",
             "memory_list",
             "memory_delete",
-            "ideas_list",
-            "idea_add",
-            "idea_update",
-            "idea_delete",
+            "plans_list",
+            "plan_add",
+            "plan_update",
+            "plan_delete",
             "project_context"
         ]
     );
@@ -93,7 +93,7 @@ fn mcp_server_shares_memory_between_clients() {
         context.contains("Proyecto Bovinapp") && context.contains("Vacunación por lotes"),
         "{context}"
     );
-    // Ideas: el agente anota, la empieza y la tacha.
+    // Planes: el agente anota en el backlog, crea un plan por fases y lo avanza.
     let mut call = |id: u64, name: &str, arguments: Value| -> String {
         let r = request(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}})).unwrap();
         assert_eq!(r["result"]["isError"], false, "{r}");
@@ -103,26 +103,62 @@ fn mcp_server_shares_memory_between_clients() {
             .to_string()
     };
     assert_eq!(
-        call(6, "idea_add", json!({"title": "Exportar vacunas a Excel"})),
-        "Anotada como idea #1."
+        call(6, "plan_add", json!({"title": "Exportar vacunas a Excel"})),
+        "Anotada en el backlog como #1."
     );
+    // El nombre anterior sigue valiendo (sesiones ya abiertas).
     call(
         7,
         "idea_add",
         json!({"title": "App para talleres", "scope": "general"}),
     );
-    call(8, "idea_update", json!({"id": 1, "status": "doing"}));
-    assert!(
-        call(9, "ideas_list", json!({})).contains("#1 ◐ Exportar vacunas a Excel (claude-code)")
-    );
-    assert!(call(10, "project_context", json!({})).contains("Ideas pendientes"));
-    call(11, "idea_update", json!({"id": 1, "status": "done"}));
     assert_eq!(
-        call(12, "ideas_list", json!({})),
-        "No hay ideas pendientes."
+        call(
+            8,
+            "plan_add",
+            json!({"title": "Vacunas por lote", "phases": [
+                {"title": "Modelo y migración", "branch": "feat/vacunas-lote", "tasks": ["Tabla lotes", "Migración"]},
+                {"title": "Pantalla de registro"}
+            ]})
+        ),
+        "Plan #3 creado con 2 fases."
     );
-    assert!(call(13, "ideas_list", json!({"include_done": true})).contains("#1 ✓"));
-    assert!(call(14, "ideas_list", json!({"scope": "general"})).contains("App para talleres"));
+    let started = call(
+        9,
+        "plan_update",
+        json!({"id": 3, "phase": 1, "phase_status": "in_progress"}),
+    );
+    assert!(started.starts_with("#3 ◐ Vacunas por lote"), "{started}");
+    assert!(
+        started.contains("1. ◐ Modelo y migración [feat/vacunas-lote]"),
+        "{started}"
+    );
+    assert!(call(10, "project_context", json!({})).contains("fase 1 de 2: Modelo y migración"));
+    let ticked = call(
+        11,
+        "plan_update",
+        json!({"id": 3, "phase": 1, "task": 1, "phase_status": "done"}),
+    );
+    assert!(
+        ticked.contains("1.1 [x] Tabla lotes") && ticked.contains("1.2 [ ] Migración"),
+        "{ticked}"
+    );
+    let done = call(
+        12,
+        "plan_update",
+        json!({"id": 3, "phase": 2, "phase_status": "done"}),
+    );
+    assert!(
+        done.starts_with("#3 ✓"),
+        "todas las fases completadas: {done}"
+    );
+    let list = call(13, "plans_list", json!({}));
+    assert!(
+        list.contains("#1 ○ Exportar vacunas a Excel") && !list.contains("#3"),
+        "{list}"
+    );
+    assert!(call(14, "plans_list", json!({"include_done": true})).contains("#3 ✓"));
+    assert!(call(15, "plans_list", json!({"scope": "general"})).contains("App para talleres"));
 
     drop(stdin);
     assert!(
@@ -160,7 +196,7 @@ fn mcp_server_shares_memory_between_clients() {
         String::from_utf8_lossy(&add.stderr)
     );
 
-    // La CLI ve las ideas del agente (y la lista general aparte).
+    // La CLI ve los planes del agente, con sus fases (y la lista general aparte).
     let ideas = |extra: &[&str]| {
         let mut args = vec!["ideas", "list", "--project", &project_arg];
         args.extend(extra);
@@ -171,6 +207,11 @@ fn mcp_server_shares_memory_between_clients() {
             .unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
-    assert!(ideas(&["--all"]).contains("#1 ✓ Exportar vacunas a Excel"));
+    let all = ideas(&["--all"]);
+    assert!(all.contains("#1 ○ Exportar vacunas a Excel"), "{all}");
+    assert!(
+        all.contains("#3 ✓ Vacunas por lote") && all.contains("[feat/vacunas-lote]"),
+        "{all}"
+    );
     assert!(ideas(&["--general"]).contains("App para talleres"));
 }

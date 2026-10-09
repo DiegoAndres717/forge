@@ -30,7 +30,7 @@ fn tools() -> Value {
         },
         {
             "name": "memory_save",
-            "description": tr!("Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa idea_add."),
+            "description": tr!("Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa los planes (plan_add)."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -56,47 +56,69 @@ fn tools() -> Value {
             "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}
         },
         {
-            "name": "ideas_list",
-            "description": tr!("Lista de ideas y pendientes del proyecto (o la lista general con scope=general): en curso, pendientes y, si se pide, las hechas. Consúltala al empezar a trabajar o cuando el usuario pregunte qué falta."),
+            "name": "plans_list",
+            "description": tr!("Planes y backlog del proyecto (o la lista general con scope=general): en progreso con sus fases (rama y tareas), el backlog y, si se pide, los completados. Consúltalo al empezar a trabajar o cuando el usuario pregunte qué falta o en qué va."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "include_done": {"type": "boolean", "description": tr!("Incluir las ya hechas")},
+                    "include_done": {"type": "boolean", "description": tr!("Incluir los completados")},
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 }
             }
         },
         {
-            "name": "idea_add",
-            "description": tr!("Anota una idea o pendiente para no perderla (propia o del usuario). Úsala cuando surja algo para hacer después, en vez de dejarlo solo en la conversación."),
+            "name": "plan_add",
+            "description": tr!("Crea un plan por fases cuando el usuario cuente algo que quiere hacer (cada fase con su rama si la merece y sus tareas), o, sin fases, anota una idea en el backlog para no perderla. Una fase no siempre es una rama."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "title": {"type": "string", "description": tr!("Qué hacer, en una línea")},
-                    "note": {"type": "string", "description": tr!("Detalle o criterio de terminado (opcional)")},
+                    "title": {"type": "string", "description": tr!("El objetivo, en una línea")},
+                    "note": {"type": "string", "description": tr!("Contexto o criterio de terminado (opcional)")},
+                    "phases": {
+                        "type": "array",
+                        "description": tr!("Fases en orden (vacío: idea del backlog)"),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "notes": {"type": "string"},
+                                "branch": {"type": "string", "description": tr!("Rama de Git, p. ej. feat/export-csv (opcional)")},
+                                "tasks": {"type": "array", "items": {"type": "string"}}
+                            },
+                            "required": ["title"]
+                        }
+                    },
                     "scope": {"type": "string", "enum": ["project", "general"], "description": tr!("general = no es de este proyecto")}
                 },
                 "required": ["title"]
             }
         },
         {
-            "name": "idea_update",
-            "description": tr!("Cambia una idea: márcala doing al empezarla y done al terminarla (queda tachada), o corrige título y nota."),
+            "name": "plan_update",
+            "description": tr!("Avanza un plan: al empezar una fase márcala in_progress (y crea su rama si la tiene), tacha tareas al terminarlas y marca la fase done al acabar; el plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "integer"},
-                    "status": {"type": "string", "enum": ["pending", "doing", "done"]},
+                    "status": {"type": "string", "enum": ["backlog", "in_progress", "done"], "description": tr!("Estado del plan o idea (con fases se calcula solo)")},
                     "title": {"type": "string"},
                     "note": {"type": "string"},
+                    "phases": {"type": "array", "description": tr!("Reemplaza todas las fases (mismo formato que en plan_add)"), "items": {"type": "object"}},
+                    "phase": {"type": "integer", "description": tr!("Número de fase a cambiar (desde 1)")},
+                    "phase_status": {"type": "string", "enum": ["backlog", "in_progress", "done"]},
+                    "branch": {"type": "string", "description": tr!("Rama de la fase (vacío la quita)")},
+                    "phase_notes": {"type": "string"},
+                    "task": {"type": "integer", "description": tr!("Número de tarea de la fase (desde 1)")},
+                    "task_done": {"type": "boolean", "description": tr!("Por defecto true: tachar la tarea")},
+                    "add_task": {"type": "string", "description": tr!("Añade una tarea a la fase")},
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 },
                 "required": ["id"]
             }
         },
         {
-            "name": "idea_delete",
-            "description": tr!("Borra una idea descartada (por id). Si se hizo, mejor márcala done."),
+            "name": "plan_delete",
+            "description": tr!("Borra un plan o idea descartada (por id). Si se hizo, mejor márcalo done."),
             "inputSchema": {
                 "type": "object",
                 "properties": {"id": {"type": "integer"}, "scope": {"type": "string", "enum": ["project", "general"]}},
@@ -142,7 +164,7 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": tr!("Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Las cosas por hacer van en la lista de ideas (ideas_list, idea_add, idea_update): márcalas doing al empezar y done al terminar.")
+                    "instructions": tr!("Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.")
                 }))
             }
             "ping" => Ok(json!({})),
@@ -201,12 +223,13 @@ impl<'a> Server<'a> {
                 }),
                 None => Err(tr!("falta `id`").into()),
             },
-            "ideas_list" => self
+            // Los nombres anteriores (ideas_*) siguen valiendo para sesiones ya abiertas.
+            "plans_list" | "ideas_list" => self
                 .store
                 .list_ideas(list, args["include_done"].as_bool().unwrap_or(false))
                 .map(|ideas| {
                     if ideas.is_empty() {
-                        tr!("No hay ideas pendientes.").into()
+                        tr!("No hay planes ni ideas en el backlog.").into()
                     } else {
                         ideas
                             .iter()
@@ -215,41 +238,34 @@ impl<'a> Server<'a> {
                             .join("\n")
                     }
                 }),
-            "idea_add" => self
-                .store
-                .add_idea(
+            "plan_add" | "idea_add" => parse_phases(&args["phases"]).and_then(|phases| {
+                let id = self.store.add_plan(
                     list,
                     args["title"].as_str().unwrap_or_default(),
                     args["note"].as_str().unwrap_or_default(),
+                    &phases,
                     &self.client,
-                )
-                .map(|id| format!("Anotada como idea #{id}.")),
-            "idea_update" => match args["id"].as_i64() {
-                Some(id) => self
-                    .store
-                    .update_idea(
-                        list,
-                        id,
-                        args["status"].as_str(),
-                        args["title"].as_str(),
-                        args["note"].as_str(),
-                        &self.client,
+                )?;
+                Ok(if phases.is_empty() {
+                    tr!("Anotada en el backlog como #{id}.", id = id)
+                } else {
+                    tr!(
+                        "Plan #{id} creado con {n} fases.",
+                        id = id,
+                        n = phases.len()
                     )
-                    .map(|ok| {
-                        if ok {
-                            format!("Idea #{id} actualizada.")
-                        } else {
-                            tr!("No existe la idea #{id} en esta lista.", id = id)
-                        }
-                    }),
+                })
+            }),
+            "plan_update" | "idea_update" => match args["id"].as_i64() {
+                Some(id) => self.update_plan(list, id, args),
                 None => Err(tr!("falta `id`").into()),
             },
-            "idea_delete" => match args["id"].as_i64() {
+            "plan_delete" | "idea_delete" => match args["id"].as_i64() {
                 Some(id) => self.store.delete_idea(list, id).map(|ok| {
                     if ok {
-                        format!("Idea #{id} borrada.")
+                        tr!("Plan #{id} borrado.", id = id)
                     } else {
-                        tr!("No existe la idea #{id} en esta lista.", id = id)
+                        tr!("No existe el plan #{id} en esta lista.", id = id)
                     }
                 }),
                 None => Err(tr!("falta `id`").into()),
@@ -262,6 +278,92 @@ impl<'a> Server<'a> {
             Err(e) => text(e, true),
         }
     }
+}
+
+impl Server<'_> {
+    /// plan_update: fases nuevas, cambio de una fase y/o estado, título y nota; devuelve el
+    /// plan como queda.
+    fn update_plan(&self, list: Option<&Path>, id: i64, args: &Value) -> Result<String, String> {
+        let missing = || tr!("No existe el plan #{id} en esta lista.", id = id);
+        if !args["phases"].is_null() {
+            let phases = parse_phases(&args["phases"])?;
+            if !self.store.set_phases(list, id, &phases, &self.client)? {
+                return Ok(missing());
+            }
+        }
+        if let Some(n) = args["phase"].as_u64() {
+            let task = args["task"].as_u64().map(|t| {
+                (
+                    t.saturating_sub(1) as usize,
+                    args["task_done"].as_bool().unwrap_or(true),
+                )
+            });
+            let change = ideas::PhaseChange {
+                status: args["phase_status"].as_str(),
+                branch: args["branch"].as_str(),
+                notes: args["phase_notes"].as_str(),
+                task,
+                add_task: args["add_task"].as_str(),
+            };
+            let index = (n as usize)
+                .checked_sub(1)
+                .ok_or_else(|| tr!("las fases se numeran desde 1").to_string())?;
+            if !self
+                .store
+                .update_phase(list, id, index, change, &self.client)?
+            {
+                return Ok(missing());
+            }
+        }
+        let (status, title, note) = (
+            args["status"].as_str(),
+            args["title"].as_str(),
+            args["note"].as_str(),
+        );
+        if (status.is_some() || title.is_some() || note.is_some())
+            && !self
+                .store
+                .update_idea(list, id, status, title, note, &self.client)?
+        {
+            return Ok(missing());
+        }
+        match self.store.get_idea(list, id)? {
+            Some(plan) => Ok(ideas::render(&plan)),
+            None => Ok(missing()),
+        }
+    }
+}
+
+/// Fases que manda un agente: `[{title, notes?, branch?, tasks?: [texto]}]` (o vacío).
+fn parse_phases(value: &Value) -> Result<Vec<ideas::Phase>, String> {
+    let Some(items) = value.as_array() else {
+        return Ok(Vec::new());
+    };
+    items
+        .iter()
+        .map(|item| {
+            let title = item["title"].as_str().unwrap_or_default();
+            let mut phase = ideas::Phase::new(title);
+            phase.notes = item["notes"].as_str().unwrap_or_default().to_string();
+            phase.branch = item["branch"].as_str().map(str::to_string);
+            if let Some(status) = item["status"].as_str() {
+                phase.status = status.to_string();
+            }
+            phase.tasks = item["tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|t| {
+                    let text = t.as_str().or_else(|| t["text"].as_str())?;
+                    Some(ideas::Task {
+                        text: text.to_string(),
+                        done: t["done"].as_bool().unwrap_or(false),
+                    })
+                })
+                .collect();
+            Ok(phase)
+        })
+        .collect()
 }
 
 fn listing(found: &[memory::Memory], empty: &str) -> String {
@@ -347,12 +449,31 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         out.extend(important);
     }
     let open = store.list_ideas(Some(project), false).unwrap_or_default();
-    if !open.is_empty() {
-        out.push(tr!("Ideas pendientes (ideas_list para el detalle):").into());
+    let (doing, backlog): (Vec<_>, Vec<_>) = open.iter().partition(|i| i.status == "doing");
+    if !doing.is_empty() {
+        out.push(tr!("Planes en progreso (plans_list para el detalle):").into());
+        out.extend(doing.iter().take(8).map(|plan| match plan.current_phase() {
+            Some((n, phase)) => format!(
+                "  #{} {} — {}",
+                plan.id,
+                plan.title,
+                tr!(
+                    "fase {n} de {total}: {phase}",
+                    n = n + 1,
+                    total = plan.phases.len(),
+                    phase = phase.title
+                )
+            ),
+            None => format!("  #{} {}", plan.id, plan.title),
+        }));
+    }
+    if !backlog.is_empty() {
+        out.push(tr!("Backlog:").into());
         out.extend(
-            open.iter()
-                .take(12)
-                .map(|i| format!("  {}", ideas::render(i).lines().next().unwrap_or_default())),
+            backlog
+                .iter()
+                .take(10)
+                .map(|i| format!("  #{} {}", i.id, i.title)),
         );
     }
     out.join("\n")
