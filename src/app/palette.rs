@@ -336,6 +336,12 @@ impl App {
                 "⌘⇧I",
                 cmd(UiCmd::ToggleIdeas),
             );
+            add(
+                icon::ARROW_CIRCLE_UP,
+                tr!("Buscar actualizaciones").into(),
+                "",
+                cmd(UiCmd::CheckUpdates),
+            );
 
             // Paneles.
             add(

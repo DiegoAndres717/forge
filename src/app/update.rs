@@ -1,8 +1,10 @@
 // Actualización dentro de la app, como Warp: pastilla "Actualizar Forge" en la barra
 // superior → descarga en segundo plano → "Reiniciar para actualizar" sustituye la app y la
-// vuelve a abrir.
+// vuelve a abrir. Se busca al abrir Forge, cada pocas horas mientras está abierto y a mano
+// (⌘K o Ajustes).
 use super::*;
 use forge_core::updates::{self, Release};
+use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Update {
@@ -10,28 +12,54 @@ pub(super) enum Update {
     Downloading,
     Ready(PathBuf),
     Failed(Release, String),
+    /// Búsqueda pedida a mano, en curso.
+    Checking,
+    /// Búsqueda a mano sin novedades: la pastilla lo dice unos segundos.
+    UpToDate(Instant),
 }
 
+/// Cada cuánto se vuelve a mirar con Forge abierto.
+const CHECK_EVERY: Duration = Duration::from_secs(4 * 3600);
+
 impl App {
-    /// Una vez al día, en segundo plano: ¿hay una versión de Forge más nueva publicada?
-    pub(super) fn check_updates(&mut self, ctx: &egui::Context) {
-        let last: i64 = self
-            .db(|s| s.setting("update_checked"))
-            .flatten()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        if store::now() - last < 86_400 {
+    /// Cada fotograma (solo la app real tiene `next_update_check`): ¿toca mirar otra vez?
+    pub(super) fn update_tick(&mut self, ctx: &egui::Context) {
+        if self
+            .next_update_check
+            .is_some_and(|at| Instant::now() >= at)
+        {
+            self.next_update_check = Some(Instant::now() + CHECK_EVERY);
+            self.check_updates(ctx, false);
+        }
+    }
+
+    /// En segundo plano: ¿hay una versión de Forge más nueva publicada? A mano (`manual`),
+    /// la pastilla dice "Buscando…" y, si no hay nada, "Forge está al día".
+    pub(super) fn check_updates(&mut self, ctx: &egui::Context, manual: bool) {
+        // Descargando o lista para reiniciar: no se pisa ese estado.
+        if matches!(
+            self.update_state(),
+            Some(Update::Downloading | Update::Ready(_))
+        ) {
             return;
         }
-        self.db(|s| s.set_setting("update_checked", &store::now().to_string()));
+        if manual {
+            *self.update.lock().unwrap() = Some(Update::Checking);
+        }
         let (slot, ctx) = (self.update.clone(), ctx.clone());
         std::thread::spawn(move || {
-            if let Some(release) = updates::latest(env!("CARGO_PKG_REPOSITORY"))
-                && updates::is_newer(&release.tag, env!("CARGO_PKG_VERSION"))
-            {
-                *slot.lock().unwrap() = Some(Update::Available(release));
-                ctx.request_repaint();
+            let newer = updates::latest(env!("CARGO_PKG_REPOSITORY"))
+                .filter(|r| updates::is_newer(&r.tag, env!("CARGO_PKG_VERSION")));
+            let mut state = slot.lock().unwrap();
+            match newer {
+                Some(release) => *state = Some(Update::Available(release)),
+                None if manual => *state = Some(Update::UpToDate(Instant::now())),
+                None => {}
             }
+            drop(state);
+            ctx.request_repaint();
+            // Para que "Forge está al día" se vaya solo.
+            ctx.request_repaint_after(Duration::from_secs(5));
         });
     }
 
@@ -82,7 +110,7 @@ impl App {
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
-            Some(Update::Downloading) | None => {}
+            Some(Update::Downloading | Update::Checking | Update::UpToDate(_)) | None => {}
         }
     }
 }
@@ -107,6 +135,19 @@ pub(super) fn update_pill(ui: &mut egui::Ui, state: &Option<Update>, cmds: &mut 
             tr!("Reintentar actualización"),
             tr!("No se pudo descargar: {e}", e = e),
         ),
+        Update::Checking => (tr!("Buscando…"), tr!("Buscando una versión nueva").into()),
+        Update::UpToDate(at) if at.elapsed() < Duration::from_secs(4) => {
+            let text = format!("{}  {}", icon::CHECK, tr!("Forge está al día"));
+            let hint = tr!(
+                "Tienes la última versión ({v})",
+                v = env!("CARGO_PKG_VERSION")
+            );
+            ui.label(RichText::new(text).size(12.0).color(theme::GREEN))
+                .on_hover_text(hint);
+            ui.add_space(6.0);
+            return;
+        }
+        Update::UpToDate(_) => return,
     };
     let button = egui::Button::new(RichText::new(text).size(12.0).color(theme::ACCENT))
         .fill(Color32::TRANSPARENT)

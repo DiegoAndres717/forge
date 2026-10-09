@@ -681,6 +681,21 @@ fn update_pill_shows_in_the_toolbar_and_follows_the_download() {
     *h.state().update.lock().unwrap() = Some(super::update::Update::Downloading);
     h.run_steps(2);
     h.get_by_label_contains("Descargando…");
+    // Búsqueda a mano: "Buscando…" y, sin novedades, "Forge está al día" unos segundos.
+    *h.state().update.lock().unwrap() = Some(super::update::Update::Checking);
+    h.run_steps(2);
+    h.get_by_label_contains("Buscando…");
+    let now = std::time::Instant::now();
+    *h.state().update.lock().unwrap() = Some(super::update::Update::UpToDate(now));
+    h.run_steps(2);
+    h.get_by_label_contains("Forge está al día");
+    let old = now - Duration::from_secs(10);
+    *h.state().update.lock().unwrap() = Some(super::update::Update::UpToDate(old));
+    h.run_steps(2);
+    assert!(
+        h.query_by_label_contains("Forge está al día").is_none(),
+        "se va sola"
+    );
     // Lista para reiniciar; fuera de un .app (tests) el clic no cierra nada.
     let staged = PathBuf::from("/tmp/forge-update-test/Forge.app");
     *h.state().update.lock().unwrap() = Some(super::update::Update::Ready(staged.clone()));

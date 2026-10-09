@@ -148,6 +148,8 @@ enum UiCmd {
     Home,
     /// Pastilla de actualización: descargar o reiniciar con la versión nueva.
     Update,
+    /// Buscar actualizaciones ahora (⌘K, Ajustes).
+    CheckUpdates,
     Activate(usize),
     Close(usize),
     /// Abre en el editor un archivo de `.forge/` del proyecto activo.
@@ -262,6 +264,8 @@ pub struct App {
     show_all: bool,
     /// Notificaciones de macOS (desactivadas en tests).
     notifications: bool,
+    /// Próxima búsqueda de actualizaciones (solo la app real; los tests no salen a la red).
+    next_update_check: Option<Instant>,
     /// Proyecto de la notificación en la que el usuario hizo clic.
     notification_click: Arc<Mutex<Option<PathBuf>>>,
     /// Ventana de Ajustes (⌘,) abierta.
@@ -292,7 +296,7 @@ impl App {
             .and_then(|p| Store::open(&p));
         let mut app = Self::with_store(ctx, settings, error, open, store);
         app.notifications = true; // solo la app real (los tests no notifican)
-        app.check_updates(ctx);
+        app.next_update_check = Some(Instant::now()); // al abrir, y luego cada pocas horas
         // Primera vez: bienvenida.
         if app.db(|s| s.setting("welcomed")).flatten().is_none() {
             app.welcome = Some(0);
@@ -338,6 +342,7 @@ impl App {
             settings_open: false,
             notifications_enabled: true,
             notifications: false,
+            next_update_check: None,
             notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
@@ -572,6 +577,7 @@ impl App {
         match cmd {
             UiCmd::Home => self.active = None,
             UiCmd::Update => self.run_update(ctx),
+            UiCmd::CheckUpdates => self.check_updates(ctx, true),
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::OpenSettings => self.settings_open = true,
@@ -1124,6 +1130,7 @@ impl eframe::App for App {
             ws.refresh_attention();
         }
         self.notify_tick(&ctx);
+        self.update_tick(&ctx);
         // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
         ctx.request_repaint_after(Duration::from_secs(2));
 

@@ -1219,4 +1219,12 @@ pub const EN: &[(&str, &str)] = &[
         "Panels hidden while this one is maximized",
     ),
     ("Mostrar todos (⌘Enter)", "Show all (⌘Enter)"),
+    ("Buscando…", "Checking…"),
+    ("Buscando una versión nueva", "Checking for a new version"),
+    ("Forge está al día", "Forge is up to date"),
+    (
+        "Tienes la última versión ({v})",
+        "You have the latest version ({v})",
+    ),
+    ("Buscar actualizaciones", "Check for updates"),
 ];
