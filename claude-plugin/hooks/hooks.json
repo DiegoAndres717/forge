@@ -1,1 +1,16 @@
-{ "modules": ["./register.tsx"] }
+{
+  "modules": ["./register.tsx"],
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -n \"$FORGE_BIN\" ] && \"$FORGE_BIN\" plans reminder --project \"$FORGE_PROJECT\" || true",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

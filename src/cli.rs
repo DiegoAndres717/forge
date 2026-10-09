@@ -898,6 +898,37 @@ fn plans_cli(
             }
         }
         "show" => show(number(0, "<id>")?)?,
+        // Para el hook UserPromptSubmit del mod de Claude: recordatorio corto, en cada
+        // mensaje, de los planes en curso y de guardar lo aprendido en la memoria.
+        "reminder" => {
+            let plans = store.list_ideas(list, false)?;
+            let mut lines: Vec<String> = plans
+                .iter()
+                .filter(|p| p.status == "doing")
+                .take(3)
+                .map(|plan| match plan.current_phase() {
+                    Some((n, phase)) => {
+                        let done = phase.tasks.iter().filter(|t| t.done).count();
+                        tr!(
+                            "Plan #{id} «{title}» en progreso: fase {n} de {total} «{phase}» ({done}/{tasks} tareas).",
+                            id = plan.id,
+                            title = plan.title,
+                            n = n + 1,
+                            total = plan.phases.len(),
+                            phase = phase.title,
+                            done = done,
+                            tasks = phase.tasks.len()
+                        )
+                    }
+                    None => tr!("Plan #{id} «{title}» en progreso.", id = plan.id, title = plan.title),
+                })
+                .collect();
+            if !lines.is_empty() {
+                lines.push(tr!("Si este trabajo avanza un plan: tacha cada tarea al terminarla y marca la fase done al acabarla (plan_update), sin esperar a que te lo pidan.").into());
+            }
+            lines.push(tr!("Si decides algo importante o resuelves un error, guárdalo en la memoria del proyecto (memory_save).").into());
+            out.line(&format!("Forge: {}", lines.join(" ")));
+        }
         "add" => {
             let [title, note @ ..] = rest else {
                 return Err(tr!("uso: forge plans add \"título\" [\"nota\"]").into());

@@ -1413,4 +1413,20 @@ pub const EN: &[(&str, &str)] = &[
         "Girar la división (lado a lado ↔ uno encima del otro)",
         "Rotate split (side by side ↔ stacked)",
     ),
+    (
+        "Plan #{id} «{title}» en progreso: fase {n} de {total} «{phase}» ({done}/{tasks} tareas).",
+        "Plan #{id} “{title}” in progress: phase {n} of {total} “{phase}” ({done}/{tasks} tasks).",
+    ),
+    (
+        "Plan #{id} «{title}» en progreso.",
+        "Plan #{id} “{title}” in progress.",
+    ),
+    (
+        "Si este trabajo avanza un plan: tacha cada tarea al terminarla y marca la fase done al acabarla (plan_update), sin esperar a que te lo pidan.",
+        "If this work advances a plan: tick each task as you finish it and mark the phase done when it's over (plan_update), without waiting to be asked.",
+    ),
+    (
+        "Si decides algo importante o resuelves un error, guárdalo en la memoria del proyecto (memory_save).",
+        "If you make an important decision or fix a bug, save it to the project memory (memory_save).",
+    ),
 ];
