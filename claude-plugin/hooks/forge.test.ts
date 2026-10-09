@@ -7,8 +7,8 @@ const command = (fields: Partial<CommandRunInput>) => fields as CommandRunInput
 type AbovePromptProps = RenderPropsOf['AbovePrompt']
 const turn = (fields: Partial<TurnCompleteInput>) =>
   ({ reason: 'answer', isAborted: false, durationMs: 1, turnId: 't', ...fields }) as TurnCompleteInput
-const usage = (model: string, input: number): TurnUsage => ({
-  model, input_tokens: input, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+const usage = (model: string, input: number, cacheRead: number): TurnUsage => ({
+  model, input_tokens: input, output_tokens: 0, cache_read_input_tokens: cacheRead, cache_creation_input_tokens: 0,
 })
 
 
@@ -47,16 +47,23 @@ test('the delegation policy is added to the system prompt', async ($, on) => {
   expect(result.sections.map(s => s.id)).toContain('forge-team')
 })
 
-test('the band shows the session tokens by model', async ($, on) => {
+test('the band shows new and cached tokens by model', async ($, on) => {
   on('turn.complete', ($, e) => ({ text: e.answer })) // the engine's side of the event
   // Two finished turns: the main loop on Opus and a subagent on Haiku.
-  await $.turn.complete(turn({ answer: 'Done.', usage: usage('claude-opus-5-5', 45_000) }))
-  await $.turn.complete(turn({ answer: 'src/a.ts', agentId: 'a1', usage: usage('claude-haiku-5-5', 120_000) }))
+  await $.turn.complete(turn({ answer: 'Done.', usage: usage('claude-opus-5-5', 45_000, 2_700_000) }))
+  await $.turn.complete(turn({ answer: 'src/a.ts', agentId: 'a1', usage: usage('claude-haiku-5-5', 120_000, 0) }))
   const drawn = await $.ui.mount({
     plugin: 'forge',
     surface: 'terminal',
     component: 'AbovePrompt',
     props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
   })
-  expect(JSON.stringify(await drawn.drawn())).toContain('session haiku 120k · opus 45k')
+  const text = JSON.stringify(await drawn.drawn())
+  // New tokens by model, most first; cache reads shown apart.
+  expect(text.indexOf('haiku')).toBeLessThan(text.indexOf('opus'))
+  expect(text).toContain('120k')
+  expect(text).toContain('45k')
+  // The cache line is drawn in pieces (" (+", "2.7M", " cache)") inside one dimmed text.
+  expect(text).toContain('"2.7M"')
+  expect(text).toContain('cache)')
 })

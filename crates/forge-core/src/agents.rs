@@ -104,6 +104,21 @@ impl AgentSpec {
         }
     }
 
+    /// Abre Claude con el modelo elegido en Ajustes (`sonnet`, `opus`, `opusplan`), salvo
+    /// que el comando ya diga uno. Otros agentes o sin elección: sin cambios.
+    pub fn with_model(&self, command: &str, model: &str) -> String {
+        if self.mcp_style != Some(McpStyle::ClaudeJson)
+            || model.is_empty()
+            || command.contains("--model")
+        {
+            return command.to_string();
+        }
+        match command.split_once(' ') {
+            Some((program, rest)) => format!("{program} --model {} {rest}", quote(model)),
+            None => format!("{command} --model {}", quote(model)),
+        }
+    }
+
     /// El agente avisa él mismo cuando termina o espera (ver `with_events`).
     pub fn sends_events(&self) -> bool {
         self.mcp_style.is_some()
@@ -443,6 +458,30 @@ mod tests {
             get("claude").with_events("claude", "/A/forge", true),
             "claude"
         );
+    }
+
+    #[test]
+    fn claude_opens_with_the_chosen_model() {
+        let agents = builtins();
+        let get = |id: &str| agents.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            get("claude").with_model("claude --continue", "sonnet"),
+            "claude --model 'sonnet' --continue"
+        );
+        assert_eq!(
+            get("claude").with_model("claude", "opusplan"),
+            "claude --model 'opusplan'"
+        );
+        assert_eq!(
+            get("claude").with_model("claude --model opus", "sonnet"),
+            "claude --model opus"
+        );
+        assert_eq!(
+            get("claude").with_model("claude", ""),
+            "claude",
+            "sin elección: su configuración"
+        );
+        assert_eq!(get("codex").with_model("codex", "sonnet"), "codex");
     }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {

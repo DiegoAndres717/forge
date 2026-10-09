@@ -292,6 +292,11 @@ impl App {
         }
         app.notifications_enabled =
             app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
+        if let Some(model) = app.db(|s| s.setting("claude_model")).flatten()
+            && let Ok(mut current) = crate::claude_plugin::CLAUDE_MODEL.lock()
+        {
+            *current = model;
+        }
         app
     }
 

@@ -18,6 +18,10 @@ import type { Band, ModelTokens } from '../types'
 const band = atom({ plugin: 'forge', key: 'band' } as const, null as Band | null)
 const tokens = atom({ plugin: 'forge', key: 'tokens' } as const, {} as ModelTokens)
 
+/** Theme colors (they follow the user's Claude theme). */
+const MODEL_COLOR: Record<string, string> = { opus: 'planMode', sonnet: 'suggestion', haiku: 'success', fable: 'claude' }
+const GUARD_COLOR: Record<string, string> = { ready: 'success', warnings: 'warning', blocked: 'error' }
+
 const EXPLORER = `You are a fast code explorer working for a senior engineer.
 Answer exactly what you were asked about the codebase: where something lives, what a
 piece of code does, which files are involved, how something is wired.
@@ -32,6 +36,13 @@ report the cause, not the full log.
 - When reviewing a change, list concrete problems with path:line and why they matter.
 - Do not modify files.`
 
+const RESEARCHER = `You are a research assistant working for a senior engineer.
+Look things up outside the codebase with the connected tools (Slack, Linear, ClickUp,
+email, calendar, Drive, docs) or the web, exactly as asked.
+- Search, open the relevant threads or items, and read what matters.
+- Reply briefly: the answer first, then who said what and when, with links.
+- Do not post, send, create or change anything unless explicitly asked.`
+
 const ARCHITECT = `You are a principal engineer consulted for the hard parts: system
 design, data model changes, risky migrations, security-sensitive code and bugs that
 resisted the obvious fixes.
@@ -44,6 +55,9 @@ and keep your context clean:
 - forge:explorer (fast model): any "where is…", "what does … do", finding files,
   symbols or call sites, or reading and summarizing several files. Delegate instead of
   reading many files yourself; you get back a short answer with paths.
+- forge:researcher (fast model): anything outside the code through the connected tools
+  or the web, such as "did X reply?", "what's the status of this ticket?", "find the
+  thread about…". It searches and reads; you get back a short summary with links.
 - forge:reviewer: running test suites, type checks or builds and interpreting their
   failures; reviewing a finished change.
 - forge:architect (strongest model): only for genuinely hard design decisions or bugs
@@ -95,6 +109,8 @@ export const register: Register = on => {
     const agents = [
       { name: 'explorer', model: 'haiku', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
         description: 'Fast, cheap code explorer: where things are, what code does, finding files, symbols and call sites, reading and summarizing several files. Returns a short answer with paths.' },
+      { name: 'researcher', model: 'haiku', prompt: RESEARCHER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
+        description: 'Fast, cheap researcher for anything outside the code: Slack, Linear, ClickUp, email, calendar, Drive, docs and the web through the connected tools. Returns a short summary with links. Read-only.' },
       { name: 'reviewer', model: 'sonnet', prompt: REVIEWER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
         description: 'Runs tests, type checks and builds and explains failures; reviews a finished change. Does not edit files.' },
       { name: 'architect', model: 'opus', prompt: ARCHITECT, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
@@ -125,10 +141,14 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.usage) {
-      const total =
-        e.usage.input_tokens + e.usage.output_tokens + e.usage.cache_read_input_tokens + e.usage.cache_creation_input_tokens
+      // Cache reads cost a fraction of new tokens: counted apart so the band is honest.
+      const fresh = e.usage.input_tokens + e.usage.output_tokens + e.usage.cache_creation_input_tokens
+      const cache = e.usage.cache_read_input_tokens
       const model = alias(e.usage.model)
-      await update($, tokens, all => ({ ...all, [model]: (all[model] ?? 0) + total }))
+      await update($, tokens, all => {
+        const before = all[model] ?? { fresh: 0, cache: 0 }
+        return { ...all, [model]: { fresh: before.fresh + fresh, cache: before.cache + cache } }
+      })
       void forge($, ['agent-usage'], JSON.stringify({ ...e.usage, model, subagent: Boolean(e.agentId) }))
     }
     // The main loop answered (not an intermediate turn that only called tools): tell
@@ -149,18 +169,34 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const status = await read($, band)
-    const used = Object.entries(await read($, tokens))
-      .sort((a, b) => b[1] - a[1])
-      .map(([model, n]) => `${model} ${short(n)}`)
-      .join(' · ')
-    if (e.props.hasSurvey || (status === null && !used)) return next(e)
-    const parts = ['Forge']
-    if (status) {
-      parts.push(`Guard ${status.guard}`, `${status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending`)
-    }
-    if (used) parts.push(`session ${used}`)
-    const { Text } = $.ui.resolve(e)
-    return <Text dimColor>{parts.join(' · ')}</Text>
+    const used = Object.entries(await read($, tokens)).sort((a, b) => b[1].fresh - a[1].fresh)
+    if (e.props.hasSurvey || (status === null && used.length === 0)) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const dot = <Text dimColor> · </Text>
+    return (
+      <Box flexDirection="row" flexWrap="wrap">
+        <Text color="claude" bold>Forge</Text>
+        {status && (
+          <>
+            {dot}
+            <Text dimColor>Guard </Text>
+            <Text color={GUARD_COLOR[status.guard] ?? 'subtle'}>{status.guard}</Text>
+            {dot}
+            <Text color={status.ideas > 0 ? 'warning' : 'subtle'}>
+              {status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending
+            </Text>
+          </>
+        )}
+        {used.map(([model, n]) => (
+          <Box key={model} flexDirection="row">
+            {dot}
+            <Text color={MODEL_COLOR[model] ?? 'text'}>{model}</Text>
+            <Text> {short(n.fresh)}</Text>
+            {n.cache > 0 && <Text dimColor> (+{short(n.cache)} cache)</Text>}
+          </Box>
+        ))}
+      </Box>
+    )
   })
 
   on('command.run', { command: 'ideas' }, async ($, e) => {

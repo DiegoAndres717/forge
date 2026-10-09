@@ -7,6 +7,17 @@ use std::sync::OnceLock;
 /// Carpeta del mod instalado (solo la app real; en tests no se carga).
 pub static PLUGIN_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Modelo con el que Forge abre Claude (Ajustes); vacío = la configuración del usuario.
+pub static CLAUDE_MODEL: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Opciones de Ajustes: (valor para `--model`, etiqueta en español).
+pub const MODELS: [(&str, &str); 4] = [
+    ("", "Tu configuración"),
+    ("sonnet", "Sonnet"),
+    ("opus", "Opus"),
+    ("opusplan", "Opus plan (Opus planifica, Sonnet ejecuta)"),
+];
+
 const FILES: [(&str, &str); 4] = [
     (
         ".claude-plugin/plugin.json",

@@ -1176,4 +1176,14 @@ pub const EN: &[(&str, &str)] = &[
         "Claude Code abierto desde Forge delega búsquedas en Haiku y revisiones en Sonnet; aquí ves a dónde van los tokens.",
         "Claude Code opened from Forge delegates searches to Haiku and reviews to Sonnet; this is where the tokens go.",
     ),
+    ("Modelo de Claude", "Claude model"),
+    ("Tu configuración", "Your settings"),
+    (
+        "Opus plan (Opus planifica, Sonnet ejecuta)",
+        "Opus plan (Opus plans, Sonnet builds)",
+    ),
+    (
+        "Al abrir Claude desde Forge (barra lateral, ⌘⇧A). Un claude escrito a mano usa lo que escribas.",
+        "When Forge opens Claude (sidebar, ⌘⇧A). A claude you type yourself uses what you type.",
+    ),
 ];

@@ -592,6 +592,11 @@ impl Workspace {
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
                 let has_mod = crate::claude_plugin::PLUGIN_DIR.get().is_some();
+                let model = crate::claude_plugin::CLAUDE_MODEL
+                    .lock()
+                    .map(|m| m.clone())
+                    .unwrap_or_default();
+                let command = spec.with_model(&command, &model);
                 Some(spec.with_events(&command, &forge.to_string_lossy(), has_mod))
             }
             (_, typed, _) => typed,

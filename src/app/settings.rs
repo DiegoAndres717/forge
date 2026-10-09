@@ -41,6 +41,29 @@ impl App {
                             }
                         });
                         ui.end_row();
+                        ui.label(tr!("Modelo de Claude"));
+                        let current = crate::claude_plugin::CLAUDE_MODEL.lock().map(|m| m.clone()).unwrap_or_default();
+                        let label = |v: &str| {
+                            crate::claude_plugin::MODELS
+                                .iter()
+                                .find(|(id, _)| *id == v)
+                                .map_or(v.to_string(), |(_, l)| forge_core::i18n::t(l).to_string())
+                        };
+                        egui::ComboBox::from_id_salt("claude-model")
+                            .selected_text(label(&current))
+                            .show_ui(ui, |ui| {
+                                for (id, name) in crate::claude_plugin::MODELS {
+                                    if ui.selectable_label(current == id, forge_core::i18n::t(name)).clicked() {
+                                        if let Ok(mut m) = crate::claude_plugin::CLAUDE_MODEL.lock() {
+                                            *m = id.to_string();
+                                        }
+                                        self.db(|s| s.set_setting("claude_model", id));
+                                    }
+                                }
+                            })
+                            .response
+                            .on_hover_text(tr!("Al abrir Claude desde Forge (barra lateral, ⌘⇧A). Un claude escrito a mano usa lo que escribas."));
+                        ui.end_row();
                         ui.label(tr!("Notificaciones"));
                         let mut on = self.notifications_enabled;
                         if ui
