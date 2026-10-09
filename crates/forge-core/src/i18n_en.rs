@@ -1227,4 +1227,109 @@ pub const EN: &[(&str, &str)] = &[
         "You have the latest version ({v})",
     ),
     ("Buscar actualizaciones", "Check for updates"),
+    (
+        "Anotada en el backlog como #{id}.",
+        "Added to the backlog as #{id}.",
+    ),
+    (
+        "Avanza un plan: al empezar una fase márcala in_progress (y crea su rama si la tiene), tacha tareas al terminarlas y marca la fase done al acabar; el plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado.",
+        "Moves a plan forward: when starting a phase mark it in_progress (and create its branch if it has one), tick tasks as you finish them and mark the phase done when it's over; the plan completes on its own when all phases are done. Also plans a backlog idea (phases), changes the status of an idea without phases, or fixes title and note. Returns the updated plan.",
+    ),
+    ("Añade una tarea a la fase", "Adds a task to the phase"),
+    ("Backlog:", "Backlog:"),
+    (
+        "Borra un plan o idea descartada (por id). Si se hizo, mejor márcalo done.",
+        "Deletes a discarded plan or idea (by id). If it was done, mark it done instead.",
+    ),
+    (
+        "Contexto o criterio de terminado (opcional)",
+        "Context or definition of done (optional)",
+    ),
+    (
+        "Crea un plan por fases cuando el usuario cuente algo que quiere hacer (cada fase con su rama si la merece y sus tareas), o, sin fases, anota una idea en el backlog para no perderla. Una fase no siempre es una rama.",
+        "Creates a phased plan when the user describes something they want to build (each phase with its branch if it deserves one, and its tasks), or, without phases, adds an idea to the backlog so it isn't lost. A phase isn't always a branch.",
+    ),
+    ("El objetivo, en una línea", "The goal, in one line"),
+    (
+        "Estado del plan o idea (con fases se calcula solo)",
+        "Status of the plan or idea (computed automatically when it has phases)",
+    ),
+    (
+        "Fases en orden (vacío: idea del backlog)",
+        "Phases in order (empty: a backlog idea)",
+    ),
+    (
+        "Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa los planes (plan_add).",
+        "Saves something worth remembering in the project: a decision and why, a fixed bug and its cause, a useful command, a convention. For things to do, use plans (plan_add).",
+    ),
+    ("Incluir los completados", "Include completed ones"),
+    (
+        "Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
+        "Shared project memory (Forge). Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover. Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
+    ),
+    (
+        "No existe el plan #{id} en esta lista.",
+        "Plan #{id} doesn't exist in this list.",
+    ),
+    (
+        "No hay planes ni ideas en el backlog.",
+        "No plans and nothing in the backlog.",
+    ),
+    (
+        "Número de fase a cambiar (desde 1)",
+        "Phase number to change (from 1)",
+    ),
+    (
+        "Número de tarea de la fase (desde 1)",
+        "Task number within the phase (from 1)",
+    ),
+    ("Plan #{id} borrado.", "Plan #{id} deleted."),
+    (
+        "Plan #{id} creado con {n} fases.",
+        "Plan #{id} created with {n} phases.",
+    ),
+    (
+        "Planes en progreso (plans_list para el detalle):",
+        "Plans in progress (plans_list for details):",
+    ),
+    (
+        "Planes y backlog del proyecto (o la lista general con scope=general): en progreso con sus fases (rama y tareas), el backlog y, si se pide, los completados. Consúltalo al empezar a trabajar o cuando el usuario pregunte qué falta o en qué va.",
+        "The project's plans and backlog (or the general list with scope=general): in progress with their phases (branch and tasks), the backlog and, if asked, completed ones. Check it when you start working or when the user asks what's left or how things are going.",
+    ),
+    (
+        "Por defecto true: tachar la tarea",
+        "Defaults to true: tick the task",
+    ),
+    (
+        "Rama de Git, p. ej. feat/export-csv (opcional)",
+        "Git branch, e.g. feat/export-csv (optional)",
+    ),
+    (
+        "Rama de la fase (vacío la quita)",
+        "The phase's branch (empty removes it)",
+    ),
+    (
+        "Reemplaza todas las fases (mismo formato que en plan_add)",
+        "Replaces all phases (same format as plan_add)",
+    ),
+    ("cada fase necesita un título", "every phase needs a title"),
+    (
+        "el plan #{id} tiene {count} fases; no existe la fase {n}",
+        "plan #{id} has {count} phases; phase {n} doesn't exist",
+    ),
+    (
+        "estado desconocido \"{status}\" (válidos: backlog, in_progress, done)",
+        "unknown status \"{status}\" (valid: backlog, in_progress, done)",
+    ),
+    (
+        "fase {n} de {total}: {phase}",
+        "phase {n} of {total}: {phase}",
+    ),
+    (
+        "la fase {n} tiene {tasks} tareas; no existe la tarea {t}",
+        "phase {n} has {tasks} tasks; task {t} doesn't exist",
+    ),
+    ("las fases se numeran desde 1", "phases are numbered from 1"),
+    ("En progreso", "In progress"),
+    ("Completado", "Completed"),
 ];
