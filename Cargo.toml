@@ -2,7 +2,7 @@
 members = ["crates/forge-core"]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 repository = "https://github.com/DiegoAndres717/forge"
 edition = "2024"
 license = "MIT"
