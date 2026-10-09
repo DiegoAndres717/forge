@@ -1407,4 +1407,10 @@ pub const EN: &[(&str, &str)] = &[
         "uso: forge plans {action} {what}",
         "usage: forge plans {action} {what}",
     ),
+    ("Poner uno encima del otro", "Stack top and bottom"),
+    ("Poner lado a lado", "Place side by side"),
+    (
+        "Girar la división (lado a lado ↔ uno encima del otro)",
+        "Rotate split (side by side ↔ stacked)",
+    ),
 ];

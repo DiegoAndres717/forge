@@ -369,6 +369,12 @@ impl App {
                 act(Action::Ws(WsAction::Split(Dir::Column))),
             );
             add(
+                icon::ARROWS_CLOCKWISE,
+                tr!("Girar la división (lado a lado ↔ uno encima del otro)").into(),
+                "",
+                act(Action::Ws(WsAction::Rotate)),
+            );
+            add(
                 icon::ARROWS_OUT,
                 tr!("Maximizar o restaurar panel").into(),
                 "⌘↩",

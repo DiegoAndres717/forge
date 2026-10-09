@@ -47,6 +47,8 @@ pub enum WsAction {
     NewTerminal,
     Close,
     ToggleMaximize,
+    /// Girar la división del panel enfocado: lado a lado ↔ uno encima del otro.
+    Rotate,
     Focus(Toward),
     Cycle(isize),
     /// ⌘F: buscar en la terminal enfocada.
@@ -244,6 +246,7 @@ pub struct NoteForm {
 enum HeaderAction {
     Close,
     Maximize,
+    Rotate,
     /// Con un panel maximizado: maximizar este otro en su lugar.
     Show(PanelId),
     Start(String),
@@ -962,6 +965,12 @@ impl Workspace {
             .join("\n")
     }
 
+    /// Orientación de la división del panel enfocado (tests).
+    #[cfg(test)]
+    pub fn focused_split(&self) -> Option<Dir> {
+        self.layout.parent_dir(self.focus)
+    }
+
     #[cfg(test)]
     pub fn maximized(&self) -> Option<PanelId> {
         self.maximized
@@ -1158,6 +1167,9 @@ impl Workspace {
                     _ => None,
                 };
             }
+            WsAction::Rotate => {
+                self.layout.rotate(self.focus);
+            }
             WsAction::Focus(toward) => {
                 if let Some(id) = layout::neighbor(&rects, self.focus, toward) {
                     self.focus = id;
@@ -1272,6 +1284,10 @@ impl Workspace {
                         Some(id)
                     };
                 }
+                HeaderAction::Rotate => {
+                    self.focus = id;
+                    self.layout.rotate(id);
+                }
                 HeaderAction::Show(other) => {
                     self.focus = other;
                     self.maximized = Some(other);
@@ -1319,6 +1335,8 @@ impl Workspace {
             let response = ui
                 .interact(r, egui::Id::new((salt, &key, id)), Sense::click())
                 .on_hover_text(hint);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint));
             let color = if focused {
                 theme::TEXT_3
             } else {
@@ -1338,6 +1356,23 @@ impl Workspace {
             };
             if button(glyph, hint, "maximize") {
                 actions.push(HeaderAction::Maximize);
+            }
+        }
+        // Girar la división (no con el panel maximizado: no se ve la división).
+        let parent = self
+            .layout
+            .parent_dir(id)
+            .filter(|_| self.maximized.is_none());
+        if let Some(dir) = parent {
+            let (glyph, hint) = match dir {
+                Dir::Row => (
+                    icon::SQUARE_SPLIT_VERTICAL,
+                    tr!("Poner uno encima del otro"),
+                ),
+                Dir::Column => (icon::SQUARE_SPLIT_HORIZONTAL, tr!("Poner lado a lado")),
+            };
+            if button(glyph, hint, "rotate") {
+                actions.push(HeaderAction::Rotate);
             }
         }
         let panel = self.panels.get(&id);
