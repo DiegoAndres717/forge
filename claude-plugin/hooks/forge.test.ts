@@ -127,6 +127,8 @@ test('the band shows which model is working right now and on what', async ($, on
   expect(working).toContain('● ')
   expect(working).toContain('explorer: find the login')
   expect(working).toContain(' (haiku)')
+  // Opus works on its first turn: no "opus 0" (tokens add up when the turn completes).
+  expect(working).not.toContain('opus 0')
   // The subagent finishes: its task leaves the band.
   await $.turn.complete(turn({ answer: 'src/login.ts', agentId: 'a1', usage: usage('claude-haiku-5-5', 9_000, 0) }))
   const after = await mount()

@@ -289,19 +289,12 @@ export const register: Register = on => {
               <Text dimColor> · </Text>
               {atWork ? <Text color={MODEL_COLOR[model] ?? 'text'}>● </Text> : null}
               <Text color={MODEL_COLOR[model] ?? 'text'} bold={atWork}>{model}</Text>
-              {` ${short(n.fresh)}`}
+              {/* Working on its first turn: no "0" (tokens add up when a turn completes). */}
+              {n.fresh > 0 ? ` ${short(n.fresh)}` : null}
               {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
             </Text>
           )
         })}
-        {subagents.map(([key, w]) => (
-          <Text key={key}>
-            <Text dimColor> · </Text>
-            <Text color={MODEL_COLOR[w.model] ?? 'text'}>{'↳ '}</Text>
-            <Text>{w.task.length > 48 ? `${w.task.slice(0, 47)}…` : w.task}</Text>
-            <Text dimColor>{` (${w.model})`}</Text>
-          </Text>
-        ))}
         {plan.map(({ label, percent, reset }) => (
           <Text key={label}>
             <Text dimColor> · {label} </Text>
@@ -311,6 +304,15 @@ export const register: Register = on => {
             <Text dimColor>{'─'.repeat(BAR_CELLS - cells(percent))}</Text>
             {` ${percent}%`}
             {percent >= 80 && reset ? <Text dimColor>{` resets ${reset}`}</Text> : null}
+          </Text>
+        ))}
+        {/* Subagents at work go last: a long task wraps alone, the usage bars stay put. */}
+        {subagents.map(([key, w]) => (
+          <Text key={key}>
+            <Text dimColor> · </Text>
+            <Text color={MODEL_COLOR[w.model] ?? 'text'}>{'↳ '}</Text>
+            <Text>{w.task.length > 36 ? `${w.task.slice(0, 35)}…` : w.task}</Text>
+            <Text dimColor>{` (${w.model})`}</Text>
           </Text>
         ))}
       </Text>
