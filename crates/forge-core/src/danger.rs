@@ -369,6 +369,23 @@ const ZSH_FILES: [(&str, &str); 4] = [
     (".zlogin", "forge_path"),
 ];
 
+/// Tras el .zshrc del usuario, en shells interactivos:
+/// - la línea que se escribe va a la terminal de Forge en una secuencia invisible (OSC
+///   7777), para sugerir carpetas mientras se escribe;
+/// - Tab sin distinguir mayúsculas y con menú, solo si su configuración no lo trae ya
+///   (oh-my-zsh, por ejemplo, ya lo hace).
+const ZSH_PROMPT: &str = r#"if [[ -o interactive && -n $TTY ]]; then
+  _forge_line() { printf '\e]7777;%s\x1f%s\a' "${LBUFFER//[$'\a\e\x1f']/}" "$PWD" > $TTY }
+  _forge_line_done() { printf '\e]7777;\a' > $TTY }
+  autoload -Uz add-zle-hook-widget
+  add-zle-hook-widget line-pre-redraw _forge_line
+  add-zle-hook-widget line-finish _forge_line_done
+  (( $+functions[compdef] )) || { autoload -Uz compinit && compinit -d "$ZDOTDIR/.zcompdump" }
+  zstyle -m ':completion:*' matcher-list '*' || zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
+  zstyle -m ':completion:*' menu '*' || zstyle ':completion:*' menu select
+fi
+"#;
+
 fn zsh_file(name: &str, tail: &str) -> String {
     let mut s = format!(
         "# Generado por Forge: carga el {name} del usuario.\n\
@@ -382,6 +399,9 @@ fn zsh_file(name: &str, tail: &str) -> String {
     );
     if tail == "forge_path" {
         s += "path=($FORGE_SHIMS ${path:#$FORGE_SHIMS})\n";
+    }
+    if name == ".zshrc" {
+        s += ZSH_PROMPT;
     }
     if name == ".zlogin" {
         // Último archivo de un shell de login: los zsh hijos usan la configuración del usuario.

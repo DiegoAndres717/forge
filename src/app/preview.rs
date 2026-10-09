@@ -356,6 +356,13 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "14-actualizacion");
     *harness.state().update.lock().unwrap() = None;
+    // Sugerencias de carpetas: la secuencia que manda el zsh de Forge al escribir `cd s`.
+    harness.state_mut().workspaces[0].focus_first_shell();
+    let line = format!("printf '\\e]7777;cd s\\x1f{}\\a'", project.display());
+    harness.event(egui::Event::Text(line));
+    harness.key_press(egui::Key::Enter);
+    settle(&mut harness);
+    save(&mut harness, &out, "15-sugerencias");
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 

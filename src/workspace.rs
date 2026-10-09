@@ -862,6 +862,21 @@ impl Workspace {
         })
     }
 
+    /// Pone el foco en la primera terminal con shell (tests y capturas).
+    #[cfg(test)]
+    pub fn focus_first_shell(&mut self) {
+        let mut shells: Vec<PanelId> = self
+            .panels
+            .iter()
+            .filter(|(_, p)| matches!(p.content, Content::Shell(_)))
+            .map(|(id, _)| *id)
+            .collect();
+        shells.sort();
+        if let Some(id) = shells.first() {
+            self.focus = *id;
+        }
+    }
+
     /// Desplazamiento y selección de la primera terminal (tests).
     #[cfg(test)]
     pub fn shell_view(&self) -> (usize, Option<String>) {
@@ -880,7 +895,7 @@ impl Workspace {
         self.panels
             .values()
             .filter_map(|p| match &p.content {
-                Content::Shell(t) => t.history_text(200),
+                Content::Shell(t) => t.screen_text(200),
                 Content::Process(_) => None,
             })
             .collect::<Vec<_>>()

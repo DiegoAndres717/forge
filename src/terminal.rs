@@ -27,6 +27,8 @@ enum UiEvent {
     Title(String),
     ResetTitle,
     Clipboard(String),
+    /// Línea que se escribe en el prompt del zsh de Forge (None: ya se ejecutó).
+    Line(Option<crate::suggest::ShellLine>),
 }
 
 struct Listener {
@@ -110,6 +112,8 @@ pub struct Terminal {
     overlays: Vec<Rect>,
     /// Último paso del desplazamiento automático al arrastrar una selección fuera.
     autoscroll_at: Instant,
+    /// Sugerencias de carpetas para lo que se escribe en el prompt (Tab acepta).
+    suggest: Option<crate::suggest::Suggest>,
     /// Botón "Copiar" junto a la selección recién hecha, y cuándo se copió.
     copy_button: Option<Pos2>,
     copied_at: Option<Instant>,
@@ -179,6 +183,7 @@ impl Terminal {
 
         let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer()?));
         let (tx, events) = channel();
+        let lines = tx.clone();
         let listener = Listener {
             writer: writer.clone(),
             tx,
@@ -199,8 +204,12 @@ impl Terminal {
             let mut parser: Processor = Processor::new();
             let mut buf = [0u8; 64 * 1024];
             let mut scanner = UrlScanner::default();
+            let mut prompt = crate::suggest::LineScanner::default();
             while let Ok(n @ 1..) = reader.read(&mut buf) {
                 parser.advance(&mut *t.lock().unwrap(), &buf[..n]);
+                for line in prompt.feed(&buf[..n]) {
+                    let _ = lines.send(UiEvent::Line(line));
+                }
                 *activity.lock().unwrap() = Some(std::time::Instant::now());
                 bytes.fetch_add(n as u64, Ordering::Relaxed);
                 for url in scanner.feed(&buf[..n]) {
@@ -252,6 +261,7 @@ impl Terminal {
             mouse_down: None,
             overlays: Vec::new(),
             autoscroll_at: Instant::now(),
+            suggest: None,
             copy_button: None,
             copied_at: None,
             search: None,
@@ -267,12 +277,23 @@ impl Terminal {
     /// al reabrir Forge). `None` si un programa ocupa la pantalla completa (vim, la
     /// interfaz de Claude…): ese contenido no es historial.
     pub fn history_text(&self, max_lines: usize) -> Option<String> {
+        self.text_until(max_lines, false)
+    }
+
+    /// Como `history_text`, pero con la línea del cursor (tests: lo que se escribe en el
+    /// prompt).
+    #[cfg(test)]
+    pub fn screen_text(&self, max_lines: usize) -> Option<String> {
+        self.text_until(max_lines, true)
+    }
+
+    fn text_until(&self, max_lines: usize, with_cursor_line: bool) -> Option<String> {
         let t = self.term.lock().unwrap();
         if t.mode().contains(TermMode::ALT_SCREEN) {
             return None;
         }
         let top = -(t.grid().history_size() as i32);
-        let cursor = t.grid().cursor.point.line.0;
+        let cursor = t.grid().cursor.point.line.0 + i32::from(with_cursor_line);
         let mut lines: Vec<String> = (top..cursor)
             .map(|l| {
                 let row = &t.grid()[alacritty_terminal::index::Line(l)];
@@ -368,15 +389,18 @@ impl Terminal {
         m: &Metrics,
     ) -> egui::Response {
         let ctx = ui.ctx().clone();
-        // Si un campo de texto tiene el foco (nota, idea, mensaje de commit…), el teclado es
-        // suyo: lo que se escribe ahí no debe llegar también al programa de la terminal.
-        let focused = focused && ctx.memory(|mem| mem.focused()).is_none();
 
         while let Ok(event) = self.events.try_recv() {
             match event {
                 UiEvent::Title(t) => self.title = Some(t),
                 UiEvent::ResetTitle => self.title = None,
                 UiEvent::Clipboard(text) => ctx.copy_text(text),
+                UiEvent::Line(line) => {
+                    let home = std::env::var_os("HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_default();
+                    self.suggest = line.and_then(|l| crate::suggest::suggest(&l, &home));
+                }
             }
         }
 
@@ -391,6 +415,40 @@ impl Terminal {
         }
 
         let response = ui.interact(rect, id, Sense::click_and_drag());
+        // Ids de las terminales: el foco de egui que tenga otra terminal no cuenta como "otro
+        // control" (al cambiar de panel, la anterior lo suelta en su fotograma).
+        let terminals = egui::Id::new("forge-terminal-ids");
+        ctx.data_mut(|d| {
+            d.get_temp_mut_or_default::<std::collections::HashSet<egui::Id>>(terminals)
+                .insert(id);
+        });
+        if !focused && ctx.memory(|mem| mem.has_focus(id)) {
+            ctx.memory_mut(|mem| mem.surrender_focus(id));
+        }
+        // Si otro control tiene el foco (nota, idea, mensaje de commit…), el teclado es suyo:
+        // lo que se escribe ahí no debe llegar también al programa de la terminal.
+        let other = ctx.memory(|mem| mem.focused()).is_some_and(|f| {
+            f != id
+                && !ctx.data(|d| {
+                    d.get_temp::<std::collections::HashSet<egui::Id>>(terminals)
+                        .is_some_and(|ids| ids.contains(&f))
+                })
+        });
+        let focused = focused && !other;
+        if focused {
+            // La terminal se queda el foco de egui y lo bloquea: Tab, flechas y Esc van al
+            // programa (zsh, vim, Claude) en vez de mover el foco a otro control.
+            ctx.memory_mut(|mem| {
+                mem.request_focus(id);
+                let all = egui::EventFilter {
+                    tab: true,
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                };
+                mem.set_focus_lock_filter(id, all);
+            });
+        }
         // Con la búsqueda abierta, el teclado es de su campo, no del programa.
         if focused && self.search.is_none() {
             self.keyboard(&ctx, m);
@@ -400,6 +458,7 @@ impl Terminal {
         paint(&self.term.lock().unwrap(), &painter, rect, focused, m);
         self.search_ui(ui, rect, id, m);
         self.scroll_overlay(ui, rect, id);
+        self.suggest_overlay(ui, rect, id, m);
         self.copy_overlay(ui, rect, id);
         response
     }
@@ -639,6 +698,25 @@ impl Terminal {
 
         for event in events {
             match event {
+                // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra.
+                egui::Event::Key {
+                    key: key @ (Key::Tab | Key::ArrowUp | Key::ArrowDown | Key::Escape),
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.is_none() && self.suggest.is_some() => {
+                    let suggest = self.suggest.as_mut().unwrap();
+                    match key {
+                        Key::Tab => {
+                            let bytes = suggest.accept();
+                            self.suggest = None;
+                            self.send(&bytes);
+                        }
+                        Key::ArrowUp => suggest.move_by(-1),
+                        Key::ArrowDown => suggest.move_by(1),
+                        _ => self.suggest = None,
+                    }
+                }
                 // Con Option como Meta, el texto "∂" lo reemplaza ESC+d desde key_bytes.
                 egui::Event::Text(text) if !(alt && m.option_as_meta) => {
                     self.scroll_to_bottom();
@@ -683,6 +761,118 @@ impl Terminal {
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// Lista de sugerencias bajo el cursor (encima si no cabe); un clic acepta.
+    fn suggest_overlay(&mut self, ui: &egui::Ui, rect: Rect, id: egui::Id, m: &Metrics) {
+        let Some(suggest) = &self.suggest else { return };
+        let (cursor, offset) = {
+            let term = self.term.lock().unwrap();
+            (term.grid().cursor.point, term.grid().display_offset())
+        };
+        if offset != 0 {
+            return; // mirando el historial: el cursor no está a la vista
+        }
+        use crate::theme::{self, icon};
+        let font = egui::FontId::proportional(12.5);
+        let row_h = 24.0;
+        let rows: Vec<_> = suggest
+            .items
+            .iter()
+            .map(|e| {
+                let glyph = if e.dir { icon::FOLDER } else { icon::FILE };
+                let name = if e.dir {
+                    format!("{}/", e.name)
+                } else {
+                    e.name.clone()
+                };
+                let galley = ui.painter().layout_no_wrap(
+                    format!("{glyph}  {name}"),
+                    font.clone(),
+                    theme::TEXT,
+                );
+                (name, galley)
+            })
+            .collect();
+        let hint = ui.painter().layout_no_wrap(
+            forge_core::tr!("Tab completar   ↑↓ elegir   Esc cerrar").to_string(),
+            egui::FontId::proportional(11.0),
+            theme::TEXT_3,
+        );
+        let width = rows
+            .iter()
+            .map(|(_, g)| g.size().x)
+            .fold(hint.size().x, f32::max)
+            + 24.0;
+        let height = row_h * rows.len() as f32 + 26.0;
+        let x = rect.min.x + cursor.column.0 as f32 * m.cell.x;
+        let below = rect.min.y + (cursor.line.0 + 1) as f32 * m.cell.y + 2.0;
+        let y = if below + height > rect.max.y {
+            below - m.cell.y - height - 4.0
+        } else {
+            below
+        };
+        let min = egui::pos2(x.min(rect.max.x - width - 4.0).max(rect.min.x + 4.0), y);
+        let panel = Rect::from_min_size(min, Vec2::new(width, height));
+        self.overlays.push(panel);
+        let painter = ui.painter();
+        painter.rect_filled(
+            panel.translate(Vec2::new(0.0, 2.0)),
+            8.0,
+            Color32::from_black_alpha(90),
+        );
+        painter.rect(
+            panel,
+            8.0,
+            theme::SURFACE,
+            egui::Stroke::new(1.0, theme::SEPARATOR),
+            egui::StrokeKind::Inside,
+        );
+        let mut clicked = None;
+        for (i, (name, galley)) in rows.into_iter().enumerate() {
+            let row = Rect::from_min_size(
+                panel.min + Vec2::new(4.0, 4.0 + i as f32 * row_h),
+                Vec2::new(width - 8.0, row_h),
+            );
+            let response = ui
+                .interact(row, id.with(("suggest", i)), Sense::click())
+                .on_hover_cursor(CursorIcon::PointingHand);
+            response.widget_info(|| {
+                let kind = egui::WidgetType::SelectableLabel;
+                egui::WidgetInfo::selected(kind, true, i == suggest.selected, &name)
+            });
+            if i == suggest.selected || response.hovered() {
+                let fill = if i == suggest.selected {
+                    theme::ACCENT
+                } else {
+                    theme::SURFACE_HOVER
+                };
+                painter.rect_filled(row, 5.0, fill);
+            }
+            painter.galley(
+                egui::pos2(row.min.x + 8.0, row.center().y - galley.size().y / 2.0),
+                galley,
+                theme::TEXT,
+            );
+            if response.clicked() {
+                clicked = Some(i);
+            }
+        }
+        painter.galley(
+            egui::pos2(panel.min.x + 12.0, panel.max.y - 19.0),
+            hint,
+            theme::TEXT_3,
+        );
+        if let Some(i) = clicked {
+            let bytes = self.suggest.as_mut().map(|s| {
+                s.selected = i;
+                s.accept()
+            });
+            self.suggest = None;
+            if let Some(bytes) = bytes {
+                self.send(&bytes);
             }
         }
     }
