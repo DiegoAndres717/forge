@@ -51,7 +51,11 @@ fn short_version(v: &str) -> String {
 fn human_bytes(bytes: u64) -> String {
     let gb = bytes as f64 / 1_073_741_824.0;
     if gb >= 1.0 {
-        format!("{gb:.1} GB").replace('.', ",")
+        let text = format!("{gb:.1} GB");
+        match forge_core::i18n::lang() {
+            forge_core::i18n::Lang::Es => text.replace('.', ","),
+            forge_core::i18n::Lang::En => text,
+        }
     } else {
         format!("{} MB", bytes / 1_048_576)
     }
