@@ -352,9 +352,21 @@ impl App {
             );
             add(
                 icon::TERMINAL_WINDOW,
-                tr!("Nueva terminal").into(),
+                tr!("Nueva terminal (en este panel)").into(),
                 "⌘T",
                 act(Action::Ws(WsAction::NewTerminal)),
+            );
+            add(
+                icon::ARROW_RIGHT,
+                tr!("Terminal siguiente del panel").into(),
+                "⌘⇧]",
+                act(Action::Ws(WsAction::CycleTab(1))),
+            );
+            add(
+                icon::ARROW_LEFT,
+                tr!("Terminal anterior del panel").into(),
+                "⌘⇧[",
+                act(Action::Ws(WsAction::CycleTab(-1))),
             );
             add(
                 icon::SQUARE_SPLIT_HORIZONTAL,

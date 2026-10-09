@@ -438,6 +438,13 @@ fn ui_preview() {
         egui::Key::Enter,
     );
     settle(&mut harness);
+    // Terminales tipo VS Code: tres en el panel "Terminal", lista a la derecha.
+    harness.state_mut().workspaces[0].focus_first_shell();
+    let ctx = harness.ctx.clone();
+    harness.state_mut().workspaces[0].new_tab(&ctx);
+    harness.state_mut().workspaces[0].new_tab(&ctx);
+    settle(&mut harness);
+    save(&mut harness, &out, "17-terminales");
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 

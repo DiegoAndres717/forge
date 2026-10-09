@@ -42,6 +42,10 @@ pub struct PanelState {
 }
 
 const HEADER: f32 = 30.0;
+/// Ancho de panel desde el que la lista de terminales va a la derecha; por debajo, un
+/// desplegable en la cabecera.
+const TAB_LIST_MIN: f32 = 420.0;
+const TAB_ROW: f32 = 28.0;
 
 /// Acciones de teclado que afectan a los paneles del workspace activo.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +58,8 @@ pub enum WsAction {
     Rotate,
     Focus(Toward),
     Cycle(isize),
+    /// Terminal siguiente/anterior del panel enfocado (⌘⇧] / ⌘⇧[).
+    CycleTab(isize),
     /// ⌘F: buscar en la terminal enfocada.
     Find,
 }
@@ -249,6 +255,10 @@ pub struct NoteForm {
 enum HeaderAction {
     Close,
     Maximize,
+    /// Nueva terminal en este panel.
+    NewTab,
+    ShowTab(PanelId),
+    CloseTab(PanelId),
     Rotate,
     /// Con un panel maximizado: maximizar este otro en su lugar.
     Show(PanelId),
@@ -948,8 +958,6 @@ impl Workspace {
     }
 
     /// Terminales del hueco donde está `visible`, en orden (ella sola si no hay grupo).
-    // ponytail: la interfaz (botón +, lista lateral) llega en la fase 2.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn panel_tabs(&self, visible: PanelId) -> Vec<PanelId> {
         self.tabs
             .iter()
@@ -960,7 +968,6 @@ impl Workspace {
 
     /// Nueva terminal en el mismo hueco que la enfocada (pasa a ser la visible), en el
     /// directorio actual de su shell.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn new_tab(&mut self, ctx: &egui::Context) {
         let cwd = match self.panels.get(&self.focus).map(|p| &p.content) {
             Some(Content::Shell(t)) => t.cwd(),
@@ -991,7 +998,6 @@ impl Workspace {
     }
 
     /// Pone a la vista la terminal `id` de su grupo (y le da el foco).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn show_tab(&mut self, id: PanelId) {
         let Some(visible) = self
             .tabs
@@ -1077,6 +1083,11 @@ impl Workspace {
     #[cfg(test)]
     pub fn focused_split(&self) -> Option<Dir> {
         self.layout.parent_dir(self.focus)
+    }
+
+    #[cfg(test)]
+    pub fn focused(&self) -> PanelId {
+        self.focus
     }
 
     #[cfg(test)]
@@ -1267,12 +1278,14 @@ impl Workspace {
         let rects = self.rects(area);
         match action {
             WsAction::Split(dir) => self.split(ctx, dir),
-            WsAction::NewTerminal => {
-                let rect = rects
-                    .iter()
-                    .find(|(id, _)| *id == self.focus)
-                    .map(|(_, r)| *r);
-                self.split(ctx, rect.map_or(Dir::Row, layout::auto_dir));
+            // Como en VS Code: la terminal nueva va al mismo panel (⌘D/⌘⇧D dividen).
+            WsAction::NewTerminal => self.new_tab(ctx),
+            WsAction::CycleTab(step) => {
+                let tabs = self.panel_tabs(self.focus);
+                if let Some(at) = tabs.iter().position(|p| *p == self.focus) {
+                    let next = tabs[(at as isize + step).rem_euclid(tabs.len() as isize) as usize];
+                    self.show_tab(next);
+                }
             }
             WsAction::Close => self.close(self.focus),
             WsAction::Find => {
@@ -1348,6 +1361,17 @@ impl Workspace {
         for (id, rect) in self.rects(area) {
             let (header, body) = rect.split_top_bottom_at_y(rect.min.y + HEADER);
             header_actions.extend(self.header(ui, id, header).into_iter().map(|a| (id, a)));
+            // Varias terminales en este panel y sitio de sobra: lista a la derecha (VS Code).
+            let tabs = self.panel_tabs(id);
+            let body = if tabs.len() > 1 && body.width() >= TAB_LIST_MIN {
+                let width = (body.width() * 0.24).clamp(150.0, 220.0);
+                let (body, list) = body.split_left_right_at_x(body.max.x - width);
+                let actions = self.tab_list(ui, list, &tabs, id);
+                header_actions.extend(actions.into_iter().map(|a| (id, a)));
+                body
+            } else {
+                body
+            };
             let focused = active && id == self.focus && self.renaming.is_none();
             let terminal_id = egui::Id::new(("terminal", key.as_path(), id));
             let Some(panel) = self.panels.get_mut(&id) else {
@@ -1418,6 +1442,12 @@ impl Workspace {
                     self.focus = id;
                     self.layout.rotate(id);
                 }
+                HeaderAction::NewTab => {
+                    self.focus = id;
+                    self.new_tab(&ctx);
+                }
+                HeaderAction::ShowTab(tab) => self.show_tab(tab),
+                HeaderAction::CloseTab(tab) => self.close(tab),
                 HeaderAction::Show(other) => {
                     self.focus = other;
                     self.maximized = Some(other);
@@ -1427,6 +1457,157 @@ impl Workspace {
                 HeaderAction::Restart(p) => self.processes.restart(&ctx, &p),
             }
         }
+    }
+
+    /// Nombre corto para la lista de terminales: de una ruta, solo la última carpeta.
+    fn tab_name(&self, id: PanelId) -> String {
+        let label = self.label(id);
+        if label.starts_with('/') || label.starts_with('~') {
+            let last = label
+                .trim_end_matches('/')
+                .rsplit('/')
+                .next()
+                .unwrap_or(&label);
+            if !last.is_empty() && last != "~" {
+                return last.to_string();
+            }
+        }
+        label
+    }
+
+    /// Icono de una terminal en la lista: proceso, agente o shell.
+    fn tab_glyph(&self, id: PanelId) -> &'static str {
+        use crate::theme::icon;
+        match self.panels.get(&id) {
+            Some(p) if matches!(p.content, Content::Process(_)) => icon::PULSE,
+            Some(p) if p.agent.is_some() => icon::ROBOT,
+            _ => icon::TERMINAL_WINDOW,
+        }
+    }
+
+    /// Lista de las terminales del panel (a la derecha, como VS Code): clic para verla, papelera al
+    /// pasar el ratón; la visible, resaltada.
+    fn tab_list(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        tabs: &[PanelId],
+        visible: PanelId,
+    ) -> Vec<HeaderAction> {
+        use crate::theme;
+        let mut actions = Vec::new();
+        let key = self.project.path.clone();
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 0.0, theme::SIDEBAR);
+        painter.vline(
+            rect.min.x + 0.5,
+            rect.y_range(),
+            egui::Stroke::new(1.0, theme::SEPARATOR),
+        );
+        for (i, tab) in tabs.iter().enumerate() {
+            let row = Rect::from_min_size(
+                egui::pos2(rect.min.x + 1.0, rect.min.y + 6.0 + i as f32 * TAB_ROW),
+                Vec2::new(rect.width() - 1.0, TAB_ROW),
+            );
+            if row.max.y > rect.max.y {
+                break;
+            }
+            let label = self.tab_name(*tab);
+            let response = ui
+                .interact(row, egui::Id::new(("tab-row", &key, *tab)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            let spoken = tr!(
+                "Terminal {n} de {total}: {name}",
+                n = i + 1,
+                total = tabs.len(),
+                name = label
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::SelectableLabel,
+                    true,
+                    *tab == visible,
+                    &spoken,
+                )
+            });
+            let current = *tab == visible;
+            if current || response.hovered() {
+                painter.rect_filled(row.shrink2(Vec2::new(4.0, 1.0)), 5.0, theme::SURFACE_HOVER);
+            }
+            if current {
+                painter.rect_filled(
+                    Rect::from_min_size(
+                        row.min + Vec2::new(4.0, 6.0),
+                        Vec2::new(2.0, row.height() - 12.0),
+                    ),
+                    1.0,
+                    theme::ACCENT,
+                );
+            }
+            let color = if current { theme::TEXT } else { theme::TEXT_3 };
+            painter.text(
+                egui::pos2(row.min.x + 14.0, row.center().y),
+                Align2::LEFT_CENTER,
+                self.tab_glyph(*tab),
+                FontId::proportional(13.0),
+                color,
+            );
+            // Nombre recortado al ancho (deja sitio a la papelera).
+            let room = (row.width() - 38.0 - 26.0).max(20.0);
+            let galley = ui.painter().layout(
+                label.clone(),
+                FontId::proportional(12.5),
+                color,
+                f32::INFINITY,
+            );
+            let shown = if galley.size().x > room {
+                let keep = ((label.chars().count() as f32) * room / galley.size().x) as usize;
+                format!(
+                    "{}…",
+                    label
+                        .chars()
+                        .take(keep.saturating_sub(1))
+                        .collect::<String>()
+                )
+            } else {
+                label.clone()
+            };
+            painter.text(
+                egui::pos2(row.min.x + 34.0, row.center().y),
+                Align2::LEFT_CENTER,
+                shown,
+                FontId::proportional(12.5),
+                color,
+            );
+            if response.clicked() {
+                actions.push(HeaderAction::ShowTab(*tab));
+            }
+            // Papelera: al pasar el ratón por la fila (o por ella misma).
+            let trash = Rect::from_center_size(
+                egui::pos2(row.max.x - 16.0, row.center().y),
+                Vec2::splat(20.0),
+            );
+            let hint = tr!("Cerrar «{name}»", name = label);
+            let close = ui.interact(
+                trash,
+                egui::Id::new(("tab-close", &key, *tab)),
+                Sense::click(),
+            );
+            close.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hint));
+            if response.hovered() || close.hovered() {
+                theme::paint_icon_button(
+                    ui,
+                    trash,
+                    crate::theme::icon::TRASH,
+                    &close,
+                    theme::TEXT_3,
+                );
+            }
+            if close.on_hover_text(&hint).clicked() {
+                actions.push(HeaderAction::CloseTab(*tab));
+            }
+        }
+        actions
     }
 
     /// Cabecera del panel (estilo pestaña de macOS): icono según el tipo, título, detalle
@@ -1475,8 +1656,21 @@ impl Workspace {
             theme::paint_icon_button(ui, r, glyph, &response, color);
             response.clicked()
         };
-        if button(icon::X, tr!("Cerrar panel (⌘W)"), "close") {
+        let tabs = self.panel_tabs(id);
+        let close_hint = if tabs.len() > 1 {
+            tr!("Cerrar esta terminal (⌘W)")
+        } else {
+            tr!("Cerrar panel (⌘W)")
+        };
+        if button(icon::X, close_hint, "close") {
             actions.push(HeaderAction::Close);
+        }
+        if button(
+            icon::PLUS,
+            tr!("Nueva terminal en este panel (⌘T)"),
+            "new-tab",
+        ) {
+            actions.push(HeaderAction::NewTab);
         }
         if self.panels.len() > 1 {
             let (glyph, hint) = if self.maximized == Some(id) {
@@ -1522,6 +1716,60 @@ impl Workspace {
             } else if button(icon::PLAY, tr!("Iniciar"), "start") {
                 actions.push(HeaderAction::Start(pid));
             }
+        }
+
+        // Varias terminales y panel estrecho: "2/3 ▾" con la lista (ancho: a la derecha).
+        if tabs.len() > 1 && rect.width() < TAB_LIST_MIN {
+            let at = tabs.iter().position(|p| *p == id).unwrap_or(0) + 1;
+            let text = format!("{at}/{}  {}", tabs.len(), icon::CARET_DOWN);
+            let galley =
+                ui.painter()
+                    .layout_no_wrap(text, FontId::proportional(11.5), theme::TEXT_3);
+            let chip = Rect::from_min_max(
+                egui::pos2(right - galley.size().x - 16.0, rect.center().y - 11.0),
+                egui::pos2(right - 2.0, rect.center().y + 11.0),
+            );
+            right = chip.min.x - 4.0;
+            let response = ui
+                .interact(chip, egui::Id::new(("tabs-chip", &key, id)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            response.widget_info(|| {
+                let label = tr!("Terminales de este panel ({n})", n = tabs.len());
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label)
+            });
+            let fill = if response.hovered() {
+                theme::SURFACE_HOVER
+            } else {
+                theme::SURFACE
+            };
+            painter.rect(
+                chip,
+                11.0,
+                fill,
+                egui::Stroke::new(1.0, theme::SEPARATOR),
+                egui::StrokeKind::Inside,
+            );
+            painter.galley(
+                egui::pos2(chip.min.x + 8.0, chip.center().y - galley.size().y / 2.0),
+                galley,
+                theme::TEXT_3,
+            );
+            egui::Popup::menu(&response).show(|ui| {
+                ui.set_min_width(220.0);
+                for tab in &tabs {
+                    let mark = if *tab == id { icon::CARET_RIGHT } else { " " };
+                    if ui
+                        .button(format!(
+                            "{mark}  {}  {}",
+                            self.tab_glyph(*tab),
+                            self.tab_name(*tab)
+                        ))
+                        .clicked()
+                    {
+                        actions.push(HeaderAction::ShowTab(*tab));
+                    }
+                }
+            });
         }
 
         // Maximizado: los demás paneles siguen ahí; un desplegable los muestra y permite
