@@ -171,31 +171,31 @@ export const register: Register = on => {
     const status = await read($, band)
     const used = Object.entries(await read($, tokens)).sort((a, b) => b[1].fresh - a[1].fresh)
     if (e.props.hasSurvey || (status === null && used.length === 0)) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
-    const dot = <Text dimColor> · </Text>
+    const { Text } = $.ui.resolve(e)
+    // One line of text with colored spans: it reads left to right and, when narrow,
+    // wraps like any sentence instead of stacking words in columns.
+    const sep = <Text dimColor> · </Text>
     return (
-      <Box flexDirection="row" flexWrap="wrap">
+      <Text>
         <Text color="claude" bold>Forge</Text>
-        {status && (
-          <>
-            {dot}
-            <Text dimColor>Guard </Text>
-            <Text color={GUARD_COLOR[status.guard] ?? 'subtle'}>{status.guard}</Text>
-            {dot}
-            <Text color={status.ideas > 0 ? 'warning' : 'subtle'}>
-              {status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending
-            </Text>
-          </>
-        )}
+        {status ? sep : null}
+        {status ? <Text dimColor>Guard </Text> : null}
+        {status ? <Text color={GUARD_COLOR[status.guard] ?? 'subtle'}>{status.guard}</Text> : null}
+        {status ? sep : null}
+        {status ? (
+          <Text color={status.ideas > 0 ? 'warning' : 'subtle'}>
+            {status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending
+          </Text>
+        ) : null}
         {used.map(([model, n]) => (
-          <Box key={model} flexDirection="row">
-            {dot}
+          <Text key={model}>
+            <Text dimColor> · </Text>
             <Text color={MODEL_COLOR[model] ?? 'text'}>{model}</Text>
-            <Text> {short(n.fresh)}</Text>
-            {n.cache > 0 && <Text dimColor> (+{short(n.cache)} cache)</Text>}
-          </Box>
+            {` ${short(n.fresh)}`}
+            {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
+          </Text>
         ))}
-      </Box>
+      </Text>
     )
   })
 

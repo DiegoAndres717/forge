@@ -63,7 +63,7 @@ test('the band shows new and cached tokens by model', async ($, on) => {
   expect(text.indexOf('haiku')).toBeLessThan(text.indexOf('opus'))
   expect(text).toContain('120k')
   expect(text).toContain('45k')
-  // The cache line is drawn in pieces (" (+", "2.7M", " cache)") inside one dimmed text.
-  expect(text).toContain('"2.7M"')
-  expect(text).toContain('cache)')
+  expect(text).toContain('(+2.7M cache)')
+  // One line of text (spans inside a Text), never a box of pieces that wraps in columns.
+  expect(text.startsWith('{"type":"Text"')).toBe(true)
 })
