@@ -134,10 +134,14 @@ impl App {
                 );
                 edit.request_focus();
                 let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
-                if (ui.button(tr!("Crear")).clicked() || enter) && !name.trim().is_empty() {
+                let create = ui
+                    .add_enabled(!name.trim().is_empty(), theme::primary_button(tr!("Crear")))
+                    .clicked();
+                if (create || enter) && !name.trim().is_empty() {
                     cmds.push(UiCmd::GitNewBranch(name.trim().to_string()));
                 }
-                if ui.button(tr!("Cancelar")).clicked() || ui.input(|i| i.key_pressed(Key::Escape))
+                if theme::secondary(ui, tr!("Cancelar")).clicked()
+                    || ui.input(|i| i.key_pressed(Key::Escape))
                 {
                     cmds.push(UiCmd::GitNewBranchCancel);
                 }
@@ -211,7 +215,10 @@ impl App {
                 let ready = !staged.is_empty() && !git.message.trim().is_empty();
                 ui.horizontal(|ui| {
                     let label = tr!("{p0}  Commit ({n})", p0 = icon::CHECK, n = staged.len());
-                    if ui.add_enabled(ready, egui::Button::new(label)).clicked() {
+                    if ui
+                        .add_enabled(ready, theme::primary_button(label))
+                        .clicked()
+                    {
                         cmds.push(UiCmd::GitCommit);
                     }
                     if staged.is_empty() && !unstaged.is_empty() {

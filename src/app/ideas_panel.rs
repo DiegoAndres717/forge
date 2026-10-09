@@ -147,10 +147,10 @@ impl App {
                         .desired_width(f32::INFINITY),
                 );
                 ui.horizontal(|ui| {
-                    if ui.button(tr!("Guardar")).clicked() {
+                    if theme::primary(ui, tr!("Guardar")).clicked() {
                         cmds.push(UiCmd::IdeaSave(target));
                     }
-                    if ui.button(tr!("Cancelar")).clicked() {
+                    if theme::secondary(ui, tr!("Cancelar")).clicked() {
                         cmds.push(UiCmd::IdeaEdit(target, None));
                     }
                 });
