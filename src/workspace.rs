@@ -54,7 +54,7 @@ pub enum WsAction {
 }
 
 enum Content {
-    Shell(Terminal),
+    Shell(Box<Terminal>),
     /// Logs de un proceso administrado (el proceso vive en `Workspace::processes`).
     Process(String),
 }
@@ -605,7 +605,7 @@ impl Workspace {
             Ok(terminal) => {
                 let command = spec.as_ref().map(|s| s.command.clone()).or(state.command);
                 let panel = Panel {
-                    content: Content::Shell(terminal),
+                    content: Content::Shell(Box::new(terminal)),
                     name: state.name,
                     command,
                     agent: state.agent,
@@ -862,6 +862,18 @@ impl Workspace {
         })
     }
 
+    /// Desplazamiento y selección de la primera terminal (tests).
+    #[cfg(test)]
+    pub fn shell_view(&self) -> (usize, Option<String>) {
+        self.panels
+            .values()
+            .find_map(|p| match &p.content {
+                Content::Shell(t) => Some(t.view_state()),
+                Content::Process(_) => None,
+            })
+            .unwrap_or_default()
+    }
+
     /// Texto de todas las terminales (tests: comprobar qué recibió cada una).
     #[cfg(test)]
     pub fn shell_text(&self) -> String {
@@ -1047,7 +1059,7 @@ impl Workspace {
             WsAction::Find => {
                 let focus = self.focus;
                 let terminal = match self.panels.get_mut(&focus).map(|p| &mut p.content) {
-                    Some(Content::Shell(t)) => Some(t),
+                    Some(Content::Shell(t)) => Some(&mut **t),
                     Some(Content::Process(id)) => {
                         let id = id.clone();
                         self.processes
@@ -1120,7 +1132,7 @@ impl Workspace {
                 continue;
             };
             let terminal = match &mut panel.content {
-                Content::Shell(t) => Some(t),
+                Content::Shell(t) => Some(&mut **t),
                 Content::Process(process) => {
                     let process = process.clone();
                     match self

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use alacritty_terminal::event::{Event as TermEvent, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
@@ -105,8 +106,13 @@ pub struct Terminal {
     scroll_acc: f32,
     had_focus: bool,
     mouse_down: Option<u8>,
-    /// Barra de scroll y botón "Ir al final" (los clics ahí no seleccionan texto).
+    /// Barra de scroll y botones flotantes (los clics ahí no seleccionan texto).
     overlays: Vec<Rect>,
+    /// Último paso del desplazamiento automático al arrastrar una selección fuera.
+    autoscroll_at: Instant,
+    /// Botón "Copiar" junto a la selección recién hecha, y cuándo se copió.
+    copy_button: Option<Pos2>,
+    copied_at: Option<Instant>,
     /// Búsqueda abierta (⌘F).
     search: Option<Box<Search>>,
     pub title: Option<String>,
@@ -245,6 +251,9 @@ impl Terminal {
             had_focus: true,
             mouse_down: None,
             overlays: Vec::new(),
+            autoscroll_at: Instant::now(),
+            copy_button: None,
+            copied_at: None,
             search: None,
             title: None,
             urls,
@@ -391,6 +400,7 @@ impl Terminal {
         paint(&self.term.lock().unwrap(), &painter, rect, focused, m);
         self.search_ui(ui, rect, id, m);
         self.scroll_overlay(ui, rect, id);
+        self.copy_overlay(ui, rect, id);
         response
     }
 
@@ -677,6 +687,75 @@ impl Terminal {
         }
     }
 
+    /// Botón "Copiar" junto a la selección; desaparece al quitarla o poco después de copiar.
+    fn copy_overlay(&mut self, ui: &egui::Ui, rect: Rect, id: egui::Id) {
+        let Some(at) = self.copy_button else { return };
+        let text = self.term.lock().unwrap().selection_to_string();
+        let done = self
+            .copied_at
+            .is_some_and(|t| t.elapsed() > Duration::from_millis(1200));
+        let Some(text) = text.filter(|t| !t.is_empty() && !done) else {
+            self.copy_button = None;
+            return;
+        };
+        let label = if self.copied_at.is_some() {
+            format!(
+                "{}  {}",
+                crate::theme::icon::CHECK,
+                forge_core::tr!("Copiado")
+            )
+        } else {
+            format!(
+                "{}  {}",
+                crate::theme::icon::COPY,
+                forge_core::tr!("Copiar")
+            )
+        };
+        let font = egui::FontId::proportional(12.0);
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label.clone(), font, Color32::WHITE);
+        let size = galley.size() + Vec2::new(20.0, 10.0);
+        // Arriba a la derecha del puntero, sin salirse de la terminal.
+        let min = (at + Vec2::new(8.0, -size.y - 8.0)).clamp(
+            rect.min + Vec2::splat(4.0),
+            rect.max - size - Vec2::splat(4.0),
+        );
+        let button = Rect::from_min_size(min, size);
+        let response = ui
+            .interact(button, id.with("copy"), Sense::click())
+            .on_hover_cursor(CursorIcon::PointingHand);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+        self.overlays.push(button);
+        let fill = if self.copied_at.is_some() {
+            crate::theme::GREEN
+        } else if response.hovered() {
+            crate::theme::ACCENT
+        } else {
+            Color32::from_rgb(0x3a, 0x3a, 0x3c)
+        };
+        ui.painter().rect_filled(button, size.y / 2.0, fill);
+        ui.painter().galley(
+            button.center() - galley.size() / 2.0,
+            galley,
+            Color32::WHITE,
+        );
+        if response.clicked() {
+            ui.ctx().copy_text(text);
+            self.copied_at = Some(Instant::now());
+        }
+        if self.copied_at.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(1250));
+        }
+    }
+
+    /// Líneas desplazadas hacia el historial y texto seleccionado (tests).
+    #[cfg(test)]
+    pub fn view_state(&self) -> (usize, Option<String>) {
+        let term = self.term.lock().unwrap();
+        (term.grid().display_offset(), term.selection_to_string())
+    }
+
     fn scroll_to_bottom(&self) {
         self.term.lock().unwrap().scroll_display(Scroll::Bottom);
     }
@@ -807,6 +886,29 @@ impl Terminal {
             }
         }
 
+        // Arrastrando una selección fuera de la terminal, el contenido se desplaza solo (más
+        // rápido cuanto más lejos) y la selección sigue al puntero; también tras la rueda.
+        if !report
+            && response.dragged_by(PointerButton::Primary)
+            && term.selection.is_some()
+            && let Some(p) = response.interact_pointer_pos()
+        {
+            let lines = autoscroll_lines(p.y, rect, m.cell.y);
+            if lines != 0 {
+                if self.autoscroll_at.elapsed() >= Duration::from_millis(40) {
+                    self.autoscroll_at = Instant::now();
+                    term.scroll_display(Scroll::Delta(lines));
+                }
+                ctx.request_repaint();
+            }
+            let (line, col, side) = self.cell_at(p, rect, m);
+            let point =
+                viewport_to_point(term.grid().display_offset(), Point::new(line, Column(col)));
+            if let Some(selection) = term.selection.as_mut() {
+                selection.update(point, side);
+            }
+        }
+
         // Doble clic selecciona palabra; triple clic, la línea.
         if !report {
             let kind = if response.triple_clicked() {
@@ -820,6 +922,14 @@ impl Terminal {
                 let (line, col, side) = self.cell_at(pos, rect, m);
                 let point = viewport_to_point(offset, Point::new(line, Column(col)));
                 term.selection = Some(Selection::new(kind, point, side));
+                self.copy_button = Some(pos);
+                self.copied_at = None;
+            } else if response.drag_stopped_by(PointerButton::Primary)
+                && term.selection.as_ref().is_some_and(|s| !s.is_empty())
+            {
+                // Al soltar la selección: botón "Copiar" junto al puntero.
+                self.copy_button = response.interact_pointer_pos().or(hover);
+                self.copied_at = None;
             } else if response.clicked() {
                 // Un clic simple sin arrastre no deja selección vacía.
                 term.selection = None;
@@ -1060,6 +1170,19 @@ fn pty_size(size: Size) -> PtySize {
 }
 
 /// Secuencia de reporte de ratón (SGR si la app lo pidió; si no, X10 clásico).
+/// Líneas a desplazar con el puntero fuera de la terminal al seleccionar: positivo hacia
+/// arriba (historial), negativo hacia abajo; más cuanto más lejos, hasta 5 por paso.
+fn autoscroll_lines(y: f32, rect: Rect, cell_h: f32) -> i32 {
+    let lines = |d: f32| (d / cell_h).ceil().clamp(1.0, 5.0) as i32;
+    if y < rect.min.y {
+        lines(rect.min.y - y)
+    } else if y > rect.max.y {
+        -lines(y - rect.max.y)
+    } else {
+        0
+    }
+}
+
 fn mouse_report(button: u8, col: usize, line: usize, pressed: bool, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::SGR_MOUSE) {
         let end = if pressed { 'M' } else { 'm' };
@@ -1635,6 +1758,26 @@ mod tests {
         assert_eq!(
             process_cwd(std::process::id()),
             std::env::current_dir().ok()
+        );
+    }
+
+    #[test]
+    fn autoscroll_speeds_up_with_distance() {
+        let rect = Rect::from_min_size(Pos2::new(0.0, 100.0), Vec2::new(400.0, 300.0));
+        assert_eq!(
+            autoscroll_lines(250.0, rect, 20.0),
+            0,
+            "dentro no se desplaza"
+        );
+        assert_eq!(
+            autoscroll_lines(95.0, rect, 20.0),
+            1,
+            "justo encima: hacia el historial"
+        );
+        assert_eq!(
+            autoscroll_lines(500.0, rect, 20.0),
+            -5,
+            "lejos debajo: máximo"
         );
     }
 
