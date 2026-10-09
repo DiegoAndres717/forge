@@ -208,6 +208,12 @@ pub struct IdeasView {
     pub focus: bool,
     /// Idea en edición: (id, título, nota).
     pub editing: Option<(i64, String, String)>,
+    /// Planes desplegados (true) o plegados a mano; sin elegir: en progreso desplegados.
+    pub toggled: HashMap<i64, bool>,
+    /// Fases con las tareas mostradas (true) u ocultas a mano; sin elegir: la fase en curso.
+    pub phase_toggled: HashMap<(i64, usize), bool>,
+    /// Campo "Añadir fase" abierto: (plan, texto).
+    pub phase_input: Option<(i64, String)>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
@@ -664,6 +670,47 @@ impl Workspace {
     }
 
     /// Abre un agente en un panel nuevo en la raíz del proyecto (reanudando si se pide y se puede).
+    /// Pide algo a un agente: si ya hay un panel suyo, se le escribe (y se enfoca); si no,
+    /// se abre uno nuevo con la petición como primer mensaje.
+    pub fn ask_agent(&mut self, ctx: &egui::Context, id: &str, prompt: &str, area: Rect) {
+        let mut panels: Vec<PanelId> = self
+            .panels
+            .iter()
+            .filter(|(_, p)| {
+                p.agent.as_deref() == Some(id) && matches!(p.content, Content::Shell(_))
+            })
+            .map(|(panel, _)| *panel)
+            .collect();
+        panels.sort_by_key(|p| *p != self.focus); // el enfocado primero
+        if let Some(panel) = panels.first().copied() {
+            if let Some(Panel {
+                content: Content::Shell(t),
+                ..
+            }) = self.panels.get(&panel)
+            {
+                t.submit(prompt);
+            }
+            self.focus = panel;
+            if self.maximized.is_some() {
+                self.maximized = Some(panel);
+            }
+            return;
+        }
+        let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
+            return;
+        };
+        let quoted = format!("'{}'", prompt.replace('\'', r"'\''"));
+        let state = PanelState {
+            name: Some(spec.name.clone()),
+            cwd: self.project.root(),
+            command: Some(format!("{} {quoted}", spec.command)),
+            process: None,
+            agent: Some(spec.id.clone()),
+        };
+        let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
+        self.add_panel(ctx, dir, state);
+    }
+
     pub fn open_agent(&mut self, ctx: &egui::Context, id: &str, resume: bool, area: Rect) {
         let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
             return;

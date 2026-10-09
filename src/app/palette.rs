@@ -331,8 +331,8 @@ impl App {
                 cmd(UiCmd::NewNote),
             );
             add(
-                icon::LIGHTBULB,
-                tr!("Ideas: mostrar u ocultar").into(),
+                icon::LIST_CHECKS,
+                tr!("Planes: mostrar u ocultar").into(),
                 "⌘⇧I",
                 cmd(UiCmd::ToggleIdeas),
             );
@@ -450,8 +450,8 @@ impl App {
         }
         // Ideas: del proyecto activo o, en Inicio, la lista general.
         add(
-            icon::LIGHTBULB,
-            tr!("Nueva idea").into(),
+            icon::LIST_CHECKS,
+            tr!("Nueva idea para el backlog").into(),
             "",
             cmd(UiCmd::NewIdea),
         );

@@ -333,14 +333,15 @@ fn dangerous_command_dialog_answers_the_terminal() {
 }
 
 #[test]
-fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
+fn plans_backlog_phases_and_tasks_from_the_panel() {
     let _serial = serial();
     let dir = project("ideas");
     let mut h = app(dir.clone());
     h.key_press_modifiers(CMD_SHIFT, Key::I);
     h.run_steps(2);
-    assert!(ws(h.state()).ideas.open, "⌘⇧I abre Ideas");
+    assert!(ws(h.state()).ideas.open, "⌘⇧I abre Planes");
 
+    // Una idea al backlog desde el campo rápido.
     let input = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Nueva idea")));
     input.focus();
     input.type_text("Exportar vacunas a Excel");
@@ -359,20 +360,66 @@ fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
     assert_eq!(ideas[0].title, "Exportar vacunas a Excel");
     assert_eq!(ideas[0].source, "usuario");
 
-    // Un agente anota otra por MCP: aparece sola en el panel.
-    h.state()
+    // Un agente crea un plan por MCP: aparece solo, con su avance.
+    let mut model = forge_core::ideas::Phase::new("Modelo");
+    model.branch = Some("feat/lotes".into());
+    model.tasks = vec![forge_core::ideas::Task {
+        text: "Tabla lotes".into(),
+        done: false,
+    }];
+    let plan = h
+        .state()
         .store
         .as_ref()
         .unwrap()
-        .add_idea(Some(&dir), "Notificar vencidas", "", "claude-code")
+        .add_plan(
+            Some(&dir),
+            "Vacunas por lote",
+            "",
+            &[model, forge_core::ideas::Phase::new("Pantalla")],
+            "claude-code",
+        )
         .unwrap();
-    wait_until(&mut h, "la idea del agente aparece", |a| {
+    wait_until(&mut h, "el plan del agente aparece", |a| {
         ws(a).ideas.items.len() == 2
     });
     h.run_steps(2);
-    h.get_by_label("Notificar vencidas");
+    h.get_by_label_contains("Fase 1 de 2 · Modelo");
+    let get = |h: &Harness<'_, App>| {
+        store(h, Some(&dir))
+            .into_iter()
+            .find(|i| i.id == plan)
+            .unwrap()
+    };
 
-    h.get_by_label("Marcar como hecha: Exportar vacunas a Excel")
+    // En el backlog está plegado: se despliega, se empieza la fase 1 y se tacha la tarea.
+    h.get_by_label("Ver fases").click();
+    h.run_steps(2);
+    h.get_by_label_contains("pasar a En progreso — Modelo")
+        .click();
+    h.run_steps(3);
+    assert_eq!(
+        get(&h).status,
+        "doing",
+        "empezar una fase pone el plan en progreso"
+    );
+    h.get_by_label("Tachar: Tabla lotes").click();
+    h.run_steps(3);
+    assert!(get(&h).phases[0].tasks[0].done);
+    h.get_by_label_contains("feat/lotes"); // chip de la rama
+
+    // Añadir una fase a mano.
+    h.get_by_label_contains("Añadir fase").click();
+    h.run_steps(2);
+    let field = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Nueva fase")));
+    field.type_text("Tests");
+    h.run_steps(1);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(get(&h).phases.len(), 3);
+
+    // Completar la idea del backlog: pasa a la sección Completado.
+    h.get_by_label("Marcar como completada: Exportar vacunas a Excel")
         .click();
     h.run_steps(3);
     assert!(
@@ -380,7 +427,7 @@ fn ideas_are_noted_crossed_out_and_refreshed_from_agents() {
             .iter()
             .any(|i| i.title == "Exportar vacunas a Excel" && i.done())
     );
-    h.get_by_label_contains("Mostrar hechas (1)");
+    h.get_by_label_contains("COMPLETADO");
 
     // Lista general en Inicio.
     h.key_press_modifiers(CMD_SHIFT, Key::H);
@@ -893,4 +940,32 @@ fn maximized_panel_lists_the_hidden_ones() {
     h.get_by_label_contains("Mostrar todos").click();
     h.run_steps(3);
     assert_eq!(ws(h.state()).maximized(), None, "vuelven a verse todos");
+}
+
+/// "Planificar con…": sin el agente abierto se abre con la petición como primer mensaje;
+/// con él abierto, se le escribe en su panel (sin abrir otro).
+#[test]
+fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
+    let _serial = serial();
+    let dir = project("ask-agent");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"echo pedido:\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "planifica la idea 7", area);
+    wait_until(&mut h, "se abre el agente con la petición", |a| {
+        ws(a).panel_count() == 2 && ws(a).shell_text().contains("pedido: planifica la idea 7")
+    });
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "echo zzsegunda$((40+2))", area);
+    wait_until(&mut h, "se escribe en el panel abierto", |a| {
+        ws(a).shell_text().contains("zzsegunda42")
+    });
+    assert_eq!(ws(h.state()).panel_count(), 2, "no abre otro panel");
 }
