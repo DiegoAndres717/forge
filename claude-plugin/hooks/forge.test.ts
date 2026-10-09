@@ -34,7 +34,7 @@ test('a model the main loop chose for the explorer is kept', async ($, on) => {
 
 test('commands say so outside a Forge session', async ($, on) => {
   mock.env(on, {})
-  const result = await $.command.run(command({ command: 'plans', args: '' }))
+  const result = await $.command.run(command({ command: 'forge-plans', args: '' }))
   expect(result.text).toContain('not opened from Forge')
 })
 
