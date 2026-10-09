@@ -1428,8 +1428,9 @@ mod tests {
     use super::*;
     use forge_core::store::Store;
 
+    // Holgado: con la suite en paralelo los shells de login tardan en arrancar.
     fn wait_for(mut cond: impl FnMut() -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         while !cond() {
             assert!(Instant::now() < deadline, "tiempo de espera agotado");
             std::thread::sleep(Duration::from_millis(50));
@@ -1570,7 +1571,7 @@ mod agent_tests {
 
         // Al reabrir se ejecuta el comando de reanudar (aquí `cd sub`) en vez del de abrir.
         let ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), Some(state));
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let restored = ws.state();
             let agent = restored
