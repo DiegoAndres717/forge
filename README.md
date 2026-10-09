@@ -136,7 +136,7 @@ Any `claude` started inside a Forge terminal — typed by hand, `claude --resume
 - **Cheaper subagents** — `forge:explorer` (Haiku) searches and reads code, `forge:reviewer` (Sonnet) runs tests and reviews, `forge:architect` (Opus) takes the hard problems. The main model delegates and keeps its context and cache.
 - **Live status band** above the prompt — Guard status, plans in progress and backlog, the model working right now (● opus / ↳ explorer: … (haiku)), session tokens (new vs. cached) and your plan usage bars (5h and weekly).
 - **Usage per model** — every turn, subagents included, is recorded; see it in Settings.
-- **Zero-token commands** — `/plans`, `/guard`, `/remember`.
+- **Zero-token commands** — `/forge-plans`, `/forge-guard`, `/forge-remember` (type `/forge` to list them).
 
 ## Keyboard shortcuts
 

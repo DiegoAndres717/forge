@@ -9,7 +9,8 @@
 //   show where the tokens go.
 // - A band above the prompt with the project's Guard status, plans and the
 //   session's tokens by model.
-// - /plans, /guard and /remember answered by Forge's CLI, without a model call.
+// - /forge-plans, /forge-guard and /forge-remember answered by Forge's CLI, without a model
+//   call (the prefix keeps them together: typing /forge lists all three).
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -160,9 +161,9 @@ export const register: Register = on => {
     for (const agent of agents) {
       await $.agent.register(agent)
     }
-    await $.command.register({ name: 'plans', description: "This project's Forge plans and backlog", argumentHint: '[add <text> | show <id>]' })
-    await $.command.register({ name: 'guard', description: 'Check the commit with Forge Guard' })
-    await $.command.register({ name: 'remember', description: 'Save a note to the project memory', argumentHint: '<text>' })
+    await $.command.register({ name: 'forge-plans', description: "Forge: this project's plans and backlog", argumentHint: '[add <text> | show <id>]' })
+    await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
+    await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to the project memory', argumentHint: '<text>' })
     void refreshBand($)
     void $.session.usage().then(u => update($, limits, () => u.rateLimits)).catch(() => undefined)
     return next(e)
@@ -316,7 +317,7 @@ export const register: Register = on => {
     )
   })
 
-  on('command.run', { command: 'plans' }, async ($, e) => {
+  on('command.run', { command: 'forge-plans' }, async ($, e) => {
     const [action, ...rest] = e.args.trim().split(/\s+/)
     const text = rest.join(' ')
     if (action === 'add' && text) return run($, ['plans', 'add', text])
@@ -324,15 +325,15 @@ export const register: Register = on => {
     return run($, ['plans'])
   })
 
-  on('command.run', { command: 'guard' }, async $ => {
+  on('command.run', { command: 'forge-guard' }, async $ => {
     const result = await run($, ['guard', 'commit'])
     void refreshBand($)
     return result
   })
 
-  on('command.run', { command: 'remember' }, async ($, e) => {
+  on('command.run', { command: 'forge-remember' }, async ($, e) => {
     const text = e.args.trim()
-    if (!text) return { text: 'Usage: /remember <text>', exitCode: 1 }
+    if (!text) return { text: 'Usage: /forge-remember <text>', exitCode: 1 }
     return run($, ['memory', 'add', 'note', text.slice(0, 60), text])
   })
 }

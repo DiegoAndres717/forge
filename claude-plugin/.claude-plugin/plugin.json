@@ -1,7 +1,7 @@
 {
   "name": "forge",
   "version": "0.1.0",
-  "description": "Forge for Claude Code: project plans and memory tools (MCP), cheaper subagents (Haiku explorer, Sonnet reviewer, Opus architect), per-model usage, live status band and /plans /guard /remember commands",
+  "description": "Forge for Claude Code: project plans and memory tools (MCP), cheaper subagents (Haiku explorer, Sonnet reviewer, Opus architect), per-model usage, live status band and /forge-plans /forge-guard /forge-remember commands",
   "types": "./types/index.d.ts",
   "author": {
     "name": "Forge"
