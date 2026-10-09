@@ -11,8 +11,11 @@ export type Used = { fresh: number; cache: number }
 /** Tokens this session used, by model alias (main loop and subagents together). */
 export type ModelTokens = Record<string, Used>
 
+/** A plan usage window (`five_hour`, `seven_day`) as Claude Code reports it. */
+export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
+
 declare module 'claude-code' {
   interface PluginState {
-    forge: { band: Band | null; tokens: ModelTokens }
+    forge: { band: Band | null; tokens: ModelTokens; limits: Limit[] }
   }
 }

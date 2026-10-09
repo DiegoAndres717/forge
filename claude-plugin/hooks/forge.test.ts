@@ -67,3 +67,30 @@ test('the band shows new and cached tokens by model', async ($, on) => {
   // One line of text (spans inside a Text), never a box of pieces that wraps in columns.
   expect(text.startsWith('{"type":"Text"')).toBe(true)
 })
+
+test('the band shows the plan usage windows as bars', async ($, on) => {
+  on('session.measure', ($, e) => ({ changed: e.changed })) // the engine's side
+  const resetsAt = new Date(Date.now() + 3 * 3_600_000).toISOString()
+  await $.session.measure({
+    context: { percent: 10 } as never,
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 85, resetsAt },
+      { kind: 'seven_day', percentUsed: 3 },
+    ],
+    changed: ['rateLimits'],
+  })
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  const text = JSON.stringify(await drawn.drawn())
+  expect(text).toContain(' 85%')
+  expect(text).toContain(' 3%')
+  expect(text).toContain('━'.repeat(10)) // 85% of 12 cells
+  expect(text).toContain('resets in 3h') // only past 80%
+  expect(text).toContain('"error"') // red past 80%
+  // 3% still fills one cell, so any use shows.
+  expect(text).toContain('"━"')
+})

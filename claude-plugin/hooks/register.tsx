@@ -13,10 +13,27 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Band, ModelTokens } from '../types'
+import type { Band, Limit, ModelTokens } from '../types'
 
 const band = atom({ plugin: 'forge', key: 'band' } as const, null as Band | null)
 const tokens = atom({ plugin: 'forge', key: 'tokens' } as const, {} as ModelTokens)
+const limits = atom({ plugin: 'forge', key: 'limits' } as const, [] as Limit[])
+
+/** The plan windows shown in the band, in order, with their short labels. */
+const WINDOWS: [string, string][] = [['five_hour', '5h'], ['seven_day', 'week']]
+const BAR_CELLS = 12
+
+/** Filled cells of a bar: any use shows at least one. */
+const cells = (percent: number) =>
+  percent > 0 ? Math.max(1, Math.round((percent / 100) * BAR_CELLS)) : 0
+
+/** "in 3h" / "in 2d" until an ISO time; empty when unknown or past. */
+function resetsIn(at: string | undefined, now: number) {
+  const ms = at ? Date.parse(at) - now : Number.NaN
+  if (!(ms > 0)) return ''
+  const hours = Math.round(ms / 3_600_000)
+  return hours >= 48 ? `in ${Math.round(hours / 24)}d` : `in ${Math.max(1, hours)}h`
+}
 
 /** Theme colors (they follow the user's Claude theme). */
 const MODEL_COLOR: Record<string, string> = { opus: 'planMode', sonnet: 'suggestion', haiku: 'success', fable: 'claude' }
@@ -123,6 +140,13 @@ export const register: Register = on => {
     await $.command.register({ name: 'guard', description: 'Check the commit with Forge Guard' })
     await $.command.register({ name: 'remember', description: 'Save a note to the project memory', argumentHint: '<text>' })
     void refreshBand($)
+    void $.session.usage().then(u => update($, limits, () => u.rateLimits)).catch(() => undefined)
+    return next(e)
+  })
+
+  // Plan usage windows: pushed after each turn and when a window moves a point.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits')) await update($, limits, () => e.rateLimits)
     return next(e)
   })
 
@@ -170,7 +194,15 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const status = await read($, band)
     const used = Object.entries(await read($, tokens)).sort((a, b) => b[1].fresh - a[1].fresh)
-    if (e.props.hasSurvey || (status === null && used.length === 0)) return next(e)
+    const now = Date.now()
+    const windows = await read($, limits)
+    const plan = WINDOWS.flatMap(([kind, label]) => {
+      const w = windows.find(l => l.kind === kind)
+      if (!w) return []
+      const percent = Math.max(0, Math.min(100, Math.round(w.percentUsed)))
+      return [{ label, percent, reset: resetsIn(w.resetsAt, now) }]
+    })
+    if (e.props.hasSurvey || (status === null && used.length === 0 && plan.length === 0)) return next(e)
     const { Text } = $.ui.resolve(e)
     // One line of text with colored spans: it reads left to right and, when narrow,
     // wraps like any sentence instead of stacking words in columns.
@@ -193,6 +225,17 @@ export const register: Register = on => {
             <Text color={MODEL_COLOR[model] ?? 'text'}>{model}</Text>
             {` ${short(n.fresh)}`}
             {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
+          </Text>
+        ))}
+        {plan.map(({ label, percent, reset }) => (
+          <Text key={label}>
+            <Text dimColor> · {label} </Text>
+            <Text color={percent >= 80 ? 'error' : percent >= 50 ? 'warning' : 'success'}>
+              {'━'.repeat(cells(percent))}
+            </Text>
+            <Text dimColor>{'─'.repeat(BAR_CELLS - cells(percent))}</Text>
+            {` ${percent}%`}
+            {percent >= 80 && reset ? <Text dimColor>{` resets ${reset}`}</Text> : null}
           </Text>
         ))}
       </Text>
