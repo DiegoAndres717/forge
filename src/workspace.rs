@@ -862,6 +862,19 @@ impl Workspace {
         })
     }
 
+    /// Texto de todas las terminales (tests: comprobar qué recibió cada una).
+    #[cfg(test)]
+    pub fn shell_text(&self) -> String {
+        self.panels
+            .values()
+            .filter_map(|p| match &p.content {
+                Content::Shell(t) => t.history_text(200),
+                Content::Process(_) => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     #[cfg(test)]
     pub fn panel_count(&self) -> usize {
         self.panels.len()

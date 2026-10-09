@@ -277,6 +277,13 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].memory.dirty = true;
     settle(&mut harness);
     save(&mut harness, &out, "3-memoria");
+    harness.state_mut().workspaces[0].memory.form = Some(crate::workspace::NoteForm {
+        kind: "decision".into(),
+        ..Default::default()
+    });
+    settle(&mut harness);
+    save(&mut harness, &out, "3b-nueva-nota");
+    harness.state_mut().workspaces[0].memory.form = None;
 
     harness.state_mut().workspaces[0].memory.open = false;
     harness.state_mut().open_palette();

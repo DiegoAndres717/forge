@@ -324,3 +324,11 @@ pub fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
         .tint(tint)
         .paint_at(ui, rect);
 }
+
+/// Campo de texto con la altura y el aire de toda la app (no la línea mínima de egui).
+/// Usar en todos los formularios: `theme::field(egui::TextEdit::singleline(..)).hint_text(..)`.
+pub fn field(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
+    edit.font(FontId::proportional(13.5))
+        .margin(Margin::symmetric(10, 8))
+        .min_size(Vec2::new(0.0, 34.0))
+}

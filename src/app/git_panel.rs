@@ -128,7 +128,7 @@ impl App {
         if let Some(name) = &mut git.new_branch {
             ui.horizontal(|ui| {
                 let edit = ui.add(
-                    egui::TextEdit::singleline(name)
+                    theme::field(egui::TextEdit::singleline(name))
                         .hint_text(tr!("nombre-de-la-rama"))
                         .desired_width(200.0),
                 );
@@ -203,7 +203,7 @@ impl App {
                 ui.add_space(10.0);
                 ui.spacing_mut().item_spacing.y = 6.0;
                 ui.add(
-                    egui::TextEdit::multiline(&mut git.message)
+                    theme::field(egui::TextEdit::multiline(&mut git.message))
                         .hint_text(tr!("Mensaje del commit"))
                         .desired_rows(2)
                         .desired_width(f32::INFINITY),
