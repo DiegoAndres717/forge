@@ -1036,3 +1036,47 @@ fn enter_accepts_the_suggestion_chosen_with_the_arrows() {
         "la lista se cierra"
     );
 }
+
+/// Terminales tipo VS Code: ⌘T y el + añaden al mismo panel, la lista lateral cambia de
+/// una a otra, ⌘⇧] pasa a la siguiente y la papelera cierra una.
+#[test]
+fn stacked_terminals_from_the_panel_ui() {
+    let _serial = serial();
+    let mut h = app(project("tabs-ui"));
+    h.run_steps(3);
+    let first = ws(h.state()).focused();
+    // ⌘T y el + de la cabecera: terminales nuevas en el mismo panel.
+    h.key_press_modifiers(CMD, Key::T);
+    h.run_steps(3);
+    h.get_all_by_label("Nueva terminal en este panel (⌘T)")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).panel_count(), 3);
+    let tabs = ws(h.state()).panel_tabs(first);
+    assert_eq!(tabs.len(), 3, "las tres en el mismo panel");
+
+    // Lista lateral: clic en la primera fila la pone a la vista.
+    h.get_by_label_contains("Terminal 1 de 3").click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), first, "la primera fila");
+
+    // ⌘⇧]: la siguiente.
+    h.key_press_modifiers(CMD_SHIFT, Key::CloseBracket);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), tabs[1]);
+
+    // Papelera de una fila: cierra esa terminal.
+    let trash = |h: &Harness<'_, App>| {
+        h.get_all_by(|n| n.label().is_some_and(|l| l.starts_with("Cerrar «")))
+            .count()
+    };
+    assert_eq!(trash(&h), 3, "una papelera por fila");
+    h.get_all_by(|n| n.label().is_some_and(|l| l.starts_with("Cerrar «")))
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).panel_count(), 2);
+}

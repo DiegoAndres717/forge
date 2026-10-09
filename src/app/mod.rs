@@ -123,6 +123,13 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::ArrowDown, false, true) => Action::Ws(WsAction::Focus(Toward::Down)),
         (Key::OpenBracket, false, false) => Action::Ws(WsAction::Cycle(-1)),
         (Key::CloseBracket, false, false) => Action::Ws(WsAction::Cycle(1)),
+        // ⌘⇧[ / ⌘⇧]: terminal anterior/siguiente del panel (como VS Code).
+        (Key::OpenBracket | Key::OpenCurlyBracket, true, false) => {
+            Action::Ws(WsAction::CycleTab(-1))
+        }
+        (Key::CloseBracket | Key::CloseCurlyBracket, true, false) => {
+            Action::Ws(WsAction::CycleTab(1))
+        }
         (Key::Plus | Key::Equals, _, false) => Action::FontBigger,
         (Key::Minus, false, false) => Action::FontSmaller,
         (Key::Num0, false, false) => Action::FontReset,

@@ -1467,4 +1467,27 @@ pub const EN: &[(&str, &str)] = &[
         "Pasan Guard solo antes de cada commit y push.",
         "Run Guard automatically before every commit and push.",
     ),
+    ("Cerrar esta terminal (⌘W)", "Close this terminal (⌘W)"),
+    (
+        "Nueva terminal en este panel (⌘T)",
+        "New terminal in this panel (⌘T)",
+    ),
+    (
+        "Terminales de este panel ({n})",
+        "Terminals in this panel ({n})",
+    ),
+    ("Cerrar «{name}»", "Close “{name}”"),
+    (
+        "Nueva terminal (en este panel)",
+        "New terminal (in this panel)",
+    ),
+    ("Terminal siguiente del panel", "Next terminal in the panel"),
+    (
+        "Terminal anterior del panel",
+        "Previous terminal in the panel",
+    ),
+    (
+        "Terminal {n} de {total}: {name}",
+        "Terminal {n} of {total}: {name}",
+    ),
 ];
