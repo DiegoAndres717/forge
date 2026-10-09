@@ -1,6 +1,7 @@
 name: Release
 
-# Al subir una etiqueta vX.Y.Z: compila, genera el .dmg y publica la versión con el archivo.
+# Al subir una etiqueta vX.Y.Z: compila (universal: Apple Silicon e Intel), genera el .dmg
+# y publica la versión con el archivo.
 on:
   push:
     tags: ["v*"]
@@ -14,6 +15,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
       - name: Comprobar que la etiqueta coincide con la versión
         run: |

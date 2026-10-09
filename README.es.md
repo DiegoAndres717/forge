@@ -10,7 +10,7 @@ Terminales, procesos, agentes, memoria del proyecto y un Guard que revisa cada c
 [![CI](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DiegoAndres717/forge?label=versión)](https://github.com/DiegoAndres717/forge/releases/latest)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
-![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black)
+![Apple Silicon + Intel](https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-universal-black)
 ![Rust](https://img.shields.io/badge/hecho%20con-Rust-orange?logo=rust)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue)](LICENSE)
 
@@ -94,7 +94,7 @@ Además: notificaciones nativas cuando un agente termina, un proceso falla o Gua
 
 ## Instalar
 
-> **Requisitos:** un Mac con Apple Silicon (M1 o posterior) y macOS 13 Ventura o superior.
+> **Requisitos:** macOS 13 Ventura o superior, en Apple Silicon o Intel (app universal).
 
 ### Descarga (recomendado)
 
@@ -112,6 +112,7 @@ Además: notificaciones nativas cuando un agente termina, un proceso falla o Gua
 brew install rustup && rustup-init -y      # Rust estable
 git clone https://github.com/DiegoAndres717/forge.git && cd forge
 ./scripts/install-app.sh                   # compila e instala ~/Applications/Forge.app
+# FORGE_UNIVERSAL=1 ./scripts/install-app.sh   → binario universal (Apple Silicon + Intel)
 ```
 
 ### Línea de comandos (opcional)
@@ -171,8 +172,8 @@ La referencia completa de la CLI está en el [README en inglés](README.md#confi
 **¿Forge envía mi código a algún sitio?**
 No. Forge funciona en local; su única llamada de red es la comprobación de actualizaciones en GitHub Releases (más la revisión con IA opcional, si la activas en `routing.toml`). Los agentes que lances hablan con sus proveedores como siempre.
 
-**¿Macs Intel o Windows?**
-Por ahora no. Las versiones se compilan para Apple Silicon. En un Mac Intel puedes intentar compilarlo desde el código.
+**¿Macs Intel? ¿Windows?**
+Macs Intel: sí, la app es universal. Windows y Linux: por ahora no.
 
 **¿Necesito Claude Code?**
 No. Terminales, procesos, Guard, Git e ideas funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.

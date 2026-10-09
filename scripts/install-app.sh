@@ -3,6 +3,7 @@
 # Volver a ejecutarlo actualiza la app con el código actual.
 #   ./scripts/install-app.sh            → ~/Applications/Forge.app
 #   ./scripts/install-app.sh /Applications
+#   FORGE_UNIVERSAL=1 ./scripts/install-app.sh   → binario universal (Apple Silicon + Intel)
 set -eu
 cd "$(dirname "$0")/.."
 command -v cargo >/dev/null 2>&1 || export PATH="/opt/homebrew/opt/rustup/bin:$HOME/.cargo/bin:$PATH"
@@ -11,7 +12,18 @@ DEST="${1:-$HOME/Applications}"
 APP="$DEST/Forge.app"
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
 
-cargo build --release
+if [ "${FORGE_UNIVERSAL:-0}" = 1 ]; then
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+    cargo build --release --target aarch64-apple-darwin
+    cargo build --release --target x86_64-apple-darwin
+    BIN=target/universal/forge
+    mkdir -p target/universal
+    lipo -create -output "$BIN" \
+        target/aarch64-apple-darwin/release/forge target/x86_64-apple-darwin/release/forge
+else
+    cargo build --release
+    BIN=target/release/forge
+fi
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
@@ -29,7 +41,7 @@ iconutil -c icns "$ICONSET" -o "$TMP/Forge.icns"
 mkdir -p "$DEST"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/forge "$APP/Contents/MacOS/forge"
+cp "$BIN" "$APP/Contents/MacOS/forge"
 cp "$TMP/Forge.icns" "$APP/Contents/Resources/Forge.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
