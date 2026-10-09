@@ -164,10 +164,14 @@ pub(crate) fn apply_exceptions(items: &mut [Item], exceptions: &[Exception]) {
 /// "1284" → "1.284"
 pub fn thousands(n: usize) -> String {
     let s = n.to_string();
+    let sep = match crate::i18n::lang() {
+        crate::i18n::Lang::Es => '.',
+        _ => ',',
+    };
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
         if i > 0 && (s.len() - i).is_multiple_of(3) {
-            out.push('.');
+            out.push(sep);
         }
         out.push(c);
     }

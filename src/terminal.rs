@@ -209,11 +209,28 @@ impl Terminal {
             c.request_repaint();
         });
 
-        if let Some(input) = input {
-            let _ = writer
-                .lock()
-                .unwrap()
-                .write_all(format!("{input}\r").as_bytes());
+        // El comando se escribe cuando el shell ya mostró su prompt (salida y luego una
+        // pausa breve): escrito antes, la terminal lo repetía encima del prompt.
+        if let Some(input) = input.map(str::to_string) {
+            let (writer, output) = (writer.clone(), last_output.clone());
+            std::thread::spawn(move || {
+                let start = std::time::Instant::now();
+                let quiet = std::time::Duration::from_millis(150);
+                while start.elapsed() < std::time::Duration::from_secs(5) {
+                    let ready = output
+                        .lock()
+                        .unwrap()
+                        .is_some_and(|at| at.elapsed() >= quiet);
+                    if ready {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                }
+                let _ = writer
+                    .lock()
+                    .unwrap()
+                    .write_all(format!("{input}\r").as_bytes());
+            });
         }
 
         Ok(Self {

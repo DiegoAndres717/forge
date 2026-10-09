@@ -108,12 +108,35 @@ fn ui_preview() {
     forge_core::i18n::init(None);
     let out = PathBuf::from(std::env::var("FORGE_PREVIEW_DIR").expect("FORGE_PREVIEW_DIR"));
     std::fs::create_dir_all(&out).unwrap();
+    // Una carpeta personal de demostración: el shell no lee la configuración del usuario
+    // (sin fastfetch, nombre del Mac ni rutas reales) y las rutas salen como ~/Developer/…
     let base = std::env::temp_dir().join(format!("forge-preview-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
-    std::fs::create_dir_all(base.join("Bovinapp/.forge")).unwrap();
-    // Ruta canónica (/private/var…): la que guarda la app al abrir el proyecto.
-    let project = base.join("Bovinapp").canonicalize().unwrap();
-    std::fs::create_dir_all(project.join("src/vacunas")).unwrap();
+    let home = base.join("home");
+    std::fs::create_dir_all(home.join("Developer")).unwrap();
+    let home = home.canonicalize().unwrap();
+    std::fs::write(
+        home.join(".zshrc"),
+        concat!(
+            "PROMPT='%F{39}%1~%f %F{76}❯%f '\nexport LANG=en_US.UTF-8\nexport CLICOLOR=1\n",
+            // npm de demostración: salida realista sin Node ni dependencias.
+            "npm() {\n  case \"$1 $2\" in\n",
+            "    'test ') printf '\\n> acme-store@1.4.0 test\\n> vitest run\\n\\n \\033[42;30m PASS \\033[0m src/cart.test.ts \\033[2m(12 tests)\\033[0m\\n \\033[42;30m PASS \\033[0m src/checkout/pay.test.ts \\033[2m(8 tests)\\033[0m\\n\\n \\033[1mTests\\033[0m  \\033[32m20 passed\\033[0m (20)\\n \\033[1mTime\\033[0m   1.84s\\n' ;;\n",
+            "    'run dev') printf '\\n> acme-store@1.4.0 dev\\n> vite\\n\\n  \\033[32mVITE v6.0.3\\033[0m  ready in \\033[1m284\\033[0m ms\\n\\n  \\033[32m➜\\033[0m  \\033[1mLocal\\033[0m:   \\033[36mhttp://localhost:\\033[1m5173\\033[0;36m/\\033[0m\\n  \\033[2m➜  Network: use --host to expose\\033[0m\\n'; sleep 600 ;;\n",
+            "    'run api') printf '\\n> acme-store@1.4.0 api\\n> tsx watch server.ts\\n\\napi listening on \\033[36mhttp://localhost:3000\\033[0m\\n'; sleep 600 ;;\n",
+            "  esac\n}\n",
+        ),
+    )
+    .unwrap();
+    // SAFETY: test aislado y manual (--ignored): el shell de las terminales usa este HOME.
+    unsafe {
+        std::env::set_var("HOME", &home);
+        std::env::set_var("SHELL", "/bin/zsh");
+        std::env::remove_var("ZDOTDIR");
+    }
+    let project = home.join("Developer/acme-store");
+    std::fs::create_dir_all(project.join(".forge")).unwrap();
+    std::fs::create_dir_all(project.join("src/checkout")).unwrap();
     let sh = |c: &str| {
         assert!(
             std::process::Command::new("sh")
@@ -125,20 +148,27 @@ fn ui_preview() {
         )
     };
     sh(
-        "git init -q -b main && git config user.email t@t && git config user.name t && echo '# Bovinapp' > README.md && git add . && git commit -qm inicio",
+        "git init -q -b main && git config user.email dev@acme.test && git config user.name Dev \
+         && echo '# Acme Store' > README.md && git add . && git commit -qm 'Initial commit' \
+         && echo 'export const cart = [];' > src/cart.ts && git add . && git commit -qm 'Add cart' \
+         && echo 'export const pay = () => {};' > src/checkout/pay.ts && git add . && git commit -qm 'Checkout with Stripe'",
     );
     std::fs::write(
         project.join(".forge/project.toml"),
-        "[project]\nname = \"Bovinapp\"\n\
+        "[project]\nname = \"Acme Store\"\n\
+         [workspace]\ndefault_layout = \"dev\"\n\
+         [layouts.dev]\nsplit = \"row\"\nratio = 0.5\n\
+         first = { name = \"Terminal\", command = \"git --no-pager log --oneline --decorate\" }\n\
+         second = { name = \"Tests\", command = \"npm test\" }\n\
          [[commands]]\nname = \"Tests\"\ncommand = \"npm test\"\n\
-         [[processes]]\nid = \"frontend\"\nname = \"Frontend\"\ncommand = \"sleep 600\"\nrestart = \"on-workspace-open\"\n\
-         [[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"sleep 600\"\n",
+         [[processes]]\nid = \"web\"\nname = \"Web\"\ncommand = \"npm run dev\"\nrestart = \"on-workspace-open\"\n\
+         [[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"npm run api\"\n",
     )
     .unwrap();
     std::fs::write(project.join(".forge/rules.toml"), "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\nname = \"Tests\"\ncommand = \"sleep 0.3\"\n").unwrap();
     std::fs::write(
-        project.join("src/vacunas/lotes.ts"),
-        "export const lote = 1;\n",
+        project.join("src/checkout/coupons.ts"),
+        "export const coupon = 'WELCOME10';\n",
     )
     .unwrap();
     sh("git add src");
@@ -146,8 +176,9 @@ fn ui_preview() {
     unsafe { std::env::set_var("FORGE_DB", base.join("forge.db")) };
     {
         let store = Store::open(&base.join("forge.db")).unwrap();
-        for (name, ago) in [("ReparAppi", 86_400), ("wabio", 5 * 86_400)] {
-            let p = base.join(name);
+        store.set_setting("welcomed", "1").unwrap(); // la bienvenida tiene su propia captura
+        for (name, ago) in [("inventory-api", 86_400), ("landing-site", 5 * 86_400)] {
+            let p = home.join("Developer").join(name);
             std::fs::create_dir_all(&p).unwrap();
             store.touch(&p, name).unwrap();
             store.conn.execute("UPDATE projects SET last_opened = last_opened - ?1, is_open = 0 WHERE path = ?2", rusqlite::params![ago, p.to_string_lossy()]).unwrap();
@@ -156,9 +187,9 @@ fn ui_preview() {
             .add_memory(
                 &project,
                 "decision",
-                "Vacunación por lotes",
-                "Se registran por lote para no duplicar animales.",
-                "vacunas",
+                "Payments go through Stripe Checkout",
+                "Hosted checkout keeps card data off our servers (no PCI scope).",
+                "payments",
                 "claude-code",
             )
             .unwrap();
@@ -166,28 +197,28 @@ fn ui_preview() {
             .add_memory(
                 &project,
                 "error",
-                "Migración con índice duplicado",
-                "drizzle-kit falló; se renombró el índice.",
+                "Duplicate index in the orders migration",
+                "drizzle-kit failed; renamed the index to orders_customer_idx.",
                 "",
-                "usuario",
+                "user",
             )
             .unwrap();
         store
-            .add_idea(Some(&project), "Exportar vacunas a Excel", "", "usuario")
+            .add_idea(Some(&project), "Export orders to CSV", "", "user")
             .unwrap();
         let b = store
             .add_idea(
                 Some(&project),
-                "Notificar vacunas vencidas",
-                "Push al celular y correo al veterinario.",
+                "Email a receipt after payment",
+                "Use the Stripe webhook, not the redirect.",
                 "claude-code",
             )
             .unwrap();
         store
-            .add_idea(Some(&project), "Modo offline para el campo", "", "codex")
+            .add_idea(Some(&project), "Offline cart for mobile", "", "codex")
             .unwrap();
         let c = store
-            .add_idea(Some(&project), "Filtro por lote", "", "usuario")
+            .add_idea(Some(&project), "Coupon codes at checkout", "", "user")
             .unwrap();
         store
             .update_idea(Some(&project), b, Some("doing"), None, None, "claude-code")
@@ -196,10 +227,10 @@ fn ui_preview() {
             .update_idea(Some(&project), c, Some("done"), None, None, "claude-code")
             .unwrap();
         store
-            .add_idea(None, "App para talleres de motos", "", "usuario")
+            .add_idea(None, "Try the new Forge release on the laptop", "", "user")
             .unwrap();
         store
-            .add_idea(None, "Probar Zed como editor", "", "usuario")
+            .add_idea(None, "Side project: habit tracker", "", "user")
             .unwrap();
     }
 
@@ -217,15 +248,7 @@ fn ui_preview() {
     let ctx = harness.ctx.clone();
     harness.state_mut().workspaces[0].show_process(
         &ctx,
-        "frontend",
-        Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0)),
-    );
-    // Panel de agente (Claude Code) para ver su logo en la cabecera. // claude-panel
-    let ctx = harness.ctx.clone();
-    harness.state_mut().workspaces[0].open_agent(
-        &ctx,
-        "claude",
-        false,
+        "web",
         Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0)),
     );
     settle(&mut harness);
@@ -272,7 +295,7 @@ fn ui_preview() {
     let request = forge_core::danger::Request {
         id: "1-1".into(),
         command: "git push --force origin main".into(),
-        reason: "reescribe la historia del remoto (git push --force)".into(),
+        reason: "rewrites remote history (git push --force)".into(),
         cwd: project.clone(),
         project: Some(project.clone()),
         origin: Some("Claude Code".into()),
@@ -298,7 +321,7 @@ fn ui_preview() {
     // Panel de Git con un cambio sin preparar.
     std::fs::write(
         project.join("README.md"),
-        "# Bovinapp\n\nControl de vacunación.\n",
+        "# Acme Store\n\nOnline store with Stripe checkout.\n",
     )
     .unwrap();
     harness.state_mut().workspaces[0].ideas.open = false;
@@ -324,16 +347,16 @@ fn ui_preview() {
     // Muchos proyectos abiertos: lista compacta con dormidos.
     let ctx = harness.ctx.clone();
     for name in [
-        "ReparAppi",
-        "wabio",
-        "his-erp",
-        "mintiplay",
-        "zai-proxy",
-        "alexa-nova",
-        "tiendawa",
-        "landing",
+        "inventory-api",
+        "landing-site",
+        "mobile-app",
+        "admin-panel",
+        "billing-service",
+        "design-system",
+        "docs",
+        "infra",
     ] {
-        let p = base.join(name);
+        let p = home.join("Developer").join(name);
         std::fs::create_dir_all(&p).unwrap();
         harness.state_mut().open_project_as(&ctx, &p, false);
     }
