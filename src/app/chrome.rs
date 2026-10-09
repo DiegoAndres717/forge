@@ -354,24 +354,6 @@ impl App {
                 cmds.push(UiCmd::ToggleGuard);
             }
             ui.add_space(6.0);
-            if theme::icon_button(ui, icon::SQUARE_SPLIT_VERTICAL, tr!("Dividir abajo (⌘⇧D)"))
-                .clicked()
-            {
-                cmds.push(UiCmd::Ws(WsAction::Split(Dir::Column)));
-            }
-            if theme::icon_button(
-                ui,
-                icon::SQUARE_SPLIT_HORIZONTAL,
-                tr!("Dividir a la derecha (⌘D)"),
-            )
-            .clicked()
-            {
-                cmds.push(UiCmd::Ws(WsAction::Split(Dir::Row)));
-            }
-            if theme::icon_button(ui, icon::TERMINAL_WINDOW, tr!("Nueva terminal (⌘T)")).clicked()
-            {
-                cmds.push(UiCmd::Ws(WsAction::NewTerminal));
-            }
             if let Some(bytes) = bytes {
                 ui.add_space(8.0);
                 ui.label(

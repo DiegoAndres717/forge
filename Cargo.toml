@@ -39,6 +39,7 @@ objc2 = "0.6"
 raw-window-handle = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWindow", "NSButton", "NSView", "NSResponder", "NSControl", "objc2-core-foundation"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry"] }
+muda = { version = "0.17", default-features = false }
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot", "eframe"] }

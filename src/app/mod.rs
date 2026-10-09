@@ -30,6 +30,7 @@ mod git_panel;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
+mod menu;
 mod notify;
 mod palette;
 mod settings;
@@ -150,8 +151,6 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
 
 /// Acciones pedidas desde la UI (inicio y barra lateral); se aplican al final del frame.
 enum UiCmd {
-    /// Acción de paneles desde la barra de herramientas (como los atajos).
-    Ws(WsAction),
     Home,
     /// Pastilla de actualización: descargar o reiniciar con la versión nueva.
     Update,
@@ -281,6 +280,8 @@ pub struct App {
     notifications: bool,
     /// Próxima búsqueda de actualizaciones (solo la app real; los tests no salen a la red).
     next_update_check: Option<Instant>,
+    /// Barra de menús de macOS (solo la app real).
+    menu: Option<menu::MenuBar>,
     /// Proyecto de la notificación en la que el usuario hizo clic.
     notification_click: Arc<Mutex<Option<PathBuf>>>,
     /// Ventana de Ajustes (⌘,) abierta.
@@ -311,6 +312,7 @@ impl App {
             .and_then(|p| Store::open(&p));
         let mut app = Self::with_store(ctx, settings, error, open, store);
         app.notifications = true; // solo la app real (los tests no notifican)
+        app.menu = menu::MenuBar::install(ctx);
         app.next_update_check = Some(Instant::now()); // al abrir, y luego cada pocas horas
         // Primera vez: bienvenida.
         if app.db(|s| s.setting("welcomed")).flatten().is_none() {
@@ -358,6 +360,7 @@ impl App {
             notifications_enabled: true,
             notifications: false,
             next_update_check: None,
+            menu: None,
             notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
@@ -616,6 +619,10 @@ impl App {
             UiCmd::SetLang(lang) => {
                 forge_core::i18n::set_lang(lang);
                 self.db(|s| s.set_setting("language", lang.code()));
+                // La barra de menús, en el idioma nuevo.
+                if self.menu.is_some() {
+                    self.menu = menu::MenuBar::install(ctx);
+                }
             }
             UiCmd::Sleep(i) => {
                 self.save();
@@ -634,11 +641,6 @@ impl App {
             UiCmd::OpenAgent(id, resume) => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.open_agent(ctx, &id, resume, area);
-                }
-            }
-            UiCmd::Ws(action) => {
-                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
-                    ws.run(ctx, action, area);
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
@@ -1081,6 +1083,21 @@ impl eframe::App for App {
         let mut ws_actions = Vec::new();
         for action in actions {
             self.handle_action(action, &mut cmds, &mut ws_actions);
+        }
+        // Barra de menús de macOS: sus opciones (y atajos) hacen lo mismo que el teclado.
+        let chosen = self
+            .menu
+            .as_ref()
+            .map(menu::MenuBar::poll)
+            .unwrap_or_default();
+        for cmd in chosen {
+            match cmd {
+                menu::MenuCmd::Action(action) => {
+                    self.handle_action(action, &mut cmds, &mut ws_actions)
+                }
+                menu::MenuCmd::CheckUpdates => cmds.push(UiCmd::CheckUpdates),
+                menu::MenuCmd::Welcome => cmds.push(UiCmd::ShowWelcome),
+            }
         }
 
         let full = ui.max_rect();
