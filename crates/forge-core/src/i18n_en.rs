@@ -1134,11 +1134,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Descartar cambios", "Discard changes"),
     ("Git: mostrar u ocultar", "Git: show or hide"),
     ("sesión anterior", "previous session"),
-    (
-        "{p0}  Forge {tag} disponible",
-        "{p0}  Forge {tag} available",
-    ),
-    ("Descargar la versión nueva", "Download the new version"),
     ("Bienvenido a Forge", "Welcome to Forge"),
     (
         "Cada proyecto con sus terminales, procesos, agentes de IA y un Guard que revisa tus cambios. Abre una carpeta para empezar (o arrástrala a la ventana).",
@@ -1186,4 +1181,21 @@ pub const EN: &[(&str, &str)] = &[
         "Al abrir Claude desde Forge (barra lateral, ⌘⇧A). Un claude escrito a mano usa lo que escribas.",
         "When Forge opens Claude (sidebar, ⌘⇧A). A claude you type yourself uses what you type.",
     ),
+    ("Actualizar Forge", "Update Forge"),
+    (
+        "Forge {tag} disponible: descargarla",
+        "Forge {tag} is available: download it",
+    ),
+    ("Descargando…", "Downloading…"),
+    (
+        "Descargando la versión nueva",
+        "Downloading the new version",
+    ),
+    ("Reiniciar para actualizar", "Restart to update"),
+    (
+        "Forge se cerrará y se abrirá con la versión nueva",
+        "Forge will close and reopen with the new version",
+    ),
+    ("Reintentar actualización", "Retry update"),
+    ("No se pudo descargar: {e}", "Couldn't download: {e}"),
 ];

@@ -663,3 +663,31 @@ fn welcome_tour_runs_once_and_is_remembered() {
         .unwrap();
     assert_eq!(welcomed.as_deref(), Some("1"), "no vuelve a salir");
 }
+
+#[test]
+fn update_pill_shows_in_the_toolbar_and_follows_the_download() {
+    let _serial = serial();
+    let mut h = app(project("update"));
+    assert!(h.query_by_label_contains("Actualizar Forge").is_none());
+    let release = forge_core::updates::Release {
+        tag: "v9.9.9".into(),
+        page: "https://example.invalid".into(),
+        dmg: None,
+    };
+    *h.state().update.lock().unwrap() = Some(super::update::Update::Available(release));
+    h.run_steps(2);
+    h.get_by_label_contains("Actualizar Forge");
+    *h.state().update.lock().unwrap() = Some(super::update::Update::Downloading);
+    h.run_steps(2);
+    h.get_by_label_contains("Descargando…");
+    // Lista para reiniciar; fuera de un .app (tests) el clic no cierra nada.
+    let staged = PathBuf::from("/tmp/forge-update-test/Forge.app");
+    *h.state().update.lock().unwrap() = Some(super::update::Update::Ready(staged.clone()));
+    h.run_steps(2);
+    h.get_by_label_contains("Reiniciar para actualizar").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().update_state(),
+        Some(super::update::Update::Ready(staged))
+    );
+}

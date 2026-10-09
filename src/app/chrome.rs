@@ -291,8 +291,12 @@ impl App {
         if pill.min.x > left {
             Self::search_pill(&mut ui, pill, compact, cmds);
         }
+        let update = self.update_state();
         let Some(i) = self.active else {
             ui.label(RichText::new(tr!("Inicio")).size(13.0).color(theme::TEXT_2));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                update::update_pill(ui, &update, cmds);
+            });
             return;
         };
         let bytes = self
@@ -303,6 +307,7 @@ impl App {
         let ws = &mut self.workspaces[i];
         let right_start = ui.max_rect().max.x;
         let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            update::update_pill(ui, &update, cmds);
             if theme::icon_toggle(ui, icon::GIT_BRANCH, "Git (⌘⇧G)", ws.git.open).clicked() {
                 cmds.push(UiCmd::ToggleGit);
             }
@@ -374,29 +379,6 @@ impl App {
     }
 
     /// Barra de estado con los atajos principales (plan §4.2).
-    /// Una vez al día, en segundo plano: ¿hay una versión de Forge más nueva publicada?
-    pub(super) fn check_updates(&mut self, ctx: &egui::Context) {
-        let last: i64 = self
-            .db(|s| s.setting("update_checked"))
-            .flatten()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-        if store::now() - last < 86_400 {
-            return;
-        }
-        self.db(|s| s.set_setting("update_checked", &store::now().to_string()));
-        let (slot, ctx) = (self.update.clone(), ctx.clone());
-        std::thread::spawn(move || {
-            let current = env!("CARGO_PKG_VERSION");
-            if let Some((tag, url)) = forge_core::updates::latest(env!("CARGO_PKG_REPOSITORY"))
-                && forge_core::updates::is_newer(&tag, current)
-            {
-                *slot.lock().unwrap() = Some((tag, url));
-                ctx.request_repaint();
-            }
-        });
-    }
-
     pub(super) fn status_bar(&self, ui: &egui::Ui, rect: Rect) {
         ui.painter().rect_filled(rect, 0.0, theme::TOOLBAR);
         ui.painter().hline(
@@ -418,32 +400,6 @@ impl App {
             FontId::proportional(11.0),
             theme::TEXT_4,
         );
-        // Versión nueva disponible: a la derecha, clic para descargarla.
-        if let Some((tag, url)) = self.update.lock().ok().and_then(|u| u.clone()) {
-            let text = tr!(
-                "{p0}  Forge {tag} disponible",
-                p0 = icon::ARROW_CIRCLE_UP,
-                tag = tag
-            );
-            let galley =
-                ui.painter()
-                    .layout_no_wrap(text, FontId::proportional(11.5), theme::ACCENT);
-            let at = Rect::from_min_size(
-                egui::pos2(
-                    rect.max.x - 12.0 - galley.size().x,
-                    rect.center().y - galley.size().y / 2.0,
-                ),
-                galley.size(),
-            );
-            ui.painter().galley(at.min, galley, theme::ACCENT);
-            let response = ui
-                .interact(at, egui::Id::new("update"), Sense::click())
-                .on_hover_text(tr!("Descargar la versión nueva"));
-            if response.clicked() {
-                let _ = std::process::Command::new("open").arg(&url).spawn();
-            }
-            return;
-        }
         if let Some(i) = self.active
             && let Some((spent, budget)) =
                 self.workspaces[i].guard.ai_spend.filter(|(s, _)| *s > 0.0)

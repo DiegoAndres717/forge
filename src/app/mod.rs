@@ -34,6 +34,7 @@ mod notify;
 mod palette;
 mod settings;
 mod sidebar;
+mod update;
 mod welcome;
 
 use guard_panel::*;
@@ -145,6 +146,8 @@ enum UiCmd {
     /// Acción de paneles desde la barra de herramientas (como los atajos).
     Ws(WsAction),
     Home,
+    /// Pastilla de actualización: descargar o reiniciar con la versión nueva.
+    Update,
     Activate(usize),
     Close(usize),
     /// Abre en el editor un archivo de `.forge/` del proyecto activo.
@@ -272,7 +275,7 @@ pub struct App {
     /// Última lectura de la carpeta de eventos de los agentes.
     events_checked: Option<Instant>,
     /// Versión nueva publicada: (etiqueta, página para descargarla).
-    update: Arc<Mutex<Option<(String, String)>>>,
+    update: Arc<Mutex<Option<update::Update>>>,
     /// Paso de la bienvenida que se muestra (la primera vez, o desde ⌘K).
     welcome: Option<usize>,
 }
@@ -568,6 +571,7 @@ impl App {
     fn apply(&mut self, ctx: &egui::Context, cmd: UiCmd, area: Rect) {
         match cmd {
             UiCmd::Home => self.active = None,
+            UiCmd::Update => self.run_update(ctx),
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::OpenSettings => self.settings_open = true,
