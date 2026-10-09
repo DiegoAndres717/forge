@@ -1,0 +1,14 @@
+# Avisos y PRs semanales con versiones nuevas de dependencias y de acciones de GitHub.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
