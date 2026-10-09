@@ -701,16 +701,22 @@ impl Terminal {
 
         for event in events {
             match event {
-                // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra.
+                // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra. Enter
+                // acepta solo si se eligió con ↑↓; si no, ejecuta lo escrito (p. ej. `cd x/`).
                 egui::Event::Key {
-                    key: key @ (Key::Tab | Key::ArrowUp | Key::ArrowDown | Key::Escape),
+                    key: key @ (Key::Tab | Key::Enter | Key::ArrowUp | Key::ArrowDown | Key::Escape),
                     pressed: true,
                     modifiers,
                     ..
-                } if modifiers.is_none() && self.suggest.is_some() => {
+                } if modifiers.is_none()
+                    && self
+                        .suggest
+                        .as_ref()
+                        .is_some_and(|s| key != Key::Enter || s.navigated) =>
+                {
                     let suggest = self.suggest.as_mut().unwrap();
                     match key {
-                        Key::Tab => {
+                        Key::Tab | Key::Enter => {
                             let bytes = suggest.accept();
                             self.suggest = None;
                             self.send(&bytes);
@@ -800,7 +806,7 @@ impl Terminal {
             })
             .collect();
         let hint = ui.painter().layout_no_wrap(
-            forge_core::tr!("Tab completar   ↑↓ elegir   Esc cerrar").to_string(),
+            forge_core::tr!("Tab completar   ↑↓ y Enter elegir   Esc cerrar").to_string(),
             egui::FontId::proportional(11.0),
             theme::TEXT_3,
         );

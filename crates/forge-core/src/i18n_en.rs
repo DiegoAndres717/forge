@@ -1204,8 +1204,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Copiar", "Copy"),
     ("Copiado", "Copied"),
     (
-        "Tab completar   ↑↓ elegir   Esc cerrar",
-        "Tab complete   ↑↓ choose   Esc close",
+        "Tab completar   ↑↓ y Enter elegir   Esc cerrar",
+        "Tab complete   ↑↓ and Enter choose   Esc close",
     ),
     (
         "{name} necesita permiso para usar {tool}",

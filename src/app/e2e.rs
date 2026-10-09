@@ -1000,3 +1000,39 @@ fn a_split_can_be_rotated_from_the_panel_header() {
     h.run_steps(3);
     assert_eq!(ws(h.state()).focused_split(), Some(Dir::Row));
 }
+
+/// Elegir con ↑↓ y pulsar Enter acepta la sugerencia elegida (no ejecuta lo escrito).
+#[test]
+fn enter_accepts_the_suggestion_chosen_with_the_arrows() {
+    let _serial = serial();
+    let dir = project("suggest-enter");
+    std::fs::create_dir_all(dir.join("Programar")).unwrap();
+    std::fs::create_dir_all(dir.join("proyectos")).unwrap();
+    let mut h = app(dir.clone());
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let osc = format!("printf '\\e]7777;cd pro\\x1f{}\\a'", dir.display());
+    h.event(egui::Event::Text(osc));
+    h.key_press(Key::Enter);
+    for _ in 0..40 {
+        h.run_steps(2);
+        if h.query_by_label("proyectos/").is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.get_by_label("Programar/");
+    h.key_press(Key::ArrowDown);
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    // "pro" ya está escrito: solo se envía lo que falta (aquí la línea real no tiene "cd
+    // pro" porque el aviso lo simula printf).
+    wait_until(&mut h, "Enter escribe la elegida", |a| {
+        ws(a).shell_text().contains("yectos/")
+    });
+    assert!(
+        h.query_by_label("proyectos/").is_none(),
+        "la lista se cierra"
+    );
+}

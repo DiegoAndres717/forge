@@ -73,6 +73,8 @@ pub struct Entry {
 pub struct Suggest {
     pub items: Vec<Entry>,
     pub selected: usize,
+    /// Se eligió con ↑↓: entonces Enter acepta la elegida (si no, Enter ejecuta lo escrito).
+    pub navigated: bool,
     /// Lo escrito tras la última `/` de la palabra, tal cual (con escapes): lo que se borra
     /// si la sugerencia no empieza exactamente igual.
     typed: String,
@@ -103,6 +105,7 @@ impl Suggest {
     pub fn move_by(&mut self, delta: isize) {
         let n = self.items.len() as isize;
         self.selected = (self.selected as isize + delta).rem_euclid(n) as usize;
+        self.navigated = true;
     }
 }
 
@@ -172,6 +175,7 @@ pub fn suggest(line: &ShellLine, home: &Path) -> Option<Suggest> {
     Some(Suggest {
         items,
         selected: 0,
+        navigated: false,
         typed: typed.to_string(),
     })
 }
@@ -272,6 +276,10 @@ mod tests {
         );
         s2.move_by(1);
         assert_eq!(s2.selected, 0, "da la vuelta");
+        assert!(
+            s2.navigated && !s.navigated,
+            "elegir con flechas se recuerda"
+        );
 
         // `cd ` sin escribir nada: todas las carpetas visibles (no las ocultas).
         let all = suggest(&line("cd ", &dir), home).unwrap();
