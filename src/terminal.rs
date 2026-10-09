@@ -359,6 +359,9 @@ impl Terminal {
         m: &Metrics,
     ) -> egui::Response {
         let ctx = ui.ctx().clone();
+        // Si un campo de texto tiene el foco (nota, idea, mensaje de commit…), el teclado es
+        // suyo: lo que se escribe ahí no debe llegar también al programa de la terminal.
+        let focused = focused && ctx.memory(|mem| mem.focused()).is_none();
 
         while let Ok(event) = self.events.try_recv() {
             match event {

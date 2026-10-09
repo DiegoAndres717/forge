@@ -692,3 +692,39 @@ fn update_pill_shows_in_the_toolbar_and_follows_the_download() {
         Some(super::update::Update::Ready(staged))
     );
 }
+
+/// Lo que se escribe en un campo de un panel (nota, idea, commit…) no llega a la terminal;
+/// al salir del campo, o tras pulsar un botón, la terminal vuelve a recibir el teclado.
+#[test]
+fn typing_in_a_panel_field_does_not_reach_the_terminal() {
+    let _serial = serial();
+    let mut h = app(project("focus"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.key_press_modifiers(CMD_SHIFT, Key::M);
+    h.run_steps(3);
+    h.get_by_label_contains("Nueva nota").click();
+    h.run_steps(3);
+    // Como una persona: primero el clic en el campo, después escribe.
+    h.get_by(|n| n.placeholder() == Some("Título")).focus();
+    h.run_steps(3);
+    h.get_by(|n| n.placeholder() == Some("Título"))
+        .type_text("zzsolonota");
+    h.run_steps(3);
+    std::thread::sleep(Duration::from_millis(500));
+    h.run_steps(3);
+    assert!(
+        !ws(h.state()).shell_text().contains("zzsolonota"),
+        "el texto de la nota llegó a la terminal"
+    );
+    // Un clic fuera del campo (aquí un botón) lo suelta, y el botón no se queda el teclado.
+    h.get_by_label_contains("Memoria del proyecto").click();
+    h.run_steps(3);
+    h.event(egui::Event::Text("echo zzterm$((40+2))".into()));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "la terminal recibe el teclado", |a| {
+        ws(a).shell_text().contains("zzterm42")
+    });
+    assert!(!ws(h.state()).shell_text().contains("zzsolonota"));
+}

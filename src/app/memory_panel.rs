@@ -87,7 +87,7 @@ impl App {
 
         ui.horizontal(|ui| {
             let search = ui.add(
-                egui::TextEdit::singleline(&mut ws.memory.query)
+                theme::field(egui::TextEdit::singleline(&mut ws.memory.query))
                     .hint_text(tr!(
                         "{p0}  Buscar (sin tildes también)",
                         p0 = icon::MAGNIFYING_GLASS
@@ -103,6 +103,8 @@ impl App {
                 .as_deref()
                 .map_or(tr!("Todos"), kind_label)
                 .to_string();
+            // Misma altura que el buscador de al lado.
+            ui.spacing_mut().interact_size.y = 34.0;
             egui::ComboBox::from_id_salt("memory-kind")
                 .selected_text(selected)
                 .show_ui(ui, |ui| {
@@ -154,12 +156,12 @@ impl App {
                             }
                         });
                     ui.add(
-                        egui::TextEdit::singleline(&mut form.title)
+                        theme::field(egui::TextEdit::singleline(&mut form.title))
                             .hint_text(tr!("Título"))
                             .desired_width(f32::INFINITY),
                     );
                     ui.add(
-                        egui::TextEdit::multiline(&mut form.body)
+                        theme::field(egui::TextEdit::multiline(&mut form.body))
                             .hint_text(tr!(
                                 "Qué y por qué (p. ej. causa del error y cómo se resolvió)"
                             ))
@@ -167,7 +169,7 @@ impl App {
                             .desired_width(f32::INFINITY),
                     );
                     ui.add(
-                        egui::TextEdit::singleline(&mut form.tags)
+                        theme::field(egui::TextEdit::singleline(&mut form.tags))
                             .hint_text(tr!("Etiquetas, separadas por comas"))
                             .desired_width(f32::INFINITY),
                     );

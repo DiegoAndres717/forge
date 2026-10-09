@@ -492,12 +492,12 @@ impl App {
                     .strong(),
                 );
                 ui.add(
-                    egui::TextEdit::singleline(&mut pr.title)
+                    theme::field(egui::TextEdit::singleline(&mut pr.title))
                         .hint_text(tr!("Título del PR"))
                         .desired_width(f32::INFINITY),
                 );
                 ui.add(
-                    egui::TextEdit::multiline(&mut pr.body)
+                    theme::field(egui::TextEdit::multiline(&mut pr.body))
                         .hint_text(tr!("Descripción"))
                         .desired_rows(10)
                         .desired_width(f32::INFINITY),
@@ -566,7 +566,7 @@ impl App {
                     .color(theme::TEXT_3),
                 );
                 ui.add(
-                    egui::TextEdit::multiline(&mut form.reason)
+                    theme::field(egui::TextEdit::multiline(&mut form.reason))
                         .hint_text(tr!(
                             "Motivo (obligatorio), p. ej. «archivos generados por Drizzle»"
                         ))
