@@ -54,6 +54,46 @@ impl Node {
         }
     }
 
+    /// Orientación de la división que contiene directamente a `target` (None: está solo).
+    pub fn parent_dir(&self, target: PanelId) -> Option<Dir> {
+        match self {
+            Node::Leaf(_) => None,
+            Node::Split {
+                dir, first, second, ..
+            } => {
+                let is = |n: &Node| matches!(n, Node::Leaf(id) if *id == target);
+                if is(first) || is(second) {
+                    Some(*dir)
+                } else {
+                    first
+                        .parent_dir(target)
+                        .or_else(|| second.parent_dir(target))
+                }
+            }
+        }
+    }
+
+    /// Gira la división que contiene a `target`: lado a lado ↔ uno encima del otro.
+    pub fn rotate(&mut self, target: PanelId) -> bool {
+        match self {
+            Node::Leaf(_) => false,
+            Node::Split {
+                dir, first, second, ..
+            } => {
+                let is = |n: &Node| matches!(n, Node::Leaf(id) if *id == target);
+                if is(first) || is(second) {
+                    *dir = match dir {
+                        Dir::Row => Dir::Column,
+                        Dir::Column => Dir::Row,
+                    };
+                    true
+                } else {
+                    first.rotate(target) || second.rotate(target)
+                }
+            }
+        }
+    }
+
     /// Quita un panel; su hermano ocupa el espacio. La raíz-hoja no se quita.
     pub fn remove(&mut self, target: PanelId) -> bool {
         let is = |n: &Node| matches!(n, Node::Leaf(id) if *id == target);
@@ -242,5 +282,24 @@ mod tests {
         assert!(root.remove(1));
         assert_eq!(root, Node::Leaf(3));
         assert!(!root.remove(3));
+    }
+
+    #[test]
+    fn rotating_flips_only_the_panels_own_split() {
+        // (1 | (2 / 3)): girar el 3 gira la división 2/3; girar el 1, la de fuera.
+        let mut layout = Node::Leaf(1);
+        layout.split(1, Dir::Row, 2);
+        layout.split(2, Dir::Column, 3);
+        assert_eq!(layout.parent_dir(3), Some(Dir::Column));
+        assert!(layout.rotate(3));
+        assert_eq!(layout.parent_dir(3), Some(Dir::Row));
+        assert_eq!(
+            layout.parent_dir(1),
+            Some(Dir::Row),
+            "la de fuera no cambia"
+        );
+        assert!(layout.rotate(1));
+        assert_eq!(layout.parent_dir(1), Some(Dir::Column));
+        assert!(!Node::Leaf(9).rotate(9), "un panel solo no tiene división");
     }
 }

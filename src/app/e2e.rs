@@ -969,3 +969,34 @@ fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
     });
     assert_eq!(ws(h.state()).panel_count(), 2, "no abre otro panel");
 }
+
+/// Una división se gira desde la cabecera del panel: lado a lado ↔ uno encima del otro.
+#[test]
+fn a_split_can_be_rotated_from_the_panel_header() {
+    use crate::layout::Dir;
+    let _serial = serial();
+    let mut h = app(project("rotate"));
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, Key::D);
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).focused_split(),
+        Some(Dir::Row),
+        "⌘D: lado a lado"
+    );
+    // Cada panel tiene el botón; el del enfocado (el nuevo) basta.
+    let rotate = h.get_all_by_label("Poner uno encima del otro").count();
+    assert_eq!(rotate, 2, "un botón por panel de la división");
+    h.get_all_by_label("Poner uno encima del otro")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused_split(), Some(Dir::Column));
+    h.get_all_by_label("Poner lado a lado")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused_split(), Some(Dir::Row));
+}
