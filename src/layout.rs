@@ -54,6 +54,20 @@ impl Node {
         }
     }
 
+    /// Pone `new` en el hueco de `old` (cambiar la terminal visible de un grupo).
+    pub fn replace(&mut self, old: PanelId, new: PanelId) -> bool {
+        match self {
+            Node::Leaf(id) if *id == old => {
+                *id = new;
+                true
+            }
+            Node::Leaf(_) => false,
+            Node::Split { first, second, .. } => {
+                first.replace(old, new) || second.replace(old, new)
+            }
+        }
+    }
+
     /// Orientación de la división que contiene directamente a `target` (None: está solo).
     pub fn parent_dir(&self, target: PanelId) -> Option<Dir> {
         match self {

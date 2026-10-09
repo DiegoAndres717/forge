@@ -22,6 +22,9 @@ pub struct WorkspaceState {
     /// Procesos administrados en marcha al guardar (se reinician al abrir).
     #[serde(default)]
     pub running: Vec<String>,
+    /// Grupos de terminales que comparten un hueco (la visible es la que está en `layout`).
+    #[serde(default)]
+    pub tabs: Vec<Vec<PanelId>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -265,6 +268,9 @@ pub struct Workspace {
     layout: Node,
     focus: PanelId,
     maximized: Option<PanelId>,
+    /// Terminales apiladas en un mismo hueco, como las de VS Code: grupos de dos o más; la
+    /// visible es la que está en `layout`, las demás siguen vivas por detrás.
+    tabs: Vec<Vec<PanelId>>,
     next_id: PanelId,
     renaming: Option<(PanelId, String)>,
     branch: (Option<String>, Option<Instant>),
@@ -325,6 +331,7 @@ impl Workspace {
             maximized: None,
             next_id: 0,
             renaming: None,
+            tabs: Vec::new(),
             branch: (None, None),
             error: None,
             dormant: None,
@@ -765,43 +772,80 @@ impl Workspace {
         }
     }
 
+    /// Abre un panel guardado (agentes: reanudan su sesión si pueden) con lo que mostraba
+    /// su terminal. `false` si ya no se puede abrir (p. ej. un proceso que no existe).
+    fn restore_panel(&mut self, ctx: &egui::Context, id: PanelId, mut panel: PanelState) -> bool {
+        let spec = panel
+            .agent
+            .as_ref()
+            .and_then(|a| self.project.agents.iter().find(|s| &s.id == a));
+        if let Some(spec) = spec {
+            panel.command = Some(spec.resume.clone().unwrap_or_else(|| spec.command.clone()));
+        }
+        if !self.project.config.workspace.restore_processes {
+            panel.command = None;
+        }
+        if !self.spawn_panel(ctx, id, panel) {
+            return false;
+        }
+        // Lo que mostraba la terminal antes de cerrar Forge.
+        let saved = self
+            .history_file(id)
+            .and_then(|f| std::fs::read_to_string(f).ok());
+        if let (
+            Some(text),
+            Some(Panel {
+                content: Content::Shell(t),
+                ..
+            }),
+        ) = (saved.filter(|t| !t.is_empty()), self.panels.get_mut(&id))
+        {
+            t.prefill(&text, tr!("sesión anterior"));
+        }
+        true
+    }
+
     fn restore(&mut self, ctx: &egui::Context, mut state: WorkspaceState) {
-        let run_commands = self.project.config.workspace.restore_processes;
         self.layout = state.layout;
         for id in self.layout.ids() {
-            let mut panel = state
+            let panel = state
                 .panels
                 .remove(&id)
                 .unwrap_or_else(|| self.root_panel());
-            // Agentes: se reanuda su última sesión si lo permiten; si no, se abren de nuevo.
-            let spec = panel
-                .agent
-                .as_ref()
-                .and_then(|a| self.project.agents.iter().find(|s| &s.id == a));
-            if let Some(spec) = spec {
-                panel.command = Some(spec.resume.clone().unwrap_or_else(|| spec.command.clone()));
-            }
-            if !run_commands {
-                panel.command = None;
-            }
-            if !self.spawn_panel(ctx, id, panel) {
+            if !self.restore_panel(ctx, id, panel) {
                 self.layout.remove(id);
-                continue;
             }
-            // Lo que mostraba la terminal antes de cerrar Forge.
-            let saved = self
-                .history_file(id)
-                .and_then(|f| std::fs::read_to_string(f).ok());
-            if let (
-                Some(text),
-                Some(Panel {
-                    content: Content::Shell(t),
-                    ..
-                }),
-            ) = (saved.filter(|t| !t.is_empty()), self.panels.get_mut(&id))
-            {
-                t.prefill(&text, tr!("sesión anterior"));
+        }
+        // Terminales apiladas que no estaban a la vista.
+        let visible = self.layout.ids();
+        for group in &state.tabs {
+            for id in group.iter().filter(|id| !visible.contains(id)) {
+                if let Some(panel) = state.panels.remove(id) {
+                    self.restore_panel(ctx, *id, panel);
+                }
             }
+        }
+        // Grupos válidos: paneles que existen, dos o más, y uno a la vista.
+        self.tabs = state
+            .tabs
+            .into_iter()
+            .map(|g| {
+                g.into_iter()
+                    .filter(|id| self.panels.contains_key(id))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|g| g.len() >= 2 && g.iter().filter(|id| visible.contains(id)).count() == 1)
+            .collect();
+        // Huérfanas (de un grupo que ya no es válido): se cierran.
+        let grouped: Vec<PanelId> = self.tabs.iter().flatten().copied().collect();
+        let orphans: Vec<PanelId> = self
+            .panels
+            .keys()
+            .copied()
+            .filter(|id| !visible.contains(id) && !grouped.contains(id))
+            .collect();
+        for id in orphans {
+            self.panels.remove(&id);
         }
         self.focus = if self.panels.contains_key(&state.focus) {
             state.focus
@@ -899,7 +943,71 @@ impl Workspace {
             panels,
             focus: self.focus,
             running: self.processes.active_ids(),
+            tabs: self.tabs.clone(),
         }
+    }
+
+    /// Terminales del hueco donde está `visible`, en orden (ella sola si no hay grupo).
+    // ponytail: la interfaz (botón +, lista lateral) llega en la fase 2.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn panel_tabs(&self, visible: PanelId) -> Vec<PanelId> {
+        self.tabs
+            .iter()
+            .find(|g| g.contains(&visible))
+            .cloned()
+            .unwrap_or_else(|| vec![visible])
+    }
+
+    /// Nueva terminal en el mismo hueco que la enfocada (pasa a ser la visible), en el
+    /// directorio actual de su shell.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn new_tab(&mut self, ctx: &egui::Context) {
+        let cwd = match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) => t.cwd(),
+            _ => None,
+        };
+        let state = PanelState {
+            name: None,
+            cwd: cwd.unwrap_or_else(|| self.project.root()),
+            command: None,
+            process: None,
+            agent: None,
+        };
+        let (current, id) = (self.focus, self.next_id);
+        if self.panels.is_empty() || !self.spawn_panel(ctx, id, state) {
+            return;
+        }
+        match self.tabs.iter_mut().find(|g| g.contains(&current)) {
+            Some(group) => {
+                let at = group
+                    .iter()
+                    .position(|p| *p == current)
+                    .map_or(group.len(), |i| i + 1);
+                group.insert(at, id);
+            }
+            None => self.tabs.push(vec![current, id]),
+        }
+        self.show_tab(id);
+    }
+
+    /// Pone a la vista la terminal `id` de su grupo (y le da el foco).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn show_tab(&mut self, id: PanelId) {
+        let Some(visible) = self
+            .tabs
+            .iter()
+            .find(|g| g.contains(&id))
+            .and_then(|g| g.iter().copied().find(|p| self.layout.ids().contains(p)))
+        else {
+            return;
+        };
+        if visible != id {
+            self.layout.replace(visible, id);
+            if self.maximized == Some(visible) {
+                self.maximized = Some(id);
+            }
+        }
+        self.focus = id;
     }
 
     /// Procesos raíz del proyecto (shells de los paneles y procesos administrados).
@@ -1105,7 +1213,29 @@ impl Workspace {
         if let Some(file) = self.history_file(id) {
             let _ = std::fs::remove_file(file);
         }
-        self.layout.remove(id);
+        // En un grupo: si estaba a la vista, ocupa su hueco la siguiente del grupo.
+        let mut replaced = false;
+        if let Some(g) = self.tabs.iter().position(|g| g.contains(&id)) {
+            let group = &mut self.tabs[g];
+            let at = group.iter().position(|p| *p == id).unwrap_or(0);
+            group.remove(at);
+            let next = group[at.min(group.len() - 1)];
+            if self.layout.replace(id, next) {
+                replaced = true;
+                if self.focus == id {
+                    self.focus = next;
+                }
+                if self.maximized == Some(id) {
+                    self.maximized = Some(next);
+                }
+            }
+            if self.tabs[g].len() < 2 {
+                self.tabs.remove(g);
+            }
+        }
+        if !replaced {
+            self.layout.remove(id);
+        }
         self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
         if self.maximized == Some(id) {
             self.maximized = None;
@@ -1676,6 +1806,48 @@ mod tests {
         );
         ws.close(id);
         assert!(!file.exists(), "cerrar el panel borra su historial");
+    }
+
+    #[test]
+    fn stacked_terminals_switch_close_and_survive_restart() {
+        let dir = std::env::temp_dir().join(format!("forge-tabs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".forge")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let ctx = egui::Context::default();
+        let store = Store::in_memory().unwrap();
+        let mut ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), None);
+        let first = ws.focus;
+
+        // Dos terminales más en el mismo hueco: el layout sigue con una sola hoja.
+        ws.new_tab(&ctx);
+        let second = ws.focus;
+        ws.new_tab(&ctx);
+        let third = ws.focus;
+        assert_eq!(ws.panel_count(), 3);
+        assert_eq!(ws.layout.ids(), vec![third], "se ve la última creada");
+        assert_eq!(ws.panel_tabs(third), vec![first, second, third]);
+
+        // Cambiar a la primera; cerrar la visible: ocupa su hueco la siguiente.
+        ws.show_tab(first);
+        assert_eq!((ws.layout.ids(), ws.focus), (vec![first], first));
+        ws.close(first);
+        assert_eq!(ws.layout.ids(), vec![second]);
+        assert_eq!(ws.panel_tabs(second), vec![second, third]);
+
+        // Guardar, cerrar y reabrir: vuelven las dos, con la misma a la vista.
+        ws.new_tab(&ctx);
+        let before = ws.state();
+        assert_eq!(before.tabs.len(), 1);
+        store.touch(&dir, "test").unwrap();
+        store.save_workspace(&dir, &before, 0).unwrap();
+        drop(ws);
+        let saved = store.workspace(&dir).unwrap();
+        let ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), saved);
+        let after = ws.state();
+        assert_eq!(after.layout, before.layout);
+        assert_eq!(after.tabs, before.tabs);
+        assert_eq!(ws.panel_count(), 3, "también las ocultas");
     }
 
     #[test]
