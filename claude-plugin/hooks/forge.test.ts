@@ -1,4 +1,4 @@
-import type { AgentSpawnInput, CommandRunInput, RenderPropsOf, TurnCompleteInput, TurnUsage } from 'claude-code'
+import type { AgentSpawnInput, CommandRunInput, RenderPropsOf, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 
 // The engine fills in the fields a test leaves out (ids, origin, parent model…).
@@ -59,8 +59,9 @@ test('the band shows new and cached tokens by model', async ($, on) => {
     props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
   })
   const text = JSON.stringify(await drawn.drawn())
-  // New tokens by model, most first; cache reads shown apart.
-  expect(text.indexOf('haiku')).toBeLessThan(text.indexOf('opus'))
+  // New tokens by model in a fixed order (nothing jumps while it updates); cache reads apart.
+  expect(text.indexOf('opus')).toBeLessThan(text.indexOf('haiku'))
+  expect(text).toContain(' · sonnet 0') // an unused model stays listed, dim
   expect(text).toContain('120k')
   expect(text).toContain('45k')
   expect(text).toContain('(+2.7M cache)')
@@ -93,4 +94,42 @@ test('the band shows the plan usage windows as bars', async ($, on) => {
   expect(text).toContain('"error"') // red past 80%
   // 3% still fills one cell, so any use shows.
   expect(text).toContain('"━"')
+})
+
+test('the band shows which model is working right now and on what', async ($, on) => {
+  // The engine's side: the spawn starts subagent a1, the request and the turn finish.
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: "", toolUses: [] } as never
+  })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  const mount = async () =>
+    JSON.stringify(
+      await (
+        await $.ui.mount({
+          plugin: 'forge',
+          surface: 'terminal',
+          component: 'AbovePrompt',
+          props: { hasSurvey: false, isWorking: true } as AbovePromptProps,
+        })
+      ).drawn(),
+    )
+  await $.agent.spawn(spawn({ subagentType: 'forge:explorer', prompt: 'x', description: 'find the login' }))
+  const step = (fields: Partial<TurnStepInput>) =>
+    ({ turnId: 't', index: 0, messageCount: 1, ...fields }) as TurnStepInput
+  // A streaming event runs as it is read.
+  for (const fields of [{ model: 'claude-opus-5-5' }, { model: 'claude-haiku-5-5', agentId: 'a1' }]) {
+    for await (const _chunk of $.turn.step(step(fields))) {
+      // no chunks from the stub
+    }
+  }
+  const working = await mount()
+  expect(working).toContain('● ')
+  expect(working).toContain('explorer: find the login')
+  expect(working).toContain(' (haiku)')
+  // The subagent finishes: its task leaves the band.
+  await $.turn.complete(turn({ answer: 'src/login.ts', agentId: 'a1', usage: usage('claude-haiku-5-5', 9_000, 0) }))
+  const after = await mount()
+  expect(after).not.toContain('explorer: find the login')
+  expect(after).toContain('9k')
 })

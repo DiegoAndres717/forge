@@ -13,11 +13,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Band, Limit, ModelTokens } from '../types'
+import type { Active, Band, Limit, ModelTokens } from '../types'
 
 const band = atom({ plugin: 'forge', key: 'band' } as const, null as Band | null)
 const tokens = atom({ plugin: 'forge', key: 'tokens' } as const, {} as ModelTokens)
 const limits = atom({ plugin: 'forge', key: 'limits' } as const, [] as Limit[])
+const active = atom({ plugin: 'forge', key: 'active' } as const, {} as Active)
+const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<string, string>)
+
+/** Models always listed in the band, in this order (others are added when used). */
+const MODELS = ['opus', 'sonnet', 'haiku']
 
 /** The plan windows shown in the band, in order, with their short labels. */
 const WINDOWS: [string, string][] = [['five_hour', '5h'], ['seven_day', 'week']]
@@ -156,14 +161,42 @@ export const register: Register = on => {
     return { sections: [...result.sections, { id: 'forge-team', text: DELEGATION, scope: 'session' as const }] }
   })
 
-  // The built-in explorer runs on Haiku too unless the model asked for another.
+  // The built-in explorer runs on Haiku too unless the model asked for another; the
+  // task is remembered so the band can say what each running subagent is doing.
   // If this hook fails, the subagent is spawned unchanged.
-  on('agent.spawn', ($, e, next) =>
-    next(e.subagentType === 'Explore' && !e.model ? { ...e, model: 'haiku' } : e),
-  ).catch(($, e, next) => next(e))
+  on('agent.spawn', async ($, e, next) => {
+    const result = await next(e.subagentType === 'Explore' && !e.model ? { ...e, model: 'haiku' } : e)
+    const id = result.agentId
+    if (id) {
+      const name = e.subagentType.replace(/^forge:/, '').toLowerCase()
+      // Only cosmetic: a failure here must not spawn the subagent a second time.
+      await update($, tasks, all => ({ ...all, [id]: e.description ? `${name}: ${e.description}` : name })).catch(
+        () => undefined,
+      )
+    }
+    return result
+  }).catch(($, e, next) => next(e))
+
+  // Who is working right now, for the band: from a loop's first model request (main or
+  // a subagent) until its turn completes. The request itself passes through untouched.
+  on('turn.step', async function* ($, e, next) {
+    const key = e.agentId ?? 'main'
+    const model = alias(e.model)
+    try {
+      const names = await read($, tasks)
+      await update($, active, all =>
+        all[key]?.model === model ? all : { ...all, [key]: { model, task: key === 'main' ? '' : names[key] ?? 'subagent' } },
+      )
+    } catch {
+      // Only the band depends on this: never hold up the request.
+    }
+    return yield* next(e)
+  })
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    const key = e.agentId ?? 'main'
+    await update($, active, ({ [key]: _done, ...rest }) => rest)
     if (e.usage) {
       // Cache reads cost a fraction of new tokens: counted apart so the band is honest.
       const fresh = e.usage.input_tokens + e.usage.output_tokens + e.usage.cache_creation_input_tokens
@@ -193,7 +226,13 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const status = await read($, band)
-    const used = Object.entries(await read($, tokens)).sort((a, b) => b[1].fresh - a[1].fresh)
+    const spent = await read($, tokens)
+    const working = Object.entries(await read($, active))
+    // Fixed order so nothing jumps around while it updates; unused models stay dim.
+    const models = [...MODELS, ...Object.keys(spent).filter(m => !MODELS.includes(m))]
+    const used = Object.entries(spent)
+    const busy = (model: string) => working.some(([, w]) => w.model === model)
+    const subagents = working.filter(([key]) => key !== 'main')
     const now = Date.now()
     const windows = await read($, limits)
     const plan = WINDOWS.flatMap(([kind, label]) => {
@@ -202,7 +241,8 @@ export const register: Register = on => {
       const percent = Math.max(0, Math.min(100, Math.round(w.percentUsed)))
       return [{ label, percent, reset: resetsIn(w.resetsAt, now) }]
     })
-    if (e.props.hasSurvey || (status === null && used.length === 0 && plan.length === 0)) return next(e)
+    if (e.props.hasSurvey || (status === null && used.length === 0 && working.length === 0 && plan.length === 0))
+      return next(e)
     const { Text } = $.ui.resolve(e)
     // One line of text with colored spans: it reads left to right and, when narrow,
     // wraps like any sentence instead of stacking words in columns.
@@ -219,12 +259,29 @@ export const register: Register = on => {
             {status.ideas === 1 ? '1 idea' : `${status.ideas} ideas`} pending
           </Text>
         ) : null}
-        {used.map(([model, n]) => (
-          <Text key={model}>
+        {models.map(model => {
+          const n = spent[model] ?? { fresh: 0, cache: 0 }
+          const atWork = busy(model)
+          if (!atWork && n.fresh === 0) {
+            return <Text key={model} dimColor>{` · ${model} 0`}</Text>
+          }
+          // The model at work right now: a filled dot and its name in bold.
+          return (
+            <Text key={model}>
+              <Text dimColor> · </Text>
+              {atWork ? <Text color={MODEL_COLOR[model] ?? 'text'}>● </Text> : null}
+              <Text color={MODEL_COLOR[model] ?? 'text'} bold={atWork}>{model}</Text>
+              {` ${short(n.fresh)}`}
+              {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
+            </Text>
+          )
+        })}
+        {subagents.map(([key, w]) => (
+          <Text key={key}>
             <Text dimColor> · </Text>
-            <Text color={MODEL_COLOR[model] ?? 'text'}>{model}</Text>
-            {` ${short(n.fresh)}`}
-            {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
+            <Text color={MODEL_COLOR[w.model] ?? 'text'}>{'↳ '}</Text>
+            <Text>{w.task.length > 48 ? `${w.task.slice(0, 47)}…` : w.task}</Text>
+            <Text dimColor>{` (${w.model})`}</Text>
           </Text>
         ))}
         {plan.map(({ label, percent, reset }) => (
