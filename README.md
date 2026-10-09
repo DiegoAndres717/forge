@@ -8,7 +8,7 @@
 Terminals, processes, agents, project memory and a Guard that checks every change before it leaves your machine — one window per project.
 
 [![CI](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/DiegoAndres717/forge?label=release)](https://github.com/DiegoAndres717/forge/releases/latest)
+[![Release](https://img.shields.io/github/v/release/DiegoAndres717/forge?label=release&cacheSeconds=300)](https://github.com/DiegoAndres717/forge/releases/latest)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
 ![Apple Silicon + Intel](https://img.shields.io/badge/Apple%20Silicon%20%2B%20Intel-universal-black)
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)
