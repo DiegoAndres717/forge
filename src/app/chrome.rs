@@ -15,12 +15,19 @@ impl App {
             Vec2::new(width, rect.height() - 64.0),
         );
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(inner));
-        ui.label(
-            RichText::new("Forge")
-                .size(30.0)
-                .color(theme::TEXT)
-                .strong(),
-        );
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Forge")
+                    .size(30.0)
+                    .color(theme::TEXT)
+                    .strong(),
+            );
+            ui.label(
+                RichText::new(format!("v{}", env!("CARGO_PKG_VERSION")))
+                    .size(13.0)
+                    .color(theme::TEXT_3),
+            );
+        });
         ui.label(
             RichText::new(tr!(
                 "Proyectos con sus terminales, agentes, procesos y Project Guard."
