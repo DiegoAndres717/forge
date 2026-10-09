@@ -12,6 +12,7 @@ Terminales, procesos, agentes, memoria del proyecto y un Guard que revisa cada c
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black)
 ![Rust](https://img.shields.io/badge/hecho%20con-Rust-orange?logo=rust)
+[![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue)](LICENSE)
 
 [Descargar](#instalar) · [Funciones](#funciones) · [Mod de Claude Code](#mod-de-claude-code) · [Atajos](#atajos-de-teclado) · [Preguntas](#preguntas-frecuentes) · [English](README.md)
 
@@ -178,3 +179,7 @@ No. Terminales, procesos, Guard, Git e ideas funcionan sin agentes. Forge detect
 
 **¿Cómo reporto un error?**
 Abre un [issue](https://github.com/DiegoAndres717/forge/issues) con lo que hiciste, lo que esperabas y, si puedes, una captura.
+
+## Licencia
+
+[MIT](LICENSE) © Diego Andres Salas

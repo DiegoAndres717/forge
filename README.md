@@ -12,6 +12,7 @@ Terminals, processes, agents, project memory and a Guard that checks every chang
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)
 ![Apple Silicon](https://img.shields.io/badge/Apple%20Silicon-arm64-black)
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [Download](#install) · [Features](#features) · [Claude Code mod](#claude-code-mod) · [Shortcuts](#keyboard-shortcuts) · [FAQ](#faq) · [Español](README.es.md)
 
@@ -213,3 +214,7 @@ tests/               Integration against the real binary: Git hooks and MCP serv
 ```
 
 UI end-to-end tests drive the real app with `egui_kittest` (no GPU needed), finding controls by their accessible names.
+
+## License
+
+[MIT](LICENSE) © Diego Andres Salas
