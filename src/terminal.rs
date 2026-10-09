@@ -1211,9 +1211,10 @@ const PALETTE: [(u8, u8, u8); 16] = [
     (0x40, 0x9c, 0xff), // azul brillante
     (0xda, 0x8f, 0xff), // magenta brillante
     (0x8e, 0xdc, 0xff), // cian brillante
-    (0xf2, 0xf2, 0xf7), // blanco brillante
+    (0xff, 0xff, 0xff), // blanco brillante
 ];
-const FOREGROUND: (u8, u8, u8) = (0xe5, 0xe5, 0xea);
+// Casi blanco (el texto de macOS): nítido sin deslumbrar.
+const FOREGROUND: (u8, u8, u8) = (0xf5, 0xf5, 0xf7);
 const BACKGROUND: (u8, u8, u8) = (0x1c, 0x1c, 0x1e);
 const CURSOR: (u8, u8, u8) = (0xf2, 0xf2, 0xf7);
 
