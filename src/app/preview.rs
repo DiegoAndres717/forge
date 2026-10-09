@@ -398,6 +398,11 @@ fn ui_preview() {
     harness.state_mut().settings_open = true;
     settle(&mut harness);
     save(&mut harness, &out, "11-ajustes");
+    // Pantalla pequeña: el modal no se sale, el contenido se desplaza.
+    harness.set_size(Vec2::new(1000.0, 620.0));
+    settle(&mut harness);
+    save(&mut harness, &out, "11b-ajustes-pequeno");
+    harness.set_size(Vec2::new(1440.0, 880.0));
     harness.state_mut().settings_open = false;
     *harness.state().update.lock().unwrap() = Some(super::update::Update::Available(
         forge_core::updates::Release {
