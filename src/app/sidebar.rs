@@ -256,44 +256,6 @@ impl App {
                 {
                     cmds.push(UiCmd::ToggleMemory);
                 }
-                let config = theme::row(
-                    ui,
-                    icon::GEAR,
-                    theme::TEXT_3,
-                    tr!("Configuración"),
-                    "",
-                    false,
-                );
-                egui::Popup::menu(&config).show(|ui| {
-                    ui.set_min_width(220.0);
-                    if !ws.project.has_config()
-                        && ui.button(tr!("Crear .forge/project.toml")).clicked()
-                    {
-                        cmds.push(UiCmd::CreateConfig);
-                    }
-                    if ws.project.has_config() {
-                        if ui
-                            .button(tr!("{p0}  Editar project.toml", p0 = icon::NOTE_PENCIL))
-                            .clicked()
-                        {
-                            cmds.push(UiCmd::EditConfig);
-                        }
-                        if ui
-                            .button(tr!(
-                                "{p0}  Recargar configuración",
-                                p0 = icon::ARROW_CLOCKWISE
-                            ))
-                            .clicked()
-                        {
-                            cmds.push(UiCmd::ReloadConfig);
-                        }
-                    }
-                    if ws.project.default_layout().is_some()
-                        && ui.button(tr!("Restablecer layout")).clicked()
-                    {
-                        cmds.push(UiCmd::ResetLayout);
-                    }
-                });
             });
     }
 

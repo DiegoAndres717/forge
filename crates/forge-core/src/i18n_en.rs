@@ -1429,4 +1429,42 @@ pub const EN: &[(&str, &str)] = &[
         "Si decides algo importante o resuelves un error, guárdalo en la memoria del proyecto (memory_save).",
         "If you make an important decision or fix a bug, save it to the project memory (memory_save).",
     ),
+    ("Este proyecto · {name}", "This project · {name}"),
+    (
+        "Se guarda en la carpeta .forge/ del proyecto: súbela al repositorio para compartirla con tu equipo.",
+        "Saved in the project's .forge/ folder: commit it to share it with your team.",
+    ),
+    ("Distribución y procesos", "Layout and processes"),
+    (
+        "Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto.",
+        "Which terminals open and which processes (dev, api…) the project has.",
+    ),
+    ("Reglas de Guard", "Guard rules"),
+    (
+        "Qué se revisa antes de un commit, un push o un pull request.",
+        "What gets checked before a commit, a push or a pull request.",
+    ),
+    (
+        "Agentes propios y cómo se abren.",
+        "Your own agents and how they open.",
+    ),
+    ("Revisión con IA", "AI review"),
+    (
+        "Qué modelos revisan los cambios y con qué presupuesto.",
+        "Which models review changes and with what budget.",
+    ),
+    ("Editar", "Edit"),
+    (
+        "Detecta los scripts de package.json",
+        "Detects the package.json scripts",
+    ),
+    ("Recargar tras editar", "Reload after editing"),
+    (
+        "Restablecer la distribución de paneles",
+        "Reset the panel layout",
+    ),
+    (
+        "Pasan Guard solo antes de cada commit y push.",
+        "Run Guard automatically before every commit and push.",
+    ),
 ];
