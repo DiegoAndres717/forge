@@ -43,12 +43,12 @@ impl App {
     pub(super) fn run_update(&mut self, ctx: &egui::Context) {
         match self.update_state() {
             Some(Update::Available(release) | Update::Failed(release, _)) => {
-                // Sin .dmg o fuera de un .app (cargo run): la página de la versión.
-                let Some(dmg) = release
-                    .dmg
-                    .clone()
-                    .filter(|_| updates::current_app().is_some())
-                else {
+                // Sin .dmg con huella o fuera de un .app (cargo run): la página de la versión.
+                let (Some(dmg), Some(checksum), Some(_)) = (
+                    release.dmg.clone(),
+                    release.checksum.clone(),
+                    updates::current_app(),
+                ) else {
                     let _ = std::process::Command::new("open")
                         .arg(&release.page)
                         .spawn();
@@ -57,7 +57,7 @@ impl App {
                 *self.update.lock().unwrap() = Some(Update::Downloading);
                 let (slot, ctx) = (self.update.clone(), ctx.clone());
                 std::thread::spawn(move || {
-                    let state = match updates::download(&dmg) {
+                    let state = match updates::download(&dmg, &checksum) {
                         Ok(staged) => Update::Ready(staged),
                         Err(e) => Update::Failed(release, e),
                     };

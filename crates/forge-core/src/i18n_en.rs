@@ -1198,4 +1198,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Reintentar actualización", "Retry update"),
     ("No se pudo descargar: {e}", "Couldn't download: {e}"),
+    (
+        "la huella SHA-256 de la descarga no coincide con la publicada",
+        "the download's SHA-256 checksum doesn't match the published one",
+    ),
 ];

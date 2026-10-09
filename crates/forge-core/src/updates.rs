@@ -11,6 +11,8 @@ pub struct Release {
     pub page: String,
     /// El .dmg publicado, si lo hay.
     pub dmg: Option<String>,
+    /// Su huella SHA-256 (`<dmg>.sha256`): sin ella no se instala nada.
+    pub checksum: Option<String>,
 }
 
 /// Última versión publicada.
@@ -40,17 +42,20 @@ pub fn latest(repo_url: &str) -> Option<Release> {
         })?
         .stdout;
     let v: serde_json::Value = serde_json::from_slice(&json).ok()?;
-    let dmg = v["assets"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|a| a["browser_download_url"].as_str())
-        .find(|u| u.ends_with(".dmg"))
-        .map(str::to_string);
+    let asset = |suffix: &str| {
+        v["assets"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|a| a["browser_download_url"].as_str())
+            .find(|u| u.ends_with(suffix))
+            .map(str::to_string)
+    };
     Some(Release {
         tag: v["tag_name"].as_str()?.to_string(),
         page: v["html_url"].as_str()?.to_string(),
-        dmg,
+        dmg: asset(".dmg"),
+        checksum: asset(".dmg.sha256"),
     })
 }
 
@@ -71,9 +76,26 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     }
 }
 
-/// Descarga el .dmg y copia su Forge.app a una carpeta temporal; devuelve esa app.
-/// Bajado con curl no lleva cuarentena: al abrirla, macOS no vuelve a preguntar.
-pub fn download(dmg_url: &str) -> Result<PathBuf, String> {
+/// Comprueba que el archivo tenga la huella publicada (salida de `shasum -a 256`).
+fn verify(file: &Path, published: &str) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    let expected = published
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
+    let actual = crate::guard::diff::hex(&Sha256::digest(&bytes));
+    if expected.len() == 64 && actual == expected {
+        Ok(())
+    } else {
+        Err(crate::tr!("la huella SHA-256 de la descarga no coincide con la publicada").into())
+    }
+}
+
+/// Descarga el .dmg, comprueba su huella y copia su Forge.app a una carpeta temporal;
+/// devuelve esa app. Bajado con curl no lleva cuarentena: al abrirla, macOS no pregunta.
+pub fn download(dmg_url: &str, checksum_url: &str) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join(format!("forge-update-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -83,6 +105,14 @@ pub fn download(dmg_url: &str) -> Result<PathBuf, String> {
         .args(["-fsSL", "-m", "600", "-o"])
         .arg(&dmg)
         .arg(dmg_url))?;
+    let published = Command::new("/usr/bin/curl")
+        .args(["-fsSL", "-m", "30", checksum_url])
+        .output()
+        .map_err(|e| e.to_string())?;
+    if let Err(e) = verify(&dmg, &String::from_utf8_lossy(&published.stdout)) {
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(e);
+    }
     run(Command::new("/usr/bin/hdiutil")
         .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
         .arg(&mount)
@@ -136,6 +166,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_a_download_whose_checksum_differs() {
+        let file = std::env::temp_dir().join(format!("forge-sha-{}", std::process::id()));
+        std::fs::write(&file, "hola").unwrap();
+        // shasum -a 256 de "hola"
+        let good = "b221d9dbb083a7f33428d7c2a3c3198ae925614d70210e28716ccaa7cd4ddb79  Forge.dmg";
+        assert!(verify(&file, good).is_ok());
+        assert!(verify(&file, &good.replace('b', "c")).is_err());
+        assert!(verify(&file, "").is_err(), "sin huella no se acepta");
+        let _ = std::fs::remove_file(file);
+    }
+
+    #[test]
     fn relaunch_replaces_the_app_after_exit() {
         let script = relaunch_script(
             42,
@@ -152,7 +194,14 @@ mod tests {
     #[ignore]
     fn real_download_stages_the_published_app() {
         let release = latest("https://github.com/DiegoAndres717/forge").expect("sin release");
-        let app = download(&release.dmg.expect("sin .dmg")).unwrap();
+        let Some(checksum) = release.checksum else {
+            eprintln!(
+                "{} no publica .sha256 (versiones anteriores a 0.1.2)",
+                release.tag
+            );
+            return;
+        };
+        let app = download(&release.dmg.expect("sin .dmg"), &checksum).unwrap();
         assert!(app.join("Contents/MacOS/forge").is_file());
         let _ = std::fs::remove_dir_all(app.parent().unwrap());
     }
