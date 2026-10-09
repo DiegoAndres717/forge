@@ -512,7 +512,7 @@ impl App {
                     if ui
                         .add_enabled(
                             !pr.title.trim().is_empty(),
-                            egui::Button::new(tr!("Crear en GitHub")),
+                            theme::primary_button(tr!("Crear en GitHub")),
                         )
                         .clicked()
                     {
@@ -579,13 +579,7 @@ impl App {
                 ui.horizontal(|ui| {
                     let valid = form.reason.trim().chars().count() >= 5;
                     if ui
-                        .add_enabled(
-                            valid,
-                            egui::Button::new(
-                                RichText::new(tr!("Registrar excepción")).color(Color32::WHITE),
-                            )
-                            .fill(theme::ACCENT),
-                        )
+                        .add_enabled(valid, theme::primary_button(tr!("Registrar excepción")))
                         .clicked()
                     {
                         cmds.push(UiCmd::GuardAllow);

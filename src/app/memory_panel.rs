@@ -177,13 +177,13 @@ impl App {
                         if ui
                             .add_enabled(
                                 !form.title.trim().is_empty(),
-                                egui::Button::new(tr!("Guardar")),
+                                theme::primary_button(tr!("Guardar")),
                             )
                             .clicked()
                         {
                             cmds.push(UiCmd::MemorySave);
                         }
-                        cancel = ui.button(tr!("Cancelar")).clicked();
+                        cancel = theme::secondary(ui, tr!("Cancelar")).clicked();
                     });
                 });
             if cancel {

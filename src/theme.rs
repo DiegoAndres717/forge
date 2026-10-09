@@ -225,14 +225,17 @@ pub fn paint_icon_button(ui: &Ui, rect: Rect, glyph: &str, response: &Response, 
     );
 }
 
-/// Botón principal (relleno con el color de acento).
+/// Botón principal (relleno con el color de acento). Para uno que puede estar
+/// deshabilitado: `ui.add_enabled(ok, theme::primary_button(..))`.
 pub fn primary(ui: &mut Ui, text: impl Into<String>) -> Response {
-    ui.add(
-        egui::Button::new(RichText::new(text.into()).color(Color32::WHITE).strong())
-            .fill(ACCENT)
-            .corner_radius(6.0)
-            .min_size(Vec2::new(0.0, 26.0)),
-    )
+    ui.add(primary_button(text))
+}
+
+pub fn primary_button(text: impl Into<String>) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text.into()).color(Color32::WHITE).strong())
+        .fill(ACCENT)
+        .corner_radius(6.0)
+        .min_size(Vec2::new(0.0, 30.0))
 }
 
 /// Botón secundario (relleno neutro).
@@ -241,7 +244,7 @@ pub fn secondary(ui: &mut Ui, text: impl Into<String>) -> Response {
         egui::Button::new(RichText::new(text.into()).color(TEXT))
             .fill(SURFACE_HOVER)
             .corner_radius(6.0)
-            .min_size(Vec2::new(0.0, 26.0)),
+            .min_size(Vec2::new(0.0, 30.0)),
     )
 }
 
