@@ -395,6 +395,14 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "13-bienvenida");
     harness.state_mut().welcome = None;
+    // Codex guarda su uso en sus sesiones: una de ejemplo en el HOME de demostración.
+    let day = PathBuf::from(std::env::var("HOME").unwrap()).join(".codex/sessions/2026/10/10");
+    std::fs::create_dir_all(&day).unwrap();
+    std::fs::write(
+        day.join("rollout-2026-10-10T10-00-00-demo.jsonl"),
+        "{\"payload\":{\"type\":\"token_count\",\"rate_limits\":{\"primary\":{\"used_percent\":35.0,\"window_minutes\":300},\"secondary\":{\"used_percent\":18.0,\"window_minutes\":10080}}}}\n",
+    )
+    .unwrap();
     // Con una segunda cuenta de Claude, para ver la sección Cuentas.
     harness.state_mut().db(|s| s.add_account("claude", "Work"));
     harness.state_mut().db(|s| {

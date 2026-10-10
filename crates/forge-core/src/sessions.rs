@@ -115,6 +115,52 @@ pub fn copy_session(
     }
 }
 
+/// Uso del plan de una cuenta de Codex (`account`: su carpeta; `None` = la principal),
+/// sacado de su sesión más reciente: Codex guarda allí sus ventanas de uso.
+pub fn codex_limits(account: Option<&Path>) -> Option<crate::accounts::AccountLimits> {
+    let home = config_dir("codex", account)?;
+    let newest = |dir: &Path| {
+        let mut v = subdirs(dir);
+        v.sort();
+        v.pop()
+    };
+    let day = newest(&newest(&newest(&home.join("sessions"))?)?)?;
+    let mut files: Vec<(i64, PathBuf)> = std::fs::read_dir(&day)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+        .map(|p| (mtime(&p), p))
+        .collect();
+    // Los nombres llevan la fecha: desempatan si se escribieron en el mismo segundo.
+    files.sort();
+    let (at, file) = files.pop()?;
+    let text = tail(&file, 256 * 1024);
+    let limits = json_lines(&text).rev().find(|e| {
+        e["payload"]["type"] == "token_count" && e["payload"]["rate_limits"].is_object()
+    })?;
+    let windows = ["primary", "secondary"]
+        .iter()
+        .filter_map(|k| {
+            let w = &limits["payload"]["rate_limits"][k];
+            let percent = w["used_percent"].as_f64()?;
+            let kind = match w["window_minutes"].as_i64() {
+                Some(300) => "five_hour".to_string(),
+                Some(10_080) => "seven_day".to_string(),
+                Some(m) if m >= 1_440 => format!("{}d", m / 1_440),
+                Some(m) => format!("{}h", m / 60),
+                None => k.to_string(),
+            };
+            Some(crate::accounts::UsageWindow {
+                kind,
+                percent_used: percent,
+                resets_at: w["resets_at"].as_i64().map(|t| t.to_string()),
+            })
+        })
+        .collect::<Vec<_>>();
+    (!windows.is_empty()).then_some(crate::accounts::AccountLimits { at, windows })
+}
+
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
     std::fs::read_dir(dir)
         .map(|r| {
@@ -348,6 +394,29 @@ mod tests {
         copy_session("codex", cwd, "a", Some(&tmp.join("codex")), Some(&other)).unwrap();
         let s = codex(&other, cwd).unwrap();
         assert_eq!((s.id.as_str(), s.topic.as_str()), ("a", "Migrar a PG17"));
+
+        // Uso del plan de Codex: la última medida de su sesión más reciente.
+        assert!(
+            codex_limits(Some(&tmp.join("codex"))).is_none(),
+            "sin medidas"
+        );
+        let rate = |p: f64| {
+            format!(
+                "{{\"payload\":{{\"type\":\"token_count\",\"rate_limits\":{{\"primary\":{{\"used_percent\":{p},\"window_minutes\":300,\"resets_at\":1}},\"secondary\":{{\"used_percent\":7.0,\"window_minutes\":43200}}}}}}}}\n"
+            )
+        };
+        std::fs::write(
+            day.join("rollout-z.jsonl"),
+            meta("z", "/x", "cli") + &rate(10.0) + &rate(64.0),
+        )
+        .unwrap();
+        let l = codex_limits(Some(&tmp.join("codex"))).unwrap();
+        let got: Vec<(&str, f64)> = l
+            .windows
+            .iter()
+            .map(|w| (w.kind.as_str(), w.percent_used))
+            .collect();
+        assert_eq!(got, [("five_hour", 64.0), ("30d", 7.0)]);
         let _ = std::fs::remove_dir_all(tmp);
     }
 }
