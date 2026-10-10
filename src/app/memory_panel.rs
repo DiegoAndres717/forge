@@ -24,7 +24,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.label(RichText::new(icon::BRAIN).size(18.0).color(theme::PURPLE));
             ui.label(
-                RichText::new(tr!("Memoria"))
+                RichText::new("Forge Memory")
                     .size(15.0)
                     .color(theme::TEXT)
                     .strong(),

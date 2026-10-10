@@ -165,7 +165,7 @@ export const register: Register = on => {
     }
     await $.command.register({ name: 'forge-plans', description: "Forge: this project's plans and backlog", argumentHint: '[add <text> | show <id>]' })
     await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
-    await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to the project memory', argumentHint: '<text>' })
+    await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to Forge Memory', argumentHint: '<text>' })
     void refreshBand($)
     void $.session
       .usage()

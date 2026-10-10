@@ -806,7 +806,8 @@ fn typing_in_a_panel_field_does_not_reach_the_terminal() {
         "el texto de la nota llegó a la terminal"
     );
     // Un clic fuera del campo (aquí un botón) lo suelta, y el botón no se queda el teclado.
-    h.get_by_label_contains("Memoria del proyecto").click();
+    h.get_by_label_contains("Forge Memory · memoria del proyecto")
+        .click();
     h.run_steps(3);
     h.event(egui::Event::Text("echo zzterm$((40+2))".into()));
     h.key_press(Key::Enter);

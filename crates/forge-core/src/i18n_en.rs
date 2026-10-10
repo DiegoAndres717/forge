@@ -797,8 +797,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("la idea necesita un título", "the idea needs a title"),
     (
-        "Busca en la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió.",
-        "Searches the project memory (decisions, architecture, fixed errors, commands, conventions). Use it before deciding something or when you hit an error that may already have been solved.",
+        "Busca en Forge Memory, la memoria del proyecto (decisiones, arquitectura, errores resueltos, comandos, convenciones). Úsala antes de decidir algo o al encontrar un error que quizá ya se resolvió.",
+        "Searches Forge Memory, the project memory (decisions, architecture, fixed errors, commands, conventions). Use it before deciding something or when you hit an error that may already have been solved.",
     ),
     (
         "Palabras a buscar (sin tildes también vale)",
@@ -1273,8 +1273,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Incluir los completados", "Include completed ones"),
     (
-        "Memoria compartida del proyecto (Forge). Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
-        "Shared project memory (Forge). Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover. Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
+        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
+        "Forge Memory: the shared project memory. Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover (if a similar one exists, update it with memory_update). Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
     ),
     (
         "No existe el plan #{id} en esta lista.",
@@ -2114,5 +2114,9 @@ pub const EN: &[(&str, &str)] = &[
     (
         "Servidores como dev o api que Forge arranca, vigila y reinicia. Se configuran en Ajustes → Este proyecto.",
         "Servers like dev or api that Forge starts, watches and restarts. Set them up in Settings → This project.",
+    ),
+    (
+        "Forge Memory · memoria del proyecto (⌘⇧M)",
+        "Forge Memory · project memory (⌘⇧M)",
     ),
 ];
