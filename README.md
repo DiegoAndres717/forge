@@ -96,7 +96,15 @@ Also: native notifications when an agent finishes, a process fails or Guard bloc
 
 > **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app).
 
-### Download (recommended)
+### One command (recommended)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+```
+
+It downloads the latest release, checks its SHA-256, installs `Forge.app` in `/Applications` (or `~/Applications`) and links the `forge` command. Run it again to update. Installed this way, macOS doesn't show the "cannot be opened" warning.
+
+### Download
 
 1. Download `Forge-x.y.z.dmg` from the [latest release](https://github.com/DiegoAndres717/forge/releases/latest).
 2. Open it and drag **Forge** to **Applications**.

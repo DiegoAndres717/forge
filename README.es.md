@@ -96,7 +96,15 @@ Además: notificaciones nativas cuando un agente termina, un proceso falla o Gua
 
 > **Requisitos:** macOS 13 Ventura o superior, en Apple Silicon o Intel (app universal).
 
-### Descarga (recomendado)
+### Con un comando (recomendado)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+```
+
+Descarga la última versión, comprueba su SHA-256, instala `Forge.app` en `/Applications` (o `~/Applications`) y enlaza el comando `forge`. Vuelve a ejecutarlo para actualizar. Instalado así, macOS no muestra el aviso de "no se puede abrir".
+
+### Descarga
 
 1. Descarga `Forge-x.y.z.dmg` de la [última versión](https://github.com/DiegoAndres717/forge/releases/latest).
 2. Ábrelo y arrastra **Forge** a **Aplicaciones**.
