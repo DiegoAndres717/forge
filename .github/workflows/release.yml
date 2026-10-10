@@ -12,6 +12,9 @@ permissions:
 jobs:
   dmg:
     runs-on: macos-latest
+    env:
+      # Para actualizar la receta de Homebrew (DiegoAndres717/homebrew-tap); sin él, se salta.
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
@@ -29,3 +32,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "$GITHUB_REF_NAME" dist/*.dmg dist/*.dmg.sha256 --title "Forge $GITHUB_REF_NAME" --generate-notes
+      - name: Actualizar Homebrew (brew install --cask diegoandres717/tap/forge)
+        if: env.TAP_TOKEN != ''
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SHA=$(cut -d' ' -f1 "dist/Forge-$VERSION.dmg.sha256")
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/DiegoAndres717/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          ./scripts/cask.sh "$VERSION" "$SHA" > tap/Casks/forge.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/forge.rb
+          git commit -m "forge $VERSION"
+          git push
