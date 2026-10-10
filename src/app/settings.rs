@@ -563,15 +563,17 @@ impl App {
                     if n > 0 {
                         ui.separator();
                     }
-                    let limits = self
-                        .store
-                        .as_ref()
-                        .and_then(|s| s.account_limits(program, a.id));
+                    let limits = match program {
+                        // Codex lo guarda en sus sesiones; se relee cada 10 s.
+                        "codex" => codex_limits_cached(ui, a),
+                        _ => self
+                            .store
+                            .as_ref()
+                            .and_then(|s| s.account_limits(program, a.id)),
+                    };
                     let tokens = usage.get(&a.id).copied();
                     account_row(ui, cmds, program, a, chosen, ws.is_some());
-                    if program == "claude" {
-                        account_usage(ui, limits.as_ref(), tokens);
-                    }
+                    account_usage(ui, limits.as_ref(), tokens);
                     ui.add_space(4.0);
                 }
                 ui.add_space(4.0);
@@ -608,6 +610,7 @@ fn account_usage(
             let label = match w.kind.as_str() {
                 "five_hour" => "5h",
                 "seven_day" => tr!("semana"),
+                "30d" => tr!("30 días"),
                 other => other,
             };
             let used = (w.percent_used / 100.0).clamp(0.0, 1.0) as f32;
@@ -770,4 +773,22 @@ fn account_row(
             }
         });
     }
+}
+
+/// Uso del plan de una cuenta de Codex, leído de sus sesiones como mucho cada 10 s.
+fn codex_limits_cached(
+    ui: &egui::Ui,
+    a: &forge_core::accounts::Account,
+) -> Option<forge_core::accounts::AccountLimits> {
+    type Cached = (f64, Option<forge_core::accounts::AccountLimits>);
+    let id = egui::Id::new(("codex-limits", a.id));
+    let now = ui.input(|i| i.time);
+    if let Some((at, limits)) = ui.data(|d| d.get_temp::<Cached>(id))
+        && now - at < 10.0
+    {
+        return limits;
+    }
+    let limits = forge_core::sessions::codex_limits(a.dir.as_deref());
+    ui.data_mut(|d| d.insert_temp::<Cached>(id, (now, limits.clone())));
+    limits
 }

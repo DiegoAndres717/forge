@@ -1740,4 +1740,5 @@ pub const EN: &[(&str, &str)] = &[
         "Reads the .forge/ files again if you edited them by hand",
     ),
     ("✓ Guardado", "✓ Saved"),
+    ("30 días", "30 days"),
 ];
