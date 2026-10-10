@@ -743,6 +743,7 @@ impl Workspace {
         }
         if let Some(a) = &account {
             env.extend(a.env());
+            env.insert("FORGE_ACCOUNT_ID".into(), a.id.to_string());
             if self.has_accounts(&a.program) {
                 env.insert("FORGE_ACCOUNT".into(), a.name.clone());
             }

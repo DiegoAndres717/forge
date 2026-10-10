@@ -167,7 +167,13 @@ export const register: Register = on => {
     await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
     await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to the project memory', argumentHint: '<text>' })
     void refreshBand($)
-    void $.session.usage().then(u => update($, limits, () => u.rateLimits)).catch(() => undefined)
+    void $.session
+      .usage()
+      .then(async u => {
+        await update($, limits, () => u.rateLimits)
+        if (u.rateLimits?.length) void forge($, ['agent-limits'], JSON.stringify(u.rateLimits))
+      })
+      .catch(() => undefined)
     return next(e)
   })
 
@@ -175,6 +181,8 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     if (e.changed.includes('rateLimits')) {
       await update($, limits, () => e.rateLimits)
+      // Forge keeps each account's latest windows, to show them all in Settings.
+      if (e.rateLimits?.length) void forge($, ['agent-limits'], JSON.stringify(e.rateLimits))
       // A window ran out: Forge offers to carry on with another account (once per window).
       for (const w of e.rateLimits ?? []) {
         const key = `${w.kind}:${w.resetsAt ?? ''}`

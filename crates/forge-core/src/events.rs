@@ -68,15 +68,31 @@ pub fn init(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
             subagent    INTEGER NOT NULL,
             created_at  INTEGER NOT NULL
         );",
-    )
+    )?;
+    // Bases anteriores a las cuentas: todo era de la principal.
+    if conn
+        .prepare("SELECT account FROM agent_usage LIMIT 0")
+        .is_err()
+    {
+        conn.execute(
+            "ALTER TABLE agent_usage ADD COLUMN account INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 impl crate::store::Store {
-    pub fn add_agent_usage(&self, project: &Path, u: &TurnUsage) -> Result<(), String> {
+    pub fn add_agent_usage(
+        &self,
+        project: &Path,
+        u: &TurnUsage,
+        account: i64,
+    ) -> Result<(), String> {
         self.conn
             .execute(
-                "INSERT INTO agent_usage (project, model, input, output, cache_read, cache_write, subagent, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                "INSERT INTO agent_usage (project, model, input, output, cache_read, cache_write, subagent, created_at, account)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 rusqlite::params![
                     project.to_string_lossy(),
                     u.model,
@@ -85,7 +101,8 @@ impl crate::store::Store {
                     u.cache_read_input_tokens as i64,
                     u.cache_creation_input_tokens as i64,
                     u.subagent,
-                    crate::store::now()
+                    crate::store::now(),
+                    account
                 ],
             )
             .map(drop)
@@ -122,6 +139,49 @@ impl crate::store::Store {
     }
 }
 
+impl crate::store::Store {
+    /// Tokens por cuenta (id) desde `since`, de la que más usó a la que menos.
+    pub fn usage_by_account(&self, since: i64) -> Result<Vec<(i64, u64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT account, SUM(input + output + cache_read + cache_write) FROM agent_usage
+                 WHERE created_at >= ?1 GROUP BY account ORDER BY 2 DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([since], |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as u64)))
+            .map_err(|e| e.to_string())?;
+        rows.collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Cuenta de Forge con la que corre el agente (`FORGE_ACCOUNT_ID`; 0 = la principal).
+fn account_id() -> i64 {
+    std::env::var("FORGE_ACCOUNT_ID")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
+/// `forge agent-limits`: guarda las ventanas de uso del plan de la cuenta (JSON por
+/// stdin, como las da Claude Code). Nunca falla.
+pub fn record_limits() {
+    let mut payload = String::new();
+    let _ = std::io::stdin()
+        .take(64 * 1024)
+        .read_to_string(&mut payload);
+    let Ok(windows) = serde_json::from_str::<Vec<crate::accounts::UsageWindow>>(&payload) else {
+        return;
+    };
+    if let Some(store) =
+        crate::store::Store::default_path().and_then(|p| crate::store::Store::open(&p).ok())
+    {
+        let _ = store.set_account_limits("claude", account_id(), &windows);
+    }
+}
+
 /// `forge agent-usage`: guarda los tokens de un turno (JSON por stdin). Nunca falla.
 pub fn record_usage() {
     let Some(project) = std::env::var_os("FORGE_PROJECT") else {
@@ -137,7 +197,7 @@ pub fn record_usage() {
     if let Some(store) =
         crate::store::Store::default_path().and_then(|p| crate::store::Store::open(&p).ok())
     {
-        let _ = store.add_agent_usage(Path::new(&project), &usage);
+        let _ = store.add_agent_usage(Path::new(&project), &usage, account_id());
     }
 }
 

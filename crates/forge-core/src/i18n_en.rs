@@ -1634,4 +1634,16 @@ pub const EN: &[(&str, &str)] = &[
         "{p0}  Seguir la conversación con «{p1}»",
         "{p0}  Continue the conversation with “{p1}”",
     ),
+    ("semana", "week"),
+    ("{p0} tokens · 30 días", "{p0} tokens · 30 days"),
+    ("Sin uso todavía", "No usage yet"),
+    (
+        "Aparece después de usar la cuenta desde Forge",
+        "Shows up after using the account from Forge",
+    ),
+    ("Uso del plan visto {p0}", "Plan usage as of {p0}"),
+    (
+        "Tokens usados desde Forge en 30 días",
+        "Tokens used from Forge in 30 days",
+    ),
 ];
