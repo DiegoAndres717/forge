@@ -206,7 +206,7 @@ fn main() -> eframe::Result {
         }
         Some(
             "guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory" | "ideas" | "plans"
-            | "status",
+            | "status" | "context",
         ) => std::process::exit(cli::run(&args)),
         Some("help" | "--help" | "-h") => {
             print!("{}", cli::usage());

@@ -37,9 +37,25 @@ fn tools() -> Value {
                     "kind": {"type": "string", "enum": kinds},
                     "title": {"type": "string"},
                     "body": {"type": "string"},
-                    "tags": {"type": "string", "description": tr!("Separadas por comas")}
+                    "tags": {"type": "string", "description": tr!("Separadas por comas")},
+                    "force": {"type": "boolean", "description": tr!("Guardar aunque ya exista una memoria parecida")}
                 },
                 "required": ["kind", "title", "body"]
+            }
+        },
+        {
+            "name": "memory_update",
+            "description": tr!("Corrige o amplía una memoria existente (por id) en vez de guardar otra parecida. Solo cambia los campos que pases."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "integer"},
+                    "kind": {"type": "string", "enum": kinds},
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "tags": {"type": "string", "description": tr!("Separadas por comas")}
+                },
+                "required": ["id"]
             }
         },
         {
@@ -202,6 +218,19 @@ impl<'a> Server<'a> {
                 .store
                 .list_memories(self.project, kind, limit)
                 .map(|found| listing(&found, tr!("La memoria está vacía."))),
+            "memory_save"
+                if !args["force"].as_bool().unwrap_or(false)
+                    && let Ok(Some(m)) = self.store.similar_memory(
+                        self.project,
+                        args["title"].as_str().unwrap_or_default(),
+                    ) =>
+            {
+                Ok(tr!(
+                    "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si es otra cosa, vuelve a llamar a memory_save con force=true.",
+                    p0 = memory::render(&m),
+                    id = m.id
+                ))
+            }
             "memory_save" => self
                 .store
                 .add_memory(
@@ -213,6 +242,26 @@ impl<'a> Server<'a> {
                     &self.client,
                 )
                 .map(|id| format!("Guardada como #{id}.")),
+            "memory_update" => match args["id"].as_i64() {
+                Some(id) => self
+                    .store
+                    .update_memory(
+                        self.project,
+                        id,
+                        kind,
+                        args["title"].as_str(),
+                        args["body"].as_str(),
+                        args["tags"].as_str(),
+                    )
+                    .map(|ok| {
+                        if ok {
+                            tr!("Memoria #{id} actualizada.", id = id)
+                        } else {
+                            tr!("No existe la memoria #{id}.", id = id)
+                        }
+                    }),
+                None => Err(tr!("falta `id`").into()),
+            },
             "memory_delete" => match args["id"].as_i64() {
                 Some(id) => self.store.delete_memory(self.project, id).map(|ok| {
                     if ok {
@@ -524,7 +573,7 @@ mod tests {
         let list = server
             .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 9);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 10);
 
         let call = |server: &mut Server, id: i64, name: &str, args: Value| {
             server.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()
@@ -536,7 +585,35 @@ mod tests {
             json!({"kind": "decision", "title": "Pagos con Wompi", "body": "Se usa Wompi por soporte de PSE."}),
         );
         assert_eq!(saved["result"]["isError"], false);
-        let found = call(&mut server, 4, "memory_search", json!({"query": "wompi"}));
+        // Algo parecido no se duplica: se propone actualizar la existente.
+        let dup = call(
+            &mut server,
+            31,
+            "memory_save",
+            json!({"kind": "decision", "title": "Pagos con Wompi y PSE", "body": "otra vez"}),
+        );
+        let dup_text = dup["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(dup_text.contains("memory_update"), "{dup_text}");
+        let up = call(
+            &mut server,
+            32,
+            "memory_update",
+            json!({"id": 1, "body": "Se usa Wompi por PSE y Nequi."}),
+        );
+        assert_eq!(up["result"]["isError"], false);
+        let forced = call(
+            &mut server,
+            33,
+            "memory_save",
+            json!({"kind": "note", "title": "Pagos con Wompi", "body": "x", "force": true}),
+        );
+        assert!(
+            forced["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("#2")
+        );
+        let found = call(&mut server, 4, "memory_search", json!({"query": "nequi"}));
         let text = found["result"]["content"][0]["text"].as_str().unwrap();
         assert!(
             text.contains("Pagos con Wompi") && text.contains("claude-code"),

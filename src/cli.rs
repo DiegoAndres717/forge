@@ -233,6 +233,17 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
+        // Contexto del proyecto para el primer mensaje de cada conversación (mod de Claude).
+        (Some("context"), _) => open_store().map(|store| {
+            let text = forge_core::mcp::project_context(&project, &store);
+            // ponytail: recorte fijo (~6 KB) para no gastar de más; ordenar por relevancia si crece.
+            let mut cut: String = text.chars().take(6000).collect();
+            if cut.len() < text.len() {
+                cut.push_str("\n…");
+            }
+            println!("{cut}");
+            0
+        }),
         (Some("plans" | "ideas"), action) => plans_cli(
             &out,
             &project,

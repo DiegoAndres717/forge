@@ -62,6 +62,10 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         END;
         CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
             INSERT INTO memories_fts(memories_fts, rowid, title, body, tags) VALUES ('delete', old.id, old.title, old.body, old.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+            INSERT INTO memories_fts(memories_fts, rowid, title, body, tags) VALUES ('delete', old.id, old.title, old.body, old.tags);
+            INSERT INTO memories_fts(rowid, title, body, tags) VALUES (new.id, new.title, new.body, new.tags);
         END;",
     )
 }
@@ -74,6 +78,45 @@ fn fts_query(query: &str) -> Option<String> {
         .map(|t| format!("\"{t}\"*"))
         .collect();
     (!terms.is_empty()).then(|| terms.join(" "))
+}
+
+/// Palabras de relleno que no dicen de qué trata un título.
+const STOPWORDS: [&str; 16] = [
+    "con", "por", "para", "los", "las", "del", "que", "una", "uno", "sin", "the", "and", "for",
+    "with", "from", "not",
+];
+
+/// Palabras significativas de un título: minúsculas, sin tildes, de 3 letras o más.
+fn words(text: &str) -> Vec<String> {
+    let folded: String = text
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'á' | 'à' | 'ä' => 'a',
+            'é' | 'è' | 'ë' => 'e',
+            'í' | 'ì' | 'ï' => 'i',
+            'ó' | 'ò' | 'ö' => 'o',
+            'ú' | 'ù' | 'ü' => 'u',
+            'ñ' => 'n',
+            c => c,
+        })
+        .collect();
+    let mut out: Vec<String> = folded
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3 && !STOPWORDS.contains(w))
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Dos títulos hablan de lo mismo si comparten al menos 2/3 de sus palabras.
+fn same_topic(a: &str, b: &str) -> bool {
+    let (wa, wb) = (words(a), words(b));
+    let shared = wa.iter().filter(|w| wb.contains(w)).count();
+    let most = wa.len().max(wb.len());
+    most > 0 && shared * 3 >= most * 2
 }
 
 impl Store {
@@ -179,6 +222,55 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Memoria existente que trata de lo mismo que `title` (para no guardar duplicados).
+    // ponytail: recorre las 500 más recientes; usar FTS si un proyecto llega a miles.
+    pub fn similar_memory(&self, project: &Path, title: &str) -> Result<Option<Memory>, String> {
+        Ok(self
+            .list_memories(project, None, 500)?
+            .into_iter()
+            .find(|m| same_topic(&m.title, title)))
+    }
+
+    /// Cambia los campos dados de una memoria (los `None` se quedan como estaban).
+    pub fn update_memory(
+        &self,
+        project: &Path,
+        id: i64,
+        kind: Option<&str>,
+        title: Option<&str>,
+        body: Option<&str>,
+        tags: Option<&str>,
+    ) -> Result<bool, String> {
+        if let Some(kind) = kind
+            && !KINDS.iter().any(|(id, _)| *id == kind)
+        {
+            let valid: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
+            return Err(tr!(
+                "tipo de memoria desconocido \"{kind}\" (válidos: {p0})",
+                p0 = valid.join(", "),
+                kind = kind
+            ));
+        }
+        if title.is_some_and(|t| t.trim().is_empty()) {
+            return Err(tr!("la memoria necesita un título").into());
+        }
+        self.conn
+            .execute(
+                "UPDATE memories SET kind = COALESCE(?3, kind), title = COALESCE(?4, title),
+                 body = COALESCE(?5, body), tags = COALESCE(?6, tags) WHERE id = ?1 AND project = ?2",
+                params![
+                    id,
+                    self.project_key(project),
+                    kind,
+                    title.map(str::trim),
+                    body.map(str::trim),
+                    tags.map(str::trim)
+                ],
+            )
+            .map(|n| n > 0)
             .map_err(|e| e.to_string())
     }
 
@@ -385,5 +477,56 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         assert_eq!(store.project_key(&sub), "git:github.com/org/repo/api");
         let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn finds_similar_memories_and_updates_them() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/x");
+        let id = store
+            .add_memory(p, "decision", "Pagos con Wompi", "Por PSE.", "", "u")
+            .unwrap();
+        // Mismo tema con otras palabras de relleno y tildes: es la misma.
+        let hit = store.similar_memory(p, "pagos con WOMPI y PSE").unwrap();
+        assert_eq!(hit.map(|m| m.id), Some(id));
+        assert!(
+            store
+                .similar_memory(p, "Pagos con tarjeta")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .similar_memory(Path::new("/otro"), "Pagos con Wompi")
+                .unwrap()
+                .is_none()
+        );
+
+        assert!(
+            store
+                .update_memory(p, id, None, None, Some("Por PSE y Nequi."), None)
+                .unwrap()
+        );
+        let m = &store.search_memories(p, "nequi", None, 5).unwrap()[0];
+        assert_eq!((m.id, m.title.as_str()), (id, "Pagos con Wompi"));
+        assert!(
+            store.search_memories(p, "pse", None, 5).unwrap().len() == 1,
+            "el índice no queda con la versión vieja"
+        );
+        assert!(
+            !store
+                .update_memory(Path::new("/otro"), id, None, None, Some("x"), None)
+                .unwrap()
+        );
+        assert!(
+            store
+                .update_memory(p, id, Some("nada"), None, None, None)
+                .is_err()
+        );
+        assert!(
+            store
+                .update_memory(p, id, None, Some(" "), None, None)
+                .is_err()
+        );
     }
 }
