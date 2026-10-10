@@ -504,10 +504,22 @@ impl App {
 
     /// Sección PROCESOS: estado, puerto y controles (aparecen al pasar el ratón).
     pub(super) fn processes_ui(ws: &Workspace, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let add = || UiCmd::OpenSettingsTab(super::settings::SettingsTab::Project);
         ui.horizontal(|ui| {
             theme::section(ui, tr!("Procesos"));
             if !ws.processes.list.is_empty() {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::icon_button_sized(
+                        ui,
+                        icon::PLUS,
+                        tr!("Añadir o cambiar procesos (Ajustes)"),
+                        20.0,
+                        theme::TEXT_4,
+                    )
+                    .clicked()
+                    {
+                        cmds.push(add());
+                    }
                     if theme::icon_button_sized(
                         ui,
                         icon::STOP,
@@ -533,12 +545,12 @@ impl App {
                 });
             }
         });
-        if ws.processes.list.is_empty() {
-            ui.label(
-                RichText::new(tr!("   Define [[processes]] en .forge/project.toml"))
-                    .size(11.0)
-                    .color(theme::TEXT_4),
-            );
+        if ws.processes.list.is_empty()
+            && theme::row(ui, icon::PLUS, theme::TEXT_3, tr!("Añadir proceso"), "", false)
+                .on_hover_text(tr!("Servidores como dev o api que Forge arranca, vigila y reinicia. Se configuran en Ajustes → Este proyecto."))
+                .clicked()
+        {
+            cmds.push(add());
         }
         for m in &ws.processes.list {
             let id = m.def.id.clone();

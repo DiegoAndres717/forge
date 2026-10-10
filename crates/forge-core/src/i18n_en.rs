@@ -72,10 +72,6 @@ pub const EN: &[(&str, &str)] = &[
     ("Detener todos", "Stop all"),
     ("Iniciar todos", "Start all"),
     (
-        "   Define [[processes]] en .forge/project.toml",
-        "   Define [[processes]] in .forge/project.toml",
-    ),
-    (
         "{p0}\n{status}\nClic: ver logs · clic derecho: más opciones",
         "{p0}\n{status}\nClick: view logs · right-click: more options",
     ),
@@ -2110,5 +2106,13 @@ pub const EN: &[(&str, &str)] = &[
     (
         "Nombre, distribución de paneles y variables de entorno (lo avanzado se edita en el archivo).",
         "Name, panel layout and environment variables (the advanced bits are edited in the file).",
+    ),
+    (
+        "Añadir o cambiar procesos (Ajustes)",
+        "Add or change processes (Settings)",
+    ),
+    (
+        "Servidores como dev o api que Forge arranca, vigila y reinicia. Se configuran en Ajustes → Este proyecto.",
+        "Servers like dev or api that Forge starts, watches and restarts. Set them up in Settings → This project.",
     ),
 ];
