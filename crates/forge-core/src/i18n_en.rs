@@ -2006,4 +2006,109 @@ pub const EN: &[(&str, &str)] = &[
         "El agente «{id}» necesita un comando.",
         "The agent “{id}” needs a command.",
     ),
+    (
+        "Cada proceso necesita un id sin espacios.",
+        "Every process needs an id without spaces.",
+    ),
+    (
+        "Hay dos procesos con el id «{id}».",
+        "There are two processes with the id “{id}”.",
+    ),
+    (
+        "El proceso «{id}» necesita un comando.",
+        "The process “{id}” needs a command.",
+    ),
+    (
+        "Falta el puerto de «{id}».",
+        "The port for “{id}” is missing.",
+    ),
+    (
+        "La URL de «{id}» debe empezar por http:// (para https usa el puerto).",
+        "The URL for “{id}” must start with http:// (for https use the port).",
+    ),
+    (
+        "Falta el comando de comprobación de «{id}».",
+        "The check command for “{id}” is missing.",
+    ),
+    (
+        "Cada comando necesita un nombre y el comando.",
+        "Every command needs a name and the command.",
+    ),
+    ("Procesos y comandos", "Processes and commands"),
+    (
+        "No se pudo leer .forge/project.toml",
+        "Couldn't read .forge/project.toml",
+    ),
+    (
+        "Servidores y tareas que Forge arranca, vigila y reinicia (panel PROCESOS de la barra lateral). Se guarda solo en .forge/project.toml.",
+        "Servers and tasks Forge starts, watches and restarts (PROCESSES in the sidebar). Saved automatically to .forge/project.toml.",
+    ),
+    ("Nombre, p. ej. Web", "Name, e.g. Web"),
+    (
+        "Identificador sin espacios (p. ej. web, api)",
+        "Identifier without spaces (e.g. web, api)",
+    ),
+    ("Quitar proceso", "Remove process"),
+    ("Comando", "Command"),
+    ("p. ej. npm run dev", "e.g. npm run dev"),
+    ("Lo que arranca el proceso", "What starts the process"),
+    ("Carpeta", "Folder"),
+    ("la raíz del proyecto", "the project root"),
+    (
+        "Dónde se ejecuta, relativa a la carpeta del proyecto (p. ej. apps/web)",
+        "Where it runs, relative to the project folder (e.g. apps/web)",
+    ),
+    (
+        "Arrancar al abrir el proyecto",
+        "Start when the project opens",
+    ),
+    (
+        "Si no, se arranca a mano con ▶ en la barra lateral",
+        "Otherwise start it by hand with ▶ in the sidebar",
+    ),
+    ("Si termina: no reiniciar", "If it ends: don't restart"),
+    ("Si falla: reiniciar", "If it fails: restart"),
+    (
+        "Si termina: reiniciar siempre",
+        "If it ends: always restart",
+    ),
+    ("Sin comprobación", "No check"),
+    ("Puerto abierto", "Port is open"),
+    ("URL responde", "URL responds"),
+    ("Funciona si:", "Healthy when:"),
+    (
+        "Forge lo comprueba cada pocos segundos y marca el proceso en verde o en rojo en la barra lateral.",
+        "Forge checks it every few seconds and marks the process green or red in the sidebar.",
+    ),
+    ("Añadir proceso", "Add process"),
+    ("Comandos guardados", "Saved commands"),
+    (
+        "Atajos de un clic en la barra lateral (COMANDOS): cada uno se abre en una terminal nueva.",
+        "One-click shortcuts in the sidebar (COMMANDS): each opens in a new terminal.",
+    ),
+    ("Nombre, p. ej. Tests", "Name, e.g. Tests"),
+    ("Quitar comando", "Remove command"),
+    ("p. ej. npm test", "e.g. npm test"),
+    (
+        "Lo que se ejecuta en la terminal nueva",
+        "What runs in the new terminal",
+    ),
+    (
+        "Dónde se ejecuta, relativa a la carpeta del proyecto",
+        "Where it runs, relative to the project folder",
+    ),
+    ("Añadir comando", "Add command"),
+    (
+        "Para distribuciones de paneles y variables de entorno: lo abre en tu editor",
+        "For panel layouts and environment variables: opens it in your editor",
+    ),
+    (
+        "Completa el id (o nombre) y el comando para guardar.",
+        "Fill in the id (or name) and the command to save.",
+    ),
+    ("Archivo del proyecto", "Project file"),
+    (
+        "Nombre, distribución de paneles y variables de entorno (lo avanzado se edita en el archivo).",
+        "Name, panel layout and environment variables (the advanced bits are edited in the file).",
+    ),
 ];

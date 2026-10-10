@@ -308,6 +308,7 @@ pub struct App {
     guard_form: Option<guard_form::GuardForm>,
     agents_form: Option<project_forms::AgentsForm>,
     routing_form: Option<project_forms::RoutingSettings>,
+    processes_form: Option<project_forms::ProcessesForm>,
     /// Notificaciones activadas en Ajustes.
     notifications_enabled: bool,
     /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
@@ -382,6 +383,7 @@ impl App {
             guard_form: None,
             agents_form: None,
             routing_form: None,
+            processes_form: None,
             notifications_enabled: true,
             notifications: false,
             next_update_check: None,

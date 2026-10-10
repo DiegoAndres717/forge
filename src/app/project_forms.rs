@@ -3,10 +3,36 @@
 use super::guard_form::Autosave;
 use super::*;
 use forge_core::agents::{AgentForm, load_form, save_form};
+use forge_core::project::{AutoRestart, CommandForm, HealthKind, ProcessForm, ProjectForm};
 use forge_core::router::{Profile, RoutingForm};
 
 pub(super) type AgentsForm = Autosave<Vec<AgentForm>>;
 pub(super) type RoutingSettings = Autosave<RoutingForm>;
+pub(super) type ProcessesForm = Autosave<ProjectForm>;
+
+/// Campo con su etiqueta a la izquierda (fija) y su explicación.
+fn field(ui: &mut egui::Ui, text: &mut String, label: &str, hint: &str, help: &str) -> bool {
+    ui.horizontal(|ui| {
+        ui.allocate_ui_with_layout(
+            Vec2::new(80.0, 20.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_width(80.0);
+                ui.label(RichText::new(label).size(11.5).color(theme::TEXT_3))
+                    .on_hover_text(help);
+            },
+        );
+        ui.add(
+            egui::TextEdit::singleline(text)
+                .hint_text(hint)
+                .desired_width(f32::INFINITY)
+                .code_editor(),
+        )
+        .on_hover_text(help)
+        .changed()
+    })
+    .inner
+}
 
 fn heading(ui: &mut egui::Ui, text: &str, help: &str) {
     ui.add_space(6.0);
@@ -361,6 +387,224 @@ impl App {
             }
             g.tick(now, changed, true, |p, f| f.save(p));
             g.status(ui, now, "");
+        });
+    }
+
+    /// Procesos administrados (dev, api…) y comandos guardados de `.forge/project.toml`.
+    pub(super) fn processes_form_ui(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let Some(i) = self.active else { return };
+        let project = self.workspaces[i].project.path.clone();
+        if self
+            .processes_form
+            .as_ref()
+            .is_none_or(|g| g.project != project)
+        {
+            match ProjectForm::load(&project) {
+                Ok(form) => self.processes_form = Some(ProcessesForm::new(project.clone(), form)),
+                Err(e) => {
+                    theme::section(ui, tr!("Procesos y comandos"));
+                    theme::card(ui, |ui| {
+                        ui.label(
+                            RichText::new(tr!("No se pudo leer .forge/project.toml"))
+                                .color(theme::RED),
+                        );
+                        ui.label(RichText::new(&e).size(11.5).color(theme::TEXT_3));
+                        if theme::secondary(ui, tr!("Abrir archivo")).clicked() {
+                            cmds.push(UiCmd::EditFile("project.toml"));
+                        }
+                    });
+                    return;
+                }
+            }
+        }
+        let now = ui.input(|i| i.time);
+        let Some(g) = self.processes_form.as_mut() else {
+            return;
+        };
+        let mut changed = false;
+        theme::section(ui, tr!("Procesos"));
+        theme::card(ui, |ui| {
+            ui.label(
+                RichText::new(tr!("Servidores y tareas que Forge arranca, vigila y reinicia (panel PROCESOS de la barra lateral). Se guarda solo en .forge/project.toml."))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            let mut remove = None;
+            for (n, p) in g.form.processes.iter_mut().enumerate() {
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut p.name)
+                                .hint_text(tr!("Nombre, p. ej. Web"))
+                                .desired_width(150.0),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut p.id)
+                                .hint_text("id")
+                                .desired_width(90.0),
+                        )
+                        .on_hover_text(tr!("Identificador sin espacios (p. ej. web, api)"))
+                        .changed();
+                    if theme::icon_button(ui, icon::TRASH, tr!("Quitar proceso")).clicked() {
+                        remove = Some(n);
+                    }
+                });
+                changed |= field(
+                    ui,
+                    &mut p.command,
+                    tr!("Comando"),
+                    tr!("p. ej. npm run dev"),
+                    tr!("Lo que arranca el proceso"),
+                );
+                changed |= field(
+                    ui,
+                    &mut p.working_directory,
+                    tr!("Carpeta"),
+                    tr!("la raíz del proyecto"),
+                    tr!("Dónde se ejecuta, relativa a la carpeta del proyecto (p. ej. apps/web)"),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    changed |= ui
+                        .checkbox(&mut p.start_on_open, tr!("Arrancar al abrir el proyecto"))
+                        .on_hover_text(tr!("Si no, se arranca a mano con ▶ en la barra lateral"))
+                        .changed();
+                    let restart = |r: AutoRestart| match r {
+                        AutoRestart::Never => tr!("Si termina: no reiniciar"),
+                        AutoRestart::OnFailure => tr!("Si falla: reiniciar"),
+                        AutoRestart::Always => tr!("Si termina: reiniciar siempre"),
+                    };
+                    egui::ComboBox::from_id_salt(("restart", n))
+                        .selected_text(restart(p.auto_restart))
+                        .show_ui(ui, |ui| {
+                            for r in [
+                                AutoRestart::Never,
+                                AutoRestart::OnFailure,
+                                AutoRestart::Always,
+                            ] {
+                                changed |= ui
+                                    .selectable_value(&mut p.auto_restart, r, restart(r))
+                                    .changed();
+                            }
+                        });
+                });
+                ui.horizontal_wrapped(|ui| {
+                    let health = |h: HealthKind| match h {
+                        HealthKind::None => tr!("Sin comprobación"),
+                        HealthKind::Port => tr!("Puerto abierto"),
+                        HealthKind::Url => tr!("URL responde"),
+                        HealthKind::Command => tr!("Comando"),
+                    };
+                    ui.label(RichText::new(tr!("Funciona si:")).size(11.5).color(theme::TEXT_3));
+                    egui::ComboBox::from_id_salt(("health", n))
+                        .selected_text(health(p.health))
+                        .show_ui(ui, |ui| {
+                            for h in [HealthKind::None, HealthKind::Port, HealthKind::Url, HealthKind::Command] {
+                                changed |= ui.selectable_value(&mut p.health, h, health(h)).changed();
+                            }
+                        });
+                    match p.health {
+                        HealthKind::None => {}
+                        HealthKind::Port => {
+                            changed |= ui.add(egui::DragValue::new(&mut p.port).range(0..=65_535).prefix(":")).changed();
+                        }
+                        HealthKind::Url => {
+                            changed |= ui
+                                .add(egui::TextEdit::singleline(&mut p.url).hint_text("http://localhost:3000/health").desired_width(240.0))
+                                .changed();
+                        }
+                        HealthKind::Command => {
+                            changed |= ui
+                                .add(egui::TextEdit::singleline(&mut p.check_command).hint_text("curl -f localhost:3000").desired_width(240.0).code_editor())
+                                .changed();
+                        }
+                    }
+                    theme::help(ui, tr!("Forge lo comprueba cada pocos segundos y marca el proceso en verde o en rojo en la barra lateral."));
+                });
+            }
+            if let Some(n) = remove {
+                g.form.processes.remove(n);
+                changed = true;
+            }
+            ui.add_space(4.0);
+            if theme::secondary(ui, format!("{}  {}", icon::PLUS, tr!("Añadir proceso"))).clicked()
+            {
+                g.form.processes.push(ProcessForm::default());
+            }
+        });
+        theme::section(ui, tr!("Comandos guardados"));
+        theme::card(ui, |ui| {
+            ui.label(
+                RichText::new(tr!("Atajos de un clic en la barra lateral (COMANDOS): cada uno se abre en una terminal nueva."))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            let mut remove = None;
+            for (n, c) in g.form.commands.iter_mut().enumerate() {
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut c.name)
+                                .hint_text(tr!("Nombre, p. ej. Tests"))
+                                .desired_width(180.0),
+                        )
+                        .changed();
+                    if theme::icon_button(ui, icon::TRASH, tr!("Quitar comando")).clicked() {
+                        remove = Some(n);
+                    }
+                });
+                changed |= field(
+                    ui,
+                    &mut c.command,
+                    tr!("Comando"),
+                    tr!("p. ej. npm test"),
+                    tr!("Lo que se ejecuta en la terminal nueva"),
+                );
+                changed |= field(
+                    ui,
+                    &mut c.working_directory,
+                    tr!("Carpeta"),
+                    tr!("la raíz del proyecto"),
+                    tr!("Dónde se ejecuta, relativa a la carpeta del proyecto"),
+                );
+            }
+            if let Some(n) = remove {
+                g.form.commands.remove(n);
+                changed = true;
+            }
+            ui.add_space(4.0);
+            ui.horizontal_wrapped(|ui| {
+                if theme::secondary(ui, format!("{}  {}", icon::PLUS, tr!("Añadir comando"))).clicked() {
+                    g.form.commands.push(CommandForm::default());
+                }
+                if theme::secondary(ui, tr!("Abrir archivo"))
+                    .on_hover_text(tr!("Para distribuciones de paneles y variables de entorno: lo abre en tu editor"))
+                    .clicked()
+                {
+                    cmds.push(UiCmd::EditFile("project.toml"));
+                }
+            });
+            let complete = g
+                .form
+                .processes
+                .iter()
+                .all(|p| !p.id.trim().is_empty() && !p.command.trim().is_empty())
+                && g.form
+                    .commands
+                    .iter()
+                    .all(|c| !c.name.trim().is_empty() && !c.command.trim().is_empty());
+            // Guardado: la barra lateral (procesos y comandos) se actualiza al momento.
+            if g.tick(now, changed, complete, |p, f| f.save(p)) {
+                cmds.push(UiCmd::ReloadConfig);
+            }
+            g.status(
+                ui,
+                now,
+                tr!("Completa el id (o nombre) y el comando para guardar."),
+            );
         });
     }
 }
