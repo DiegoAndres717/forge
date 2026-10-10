@@ -93,6 +93,7 @@ impl App {
             self.guard_form = None;
             self.agents_form = None;
             self.routing_form = None;
+            self.processes_form = None;
             return;
         }
         let mut changed = false;
@@ -381,8 +382,10 @@ impl App {
             // Cada archivo por lo que hace (el nombre técnico, en gris).
             let files = [(
                 icon::SQUARES_FOUR,
-                tr!("Distribución y procesos"),
-                tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."),
+                tr!("Archivo del proyecto"),
+                tr!(
+                    "Nombre, distribución de paneles y variables de entorno (lo avanzado se edita en el archivo)."
+                ),
                 "project.toml",
             )];
             let narrow = ui.available_width() < SIDE_BY_SIDE;
@@ -468,6 +471,7 @@ impl App {
                 }
             });
         });
+        self.processes_form_ui(ui, cmds);
         self.guard_form_ui(ui, cmds);
         self.agents_form_ui(ui, cmds);
         self.routing_form_ui(ui, cmds);

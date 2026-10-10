@@ -1314,3 +1314,33 @@ fn turning_an_agent_off_in_settings_hides_it() {
     let text = std::fs::read_to_string(dir.join(".forge/agents.toml")).unwrap();
     assert!(text.contains("enabled = false"), "{text}");
 }
+
+/// Un proceso añadido en Ajustes aparece en la barra lateral sin recargar a mano.
+#[test]
+fn a_process_added_in_settings_shows_up() {
+    let _serial = serial();
+    let dir = project("processes-form");
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Project);
+    h.state_mut().settings_open = true;
+    h.run_steps(3);
+    let g = h
+        .state_mut()
+        .processes_form
+        .as_mut()
+        .expect("formulario de procesos cargado");
+    g.form.processes.push(forge_core::project::ProcessForm {
+        id: "api".into(),
+        name: "API".into(),
+        command: "sleep 60".into(),
+        ..Default::default()
+    });
+    wait_until(&mut h, "se guarda y se recarga", |a| {
+        ws(a).project.config.processes.iter().any(|p| p.id == "api")
+    });
+    assert!(
+        ws(h.state()).processes.get("api").is_some(),
+        "en el panel PROCESOS"
+    );
+}

@@ -274,6 +274,214 @@ impl Project {
     }
 }
 
+/// Cómo comprueba Forge que un proceso funciona.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub enum HealthKind {
+    #[default]
+    None,
+    Port,
+    Url,
+    Command,
+}
+
+/// Ajustes → Procesos: un proceso tal como se edita en el formulario.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ProcessForm {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    /// Relativa a la carpeta del proyecto ("" = la raíz).
+    pub working_directory: String,
+    pub start_on_open: bool,
+    pub auto_restart: AutoRestart,
+    pub health: HealthKind,
+    pub port: u16,
+    pub url: String,
+    pub check_command: String,
+    /// Lo que el formulario no edita, para no perderlo al guardar.
+    pub environment: HashMap<String, String>,
+    pub interval_seconds: u64,
+    pub timeout_seconds: u64,
+}
+
+/// Un comando guardado tal como se edita en el formulario.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct CommandForm {
+    pub name: String,
+    pub command: String,
+    pub working_directory: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ProjectForm {
+    pub processes: Vec<ProcessForm>,
+    pub commands: Vec<CommandForm>,
+}
+
+fn dir_text(d: &Option<PathBuf>) -> String {
+    d.as_ref()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+impl ProjectForm {
+    /// Lo de `.forge/project.toml`; sin archivo, los scripts detectados (como la plantilla).
+    pub fn load(path: &Path) -> Result<Self, String> {
+        let file = path.join(".forge/project.toml");
+        let config: ProjectConfig = match read_toml(&file)? {
+            Some(c) => c,
+            None => ProjectConfig {
+                commands: detect_commands(path),
+                ..Default::default()
+            },
+        };
+        Ok(Self {
+            processes: config
+                .processes
+                .iter()
+                .map(|p| {
+                    let h = p.health_check.as_ref();
+                    ProcessForm {
+                        id: p.id.clone(),
+                        name: p.name.clone().unwrap_or_default(),
+                        command: p.command.clone(),
+                        working_directory: dir_text(&p.working_directory),
+                        start_on_open: p.restart == StartPolicy::OnWorkspaceOpen,
+                        auto_restart: p.auto_restart,
+                        health: match h {
+                            Some(h) if h.port.is_some() => HealthKind::Port,
+                            Some(h) if h.url.is_some() => HealthKind::Url,
+                            Some(h) if h.command.is_some() => HealthKind::Command,
+                            _ => HealthKind::None,
+                        },
+                        port: h.and_then(|h| h.port).unwrap_or_default(),
+                        url: h.and_then(|h| h.url.clone()).unwrap_or_default(),
+                        check_command: h.and_then(|h| h.command.clone()).unwrap_or_default(),
+                        environment: p.environment.clone(),
+                        interval_seconds: h.map_or(default_interval(), |h| h.interval_seconds),
+                        timeout_seconds: h.map_or(default_timeout(), |h| h.timeout_seconds),
+                    }
+                })
+                .collect(),
+            commands: config
+                .commands
+                .iter()
+                .map(|c| CommandForm {
+                    name: c.name.clone(),
+                    command: c.command.clone(),
+                    working_directory: dir_text(&c.working_directory),
+                })
+                .collect(),
+        })
+    }
+
+    /// Guarda procesos y comandos en `.forge/project.toml` (lo crea si no existe). El resto
+    /// del archivo (distribuciones, entorno, comentarios) se conserva; lo inválido no se escribe.
+    pub fn save(&self, path: &Path) -> Result<(), String> {
+        use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
+        let file = path.join(".forge/project.toml");
+        let text =
+            std::fs::read_to_string(&file).unwrap_or_else(|_| template(&folder_name(path), &[]));
+        let mut doc: DocumentMut = text
+            .parse()
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+        let mut processes = ArrayOfTables::new();
+        let mut seen = std::collections::HashSet::new();
+        for p in &self.processes {
+            let id = p.id.trim();
+            if id.is_empty() || id.contains(char::is_whitespace) {
+                return Err(tr!("Cada proceso necesita un id sin espacios.").into());
+            }
+            if !seen.insert(id) {
+                return Err(tr!("Hay dos procesos con el id «{id}».", id = id));
+            }
+            if p.command.trim().is_empty() {
+                return Err(tr!("El proceso «{id}» necesita un comando.", id = id));
+            }
+            let mut t = Table::new();
+            t["id"] = value(id);
+            if !p.name.trim().is_empty() {
+                t["name"] = value(p.name.trim());
+            }
+            t["command"] = value(p.command.trim());
+            if !p.working_directory.trim().is_empty() {
+                t["working_directory"] = value(p.working_directory.trim());
+            }
+            if p.start_on_open {
+                t["restart"] = value("on-workspace-open");
+            }
+            match p.auto_restart {
+                AutoRestart::Never => {}
+                AutoRestart::OnFailure => t["auto_restart"] = value("on-failure"),
+                AutoRestart::Always => t["auto_restart"] = value("always"),
+            }
+            if !p.environment.is_empty() {
+                let mut env = Table::new();
+                let mut vars: Vec<_> = p.environment.iter().collect();
+                vars.sort();
+                for (k, v) in vars {
+                    env[k.as_str()] = value(v.as_str());
+                }
+                t["environment"] = Item::Table(env);
+            }
+            let mut h = Table::new();
+            match p.health {
+                HealthKind::None => {}
+                HealthKind::Port if p.port == 0 => {
+                    return Err(tr!("Falta el puerto de «{id}».", id = id));
+                }
+                HealthKind::Port => h["port"] = value(i64::from(p.port)),
+                HealthKind::Url if !p.url.trim().starts_with("http://") => {
+                    return Err(tr!(
+                        "La URL de «{id}» debe empezar por http:// (para https usa el puerto).",
+                        id = id
+                    ));
+                }
+                HealthKind::Url => h["url"] = value(p.url.trim()),
+                HealthKind::Command if p.check_command.trim().is_empty() => {
+                    return Err(tr!("Falta el comando de comprobación de «{id}».", id = id));
+                }
+                HealthKind::Command => h["command"] = value(p.check_command.trim()),
+            }
+            if p.health != HealthKind::None {
+                if p.interval_seconds != default_interval() {
+                    h["interval_seconds"] = value(p.interval_seconds as i64);
+                }
+                if p.timeout_seconds != default_timeout() {
+                    h["timeout_seconds"] = value(p.timeout_seconds as i64);
+                }
+                t["health_check"] = Item::Table(h);
+            }
+            processes.push(t);
+        }
+        let mut commands = ArrayOfTables::new();
+        for c in &self.commands {
+            if c.name.trim().is_empty() || c.command.trim().is_empty() {
+                return Err(tr!("Cada comando necesita un nombre y el comando.").into());
+            }
+            let mut t = Table::new();
+            t["name"] = value(c.name.trim());
+            t["command"] = value(c.command.trim());
+            if !c.working_directory.trim().is_empty() {
+                t["working_directory"] = value(c.working_directory.trim());
+            }
+            commands.push(t);
+        }
+        for (key, list) in [("processes", processes), ("commands", commands)] {
+            if list.is_empty() {
+                doc.remove(key);
+            } else {
+                doc[key] = Item::ArrayOfTables(list);
+            }
+        }
+        let out = doc.to_string();
+        let config: ProjectConfig = toml::from_str(&out).map_err(|e| e.to_string())?;
+        validate_processes(&config.processes)?;
+        std::fs::create_dir_all(path.join(".forge")).map_err(|e| e.to_string())?;
+        std::fs::write(&file, out).map_err(|e| format!("{}: {e}", file.display()))
+    }
+}
+
 fn validate_processes(processes: &[ProcessDef]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     for p in processes {
@@ -558,5 +766,71 @@ mod tests {
         )
         .unwrap();
         assert_eq!(git_branch(&wt).as_deref(), Some("0123456"));
+    }
+
+    #[test]
+    fn the_processes_form_keeps_the_rest_of_the_file() {
+        let dir = std::env::temp_dir().join(format!("forge-project-form-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
+
+        // Sin archivo: los scripts detectados.
+        let mut form = ProjectForm::load(&dir).unwrap();
+        assert!(form.processes.is_empty());
+        assert_eq!(form.commands.len(), 1);
+        form.processes.push(ProcessForm {
+            id: "web".into(),
+            name: "Web".into(),
+            command: "npm run dev".into(),
+            working_directory: "apps/web".into(),
+            start_on_open: true,
+            auto_restart: AutoRestart::OnFailure,
+            health: HealthKind::Port,
+            port: 5173,
+            ..ProcessForm::default()
+        });
+        form.save(&dir).unwrap();
+        let project = Project::load(&dir).unwrap();
+        let p = &project.config.processes[0];
+        assert_eq!(
+            (p.restart, p.auto_restart),
+            (StartPolicy::OnWorkspaceOpen, AutoRestart::OnFailure)
+        );
+        assert_eq!(p.health_check.as_ref().unwrap().port, Some(5173));
+        assert_eq!(p.working_directory.as_deref(), Some(Path::new("apps/web")));
+        assert_eq!(ProjectForm::load(&dir).unwrap().processes, form.processes);
+
+        // Lo que el formulario no toca (comentarios, entorno, distribuciones) sigue.
+        let path = dir.join(".forge/project.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(
+            &path,
+            format!("# mi nota\n{text}\n[environment]\nAPI_URL = \"http://localhost:3000\"\n"),
+        )
+        .unwrap();
+        form.commands.clear();
+        form.save(&dir).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# mi nota") && text.contains("API_URL"),
+            "{text}"
+        );
+        assert!(Project::load(&dir).unwrap().config.commands.is_empty());
+
+        // Lo inválido no se escribe.
+        let mut bad = form.clone();
+        bad.processes[0].health = HealthKind::Url;
+        bad.processes[0].url = "https://x".into();
+        assert!(bad.save(&dir).is_err());
+        let mut bad = form.clone();
+        bad.processes.push(ProcessForm {
+            id: "web".into(),
+            command: "x".into(),
+            ..ProcessForm::default()
+        });
+        assert!(bad.save(&dir).is_err());
+        assert_eq!(ProjectForm::load(&dir).unwrap(), form);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

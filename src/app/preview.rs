@@ -460,11 +460,21 @@ fn ui_preview() {
     }
     // El formulario de Guard: se baja con la rueda hasta él, en ancho y en estrecho.
     for (size, scroll, name) in [
-        (Vec2::new(1440.0, 880.0), 380.0, "11h-ajustes-guard"),
-        (Vec2::new(560.0, 900.0), 380.0, "11i-ajustes-guard-estrecho"),
+        (Vec2::new(1440.0, 880.0), 250.0, "11l-ajustes-procesos"),
+        (
+            Vec2::new(560.0, 900.0),
+            300.0,
+            "11m-ajustes-procesos-estrecho",
+        ),
+        (Vec2::new(1440.0, 880.0), 1250.0, "11h-ajustes-guard"),
+        (
+            Vec2::new(560.0, 900.0),
+            1700.0,
+            "11i-ajustes-guard-estrecho",
+        ),
         (
             Vec2::new(1440.0, 880.0),
-            880.0,
+            1850.0,
             "11j-ajustes-agentes-proyecto",
         ),
         (Vec2::new(1440.0, 880.0), 5000.0, "11k-ajustes-revision-ia"),
