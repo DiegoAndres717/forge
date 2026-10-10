@@ -106,6 +106,14 @@ Also: native notifications when an agent finishes, a process fails or Guard bloc
    xattr -dr com.apple.quarantine /Applications/Forge.app
    ```
 
+### Homebrew
+
+```sh
+brew install --cask diegoandres717/tap/forge
+```
+
+Update with `brew upgrade --cask forge`.
+
 ### Build from source
 
 ```sh

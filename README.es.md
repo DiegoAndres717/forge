@@ -106,6 +106,14 @@ Además: notificaciones nativas cuando un agente termina, un proceso falla o Gua
    xattr -dr com.apple.quarantine /Applications/Forge.app
    ```
 
+### Homebrew
+
+```sh
+brew install --cask diegoandres717/tap/forge
+```
+
+Para actualizar: `brew upgrade --cask forge`.
+
 ### Compilar desde el código
 
 ```sh
