@@ -1866,4 +1866,144 @@ pub const EN: &[(&str, &str)] = &[
         "Hay dos comprobaciones con el id «{id}».",
         "There are two checks with the id “{id}”.",
     ),
+    (
+        "Haiku revisa todo y nunca pasa a modelos más caros. Lo más barato.",
+        "Haiku reviews everything and never moves up to pricier models. The cheapest.",
+    ),
+    (
+        "Haiku revisa el código; si el cambio es de riesgo alto, Sonnet revisa también la arquitectura o la seguridad.",
+        "Haiku reviews the code; for high-risk changes, Sonnet also reviews the architecture or security.",
+    ),
+    (
+        "Sonnet revisa siempre y, desde riesgo medio, Opus revisa la arquitectura o la seguridad. Gasta más.",
+        "Sonnet always reviews and, from medium risk, Opus reviews the architecture or security. Costs more.",
+    ),
+    (
+        "No se pudo leer .forge/agents.toml",
+        "Couldn't read .forge/agents.toml",
+    ),
+    (
+        "Qué agentes salen en la barra lateral de este proyecto y cómo se abren. Se guarda solo en .forge/agents.toml.",
+        "Which agents show in this project's sidebar and how they open. Saved automatically to .forge/agents.toml.",
+    ),
+    (
+        "Si lo desactivas, no sale en la barra lateral ni en ⌘K",
+        "Turned off, it doesn't show in the sidebar or ⌘K",
+    ),
+    ("Identificador sin espacios", "Identifier without spaces"),
+    ("Predeterminado", "Default"),
+    (
+        "El que se abre con ⌘⇧A. Pulsa para quitarlo.",
+        "The one ⌘⇧A opens. Click to unset it.",
+    ),
+    ("Predeterminado (automático)", "Default (automatic)"),
+    (
+        "Ninguno está elegido, así que se usa el primero instalado. Pulsa para fijarlo.",
+        "None is chosen, so the first installed one is used. Click to make it fixed.",
+    ),
+    ("Hacer predeterminado", "Make default"),
+    (
+        "Que sea el que se abre con ⌘⇧A y el botón de agente",
+        "Make it the one ⌘⇧A and the agent button open",
+    ),
+    ("Quitar agente", "Remove agent"),
+    ("Abrir", "Open"),
+    ("p. ej. aider --model sonnet", "e.g. aider --model sonnet"),
+    (
+        "Cómo se abre en la terminal; puedes añadir opciones, p. ej. claude --model opus",
+        "How it opens in the terminal; you can add options, e.g. claude --model opus",
+    ),
+    ("Reanudar", "Resume"),
+    ("opcional", "optional"),
+    (
+        "Cómo seguir la última sesión (se usa al restaurar el proyecto)",
+        "How to continue the last session (used when the project is restored)",
+    ),
+    ("Añadir agente propio", "Add your own agent"),
+    (
+        "Cualquier programa de terminal: aider, goose, un script tuyo…",
+        "Any terminal program: aider, goose, a script of yours…",
+    ),
+    ("Ocultar los no instalados", "Hide the ones not installed"),
+    (
+        "Mostrar los no instalados ({n})",
+        "Show the ones not installed ({n})",
+    ),
+    (
+        "Para opciones avanzadas (variables de entorno…): lo abre en tu editor",
+        "For advanced options (environment variables…): opens it in your editor",
+    ),
+    (
+        "No se pudo leer .forge/routing.toml",
+        "Couldn't read .forge/routing.toml",
+    ),
+    (
+        "Un modelo revisa cada cambio antes de que salga, según su riesgo. Se guarda solo en .forge/routing.toml.",
+        "A model reviews each change before it leaves, according to its risk. Saved automatically to .forge/routing.toml.",
+    ),
+    (
+        "{p0} Ahora no se usa: actívala en «Revisión con IA» de algún paso de Project Guard (arriba).",
+        "{p0} Not used right now: turn on “AI review” for a Project Guard step (above).",
+    ),
+    ("Perfil", "Profile"),
+    (
+        "Qué modelos revisan y cuándo se pasa a uno más capaz.",
+        "Which models review and when a more capable one steps in.",
+    ),
+    ("Económico", "Economy"),
+    ("Equilibrado", "Balanced"),
+    ("Calidad", "Quality"),
+    ("Gasto", "Spending"),
+    (
+        "Las revisiones con modelos de pago gastan dinero (o tu plan). Estos topes lo limitan.",
+        "Reviews with paid models cost money (or your plan). These caps limit it.",
+    ),
+    ("al mes como máximo", "per month at most"),
+    (
+        "Al llegar a este gasto en el mes, Forge deja de llamar a modelos de pago.",
+        "Once the month reaches this spend, Forge stops calling paid models.",
+    ),
+    ("por revisión como máximo", "per review at most"),
+    (
+        "Tope de cada revisión (se pasa a Claude con --max-budget-usd).",
+        "Cap for each review (passed to Claude as --max-budget-usd).",
+    ),
+    ("Opciones", "Options"),
+    ("Ajustes finos del perfil.", "Fine-tuning for the profile."),
+    (
+        "Usar un modelo local si hay",
+        "Use a local model if available",
+    ),
+    (
+        "Si tienes Ollama instalado, la primera clasificación del cambio se hace en tu Mac, gratis.",
+        "With Ollama installed, the first classification of the change runs on your Mac, for free.",
+    ),
+    (
+        "Pasar a un modelo más capaz si hay riesgo",
+        "Move up to a more capable model when risky",
+    ),
+    (
+        "Un cambio de riesgo (pagos, seguridad, migraciones…) lo revisa además un modelo más capaz. No aplica en Económico.",
+        "A risky change (payments, security, migrations…) is also reviewed by a more capable model. Doesn't apply to Economy.",
+    ),
+    (
+        "Para elegir proveedor y modelo por tarea: lo abre en tu editor",
+        "To pick a provider and model per task: opens it in your editor",
+    ),
+    (
+        "Solo un agente puede ser el predeterminado.",
+        "Only one agent can be the default.",
+    ),
+    (
+        "Cada agente necesita un id sin espacios.",
+        "Every agent needs an id without spaces.",
+    ),
+    (
+        "Hay dos agentes con el id «{id}».",
+        "There are two agents with the id “{id}”.",
+    ),
+    (
+        "El agente «{id}» necesita un comando.",
+        "The agent “{id}” needs a command.",
+    ),
 ];

@@ -6,15 +6,84 @@ use forge_core::guard::{CheckForm, RulesForm, STANDARD_CHECKS};
 /// Tras este rato sin cambios, se guarda.
 const SAVE_AFTER: f64 = 0.8;
 
-pub(super) struct GuardForm {
-    project: PathBuf,
-    form: RulesForm,
+/// Un formulario de Ajustes que se guarda solo: lo editado, lo último guardado y el estado.
+pub(super) struct Autosave<T> {
+    pub(super) project: PathBuf,
+    pub(super) form: T,
     /// Lo último guardado (o leído): si `form` difiere, hay cambios por guardar.
-    saved: RulesForm,
+    saved: T,
     changed_at: f64,
     saved_at: Option<f64>,
-    error: Option<String>,
+    pub(super) error: Option<String>,
 }
+
+impl<T: Clone + PartialEq> Autosave<T> {
+    pub(super) fn new(project: PathBuf, form: T) -> Self {
+        Self {
+            project,
+            saved: form.clone(),
+            form,
+            changed_at: 0.0,
+            saved_at: None,
+            error: None,
+        }
+    }
+
+    /// Tras un cambio (`changed`), espera un momento y guarda con `save` si `complete`.
+    /// Devuelve si acaba de guardar.
+    pub(super) fn tick(
+        &mut self,
+        now: f64,
+        changed: bool,
+        complete: bool,
+        save: impl FnOnce(&Path, &T) -> Result<(), String>,
+    ) -> bool {
+        if changed {
+            self.changed_at = now;
+            self.error = None;
+        }
+        if self.form != self.saved && complete && now - self.changed_at > SAVE_AFTER {
+            match save(&self.project, &self.form) {
+                Ok(()) => {
+                    self.saved = self.form.clone();
+                    self.saved_at = Some(now);
+                    return true;
+                }
+                Err(e) => self.error = Some(e),
+            }
+        }
+        false
+    }
+
+    /// "Guardando…", "✓ Guardado" o el error.
+    pub(super) fn status(&self, ui: &mut egui::Ui, now: f64, incomplete: &str) {
+        let pending = self.form != self.saved;
+        ui.add_space(4.0);
+        if let Some(e) = &self.error {
+            ui.label(RichText::new(e).size(11.5).color(theme::RED));
+        } else if pending && now - self.changed_at > SAVE_AFTER {
+            ui.label(RichText::new(incomplete).size(11.5).color(theme::TEXT_3));
+        } else if pending {
+            ui.label(
+                RichText::new(tr!("Guardando…"))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(300));
+        } else if self.saved_at.is_some_and(|t| now - t < 2.5) {
+            ui.label(
+                RichText::new(tr!("✓ Guardado"))
+                    .size(11.5)
+                    .color(theme::GREEN),
+            );
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        }
+    }
+}
+
+pub(super) type GuardForm = Autosave<RulesForm>;
 
 /// Una casilla con su ⓘ.
 fn check(ui: &mut egui::Ui, on: &mut bool, label: &str, help: &str) -> bool {
@@ -57,14 +126,7 @@ impl App {
             .is_none_or(|g| g.project != project)
         {
             self.guard_form = Some(match RulesForm::load(&project) {
-                Ok(form) => GuardForm {
-                    project: project.clone(),
-                    saved: form.clone(),
-                    form,
-                    changed_at: 0.0,
-                    saved_at: None,
-                    error: None,
-                },
+                Ok(form) => GuardForm::new(project.clone(), form),
                 Err(e) => {
                     // Un archivo que no se puede leer no se pisa: se dice y se ofrece abrirlo.
                     theme::section(ui, "Project Guard");
@@ -349,53 +411,14 @@ impl App {
                 }
             });
 
-            // Estado del guardado.
-            if changed {
-                g.changed_at = now;
-                g.error = None;
-            }
-            let pending = g.form != g.saved;
             // Una comprobación a medio escribir (sin id o comando) espera a estar completa.
             let complete = g
                 .form
                 .checks
                 .iter()
                 .all(|c| !c.id.trim().is_empty() && !c.command.trim().is_empty());
-            if pending && complete && now - g.changed_at > SAVE_AFTER {
-                match g.form.save(&g.project) {
-                    Ok(()) => {
-                        g.saved = g.form.clone();
-                        g.saved_at = Some(now);
-                    }
-                    Err(e) => g.error = Some(e),
-                }
-            }
-            ui.add_space(4.0);
-            if let Some(e) = &g.error {
-                ui.label(RichText::new(e).size(11.5).color(theme::RED));
-            } else if pending && !complete {
-                ui.label(
-                    RichText::new(tr!("Completa el id y el comando para guardar."))
-                        .size(11.5)
-                        .color(theme::TEXT_3),
-                );
-            } else if pending {
-                ui.label(
-                    RichText::new(tr!("Guardando…"))
-                        .size(11.5)
-                        .color(theme::TEXT_3),
-                );
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(300));
-            } else if g.saved_at.is_some_and(|t| now - t < 2.5) {
-                ui.label(
-                    RichText::new(tr!("✓ Guardado"))
-                        .size(11.5)
-                        .color(theme::GREEN),
-                );
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_millis(500));
-            }
+            g.tick(now, changed, complete, |p, f| f.save(p));
+            g.status(ui, now, tr!("Completa el id y el comando para guardar."));
         });
     }
 }

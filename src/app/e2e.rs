@@ -622,12 +622,16 @@ fn settings_tabs_show_their_options_with_help() {
         h.query_by_label_contains("Idioma de Forge").is_some(),
         "ⓘ del idioma"
     );
-    assert!(h.query_by_label_contains("Crear con plantilla").is_none());
+    assert!(
+        h.query_by_label_contains("Qué se exige en cada paso")
+            .is_none()
+    );
     h.get_by_label_contains("Este proyecto").click();
     h.run_steps(3);
     assert!(
-        h.query_all_by_label_contains("Crear con plantilla").count() >= 1,
-        "archivos que faltan"
+        h.query_by_label_contains("Qué se exige en cada paso")
+            .is_some(),
+        "formulario de Guard"
     );
     assert!(h.query_by_label_contains("Idioma").is_none());
 }
@@ -1268,4 +1272,45 @@ fn the_guard_form_saves_by_itself() {
     // Lo que había en el archivo sigue (el check de tests del proyecto de prueba).
     let text = std::fs::read_to_string(&rules).unwrap();
     assert!(text.contains("id = \"tests\""), "{text}");
+}
+
+/// Agentes del proyecto desde Ajustes: desactivar uno lo quita de la barra lateral.
+#[test]
+fn turning_an_agent_off_in_settings_hides_it() {
+    let _serial = serial();
+    let dir = project("agents-form");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    assert!(
+        ws(h.state())
+            .project
+            .agents
+            .iter()
+            .any(|a| a.id == "fake" && a.enabled)
+    );
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Project);
+    h.state_mut().settings_open = true;
+    h.run_steps(3);
+    // Desactivar el propio (el formulario está más abajo: se cambia su estado y se espera
+    // a que se guarde solo, como al pulsar la casilla).
+    let g = h
+        .state_mut()
+        .agents_form
+        .as_mut()
+        .expect("formulario de agentes cargado");
+    g.form.iter_mut().find(|a| a.id == "fake").unwrap().enabled = false;
+    wait_until(&mut h, "se guarda y se recarga", |a| {
+        ws(a)
+            .project
+            .agents
+            .iter()
+            .any(|x| x.id == "fake" && !x.enabled)
+    });
+    let text = std::fs::read_to_string(dir.join(".forge/agents.toml")).unwrap();
+    assert!(text.contains("enabled = false"), "{text}");
 }
