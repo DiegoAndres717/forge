@@ -622,11 +622,15 @@ fn settings_tabs_show_their_options_with_help() {
         h.query_by_label_contains("Idioma de Forge").is_some(),
         "ⓘ del idioma"
     );
-    assert!(h.query_by_label_contains("Qué se exige en cada paso").is_none());
+    assert!(
+        h.query_by_label_contains("Qué se exige en cada paso")
+            .is_none()
+    );
     h.get_by_label_contains("Este proyecto").click();
     h.run_steps(3);
     assert!(
-        h.query_by_label_contains("Qué se exige en cada paso").is_some(),
+        h.query_by_label_contains("Qué se exige en cada paso")
+            .is_some(),
         "formulario de Guard"
     );
     assert!(h.query_by_label_contains("Idioma").is_none());
