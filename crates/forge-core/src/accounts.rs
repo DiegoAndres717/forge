@@ -44,6 +44,23 @@ pub struct Account {
     pub dir: Option<PathBuf>,
 }
 
+/// Una ventana de uso del plan (5 h, semanal…), como la da Claude Code.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageWindow {
+    pub kind: String,
+    pub percent_used: f64,
+    #[serde(default)]
+    pub resets_at: Option<String>,
+}
+
+/// Últimas ventanas de uso conocidas de una cuenta y cuándo se supieron.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct AccountLimits {
+    pub at: i64,
+    pub windows: Vec<UsageWindow>,
+}
+
 pub fn supported(program: &str) -> bool {
     AGENTS.iter().any(|a| a.0 == program)
 }
@@ -213,6 +230,25 @@ impl Store {
         Ok(())
     }
 
+    pub fn set_account_limits(
+        &self,
+        program: &str,
+        id: i64,
+        windows: &[UsageWindow],
+    ) -> Result<(), String> {
+        let limits = AccountLimits {
+            at: crate::store::now(),
+            windows: windows.to_vec(),
+        };
+        let json = serde_json::to_string(&limits).map_err(|e| e.to_string())?;
+        self.set_setting(&format!("limits:{program}:{id}"), &json)
+    }
+
+    pub fn account_limits(&self, program: &str, id: i64) -> Option<AccountLimits> {
+        let json = self.setting(&format!("limits:{program}:{id}")).ok()??;
+        serde_json::from_str(&json).ok()
+    }
+
     /// Cuenta que usa el proyecto para ese agente (la última elegida; si no, la principal).
     pub fn project_account(&self, project: &Path, program: &str) -> Account {
         let key = format!("account:{program}:{}", self.project_key(project));
@@ -298,6 +334,39 @@ mod tests {
         assert_eq!(names, ["Personal", "Empresa"]);
         assert!(store.rename_account("claude", work.id, " ").is_err());
         assert!(store.add_account("gemini", "x").is_err());
+
+        // Uso del plan por cuenta (lo manda el mod) y tokens por cuenta.
+        let windows = vec![UsageWindow {
+            kind: "five_hour".into(),
+            percent_used: 40.0,
+            resets_at: None,
+        }];
+        store
+            .set_account_limits("claude", work.id, &windows)
+            .unwrap();
+        assert_eq!(
+            store.account_limits("claude", work.id).unwrap().windows,
+            windows
+        );
+        assert!(store.account_limits("claude", 0).is_none());
+        let parsed: Vec<UsageWindow> =
+            serde_json::from_str(r#"[{"kind":"seven_day","percentUsed":3}]"#).unwrap();
+        assert_eq!(parsed[0].percent_used, 3.0);
+        let turn = |model: &str| crate::events::TurnUsage {
+            model: model.into(),
+            input_tokens: 100,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            subagent: false,
+        };
+        store.add_agent_usage(p, &turn("opus"), work.id).unwrap();
+        store.add_agent_usage(p, &turn("opus"), work.id).unwrap();
+        store.add_agent_usage(p, &turn("haiku"), 0).unwrap();
+        assert_eq!(
+            store.usage_by_account(0).unwrap(),
+            [(work.id, 200), (0, 100)]
+        );
 
         assert!(store.delete_account("claude", 0).is_err());
         store.delete_account("claude", work.id).unwrap();

@@ -177,6 +177,7 @@ test('an exhausted usage window tells Forge once so it can offer another account
   await measure(90)
   await measure(100)
   await measure(100)
+  expect(sent.some(argv => argv.includes('agent-limits'))).toBe(true) // Forge keeps the latest
   const limits = sent.filter(argv => argv.includes('limit'))
   expect(limits.length).toBe(1)
   expect(limits[0]?.slice(0, 3)).toEqual(['/forge', 'agent-event', 'limit'])

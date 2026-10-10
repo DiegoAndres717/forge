@@ -397,6 +397,30 @@ fn ui_preview() {
     harness.state_mut().welcome = None;
     // Con una segunda cuenta de Claude, para ver la sección Cuentas.
     harness.state_mut().db(|s| s.add_account("claude", "Work"));
+    harness.state_mut().db(|s| {
+        let w = |kind: &str, p: f64| forge_core::accounts::UsageWindow {
+            kind: kind.into(),
+            percent_used: p,
+            resets_at: None,
+        };
+        s.set_account_limits("claude", 0, &[w("five_hour", 92.0), w("seven_day", 41.0)])?;
+        s.set_account_limits("claude", 1, &[w("five_hour", 12.0), w("seven_day", 8.0)])?;
+        let turn = forge_core::events::TurnUsage {
+            model: "opus".into(),
+            input_tokens: 1_200_000,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+            cache_creation_input_tokens: 0,
+            subagent: false,
+        };
+        s.add_agent_usage(Path::new("/demo"), &turn, 0)?;
+        let small = forge_core::events::TurnUsage {
+            model: "opus".into(),
+            input_tokens: 300_000,
+            ..turn
+        };
+        s.add_agent_usage(Path::new("/demo"), &small, 1)
+    });
     harness.state_mut().sync_accounts();
     harness.state_mut().settings_open = true;
     settle(&mut harness);

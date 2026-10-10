@@ -303,6 +303,15 @@ impl App {
                     .map(|s| s.accounts(program))
                     .unwrap_or_default();
                 let chosen = ws.and_then(|w| w.account_for(program, None)).map(|a| a.id);
+                // Solo Claude Code (con el mod) cuenta tokens y manda el uso del plan.
+                let usage: HashMap<i64, u64> = match (program, self.store.as_ref()) {
+                    ("claude", Some(s)) => s
+                        .usage_by_account(store::now() - 30 * 86_400)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
+                    _ => HashMap::new(),
+                };
                 egui::Grid::new(("accounts", program))
                     .num_columns(3)
                     .spacing([12.0, 6.0])
@@ -312,9 +321,22 @@ impl App {
                             let mut text = ui
                                 .data(|d| d.get_temp::<String>(id))
                                 .unwrap_or_else(|| a.name.clone());
+                            let limits = self
+                                .store
+                                .as_ref()
+                                .and_then(|s| s.account_limits(program, a.id));
+                            let tokens = usage.get(&a.id).copied();
                             let edit = ui
-                                .add(egui::TextEdit::singleline(&mut text).desired_width(150.0))
-                                .on_hover_text(tr!("Nombre de la cuenta"));
+                                .vertical(|ui| {
+                                    let edit = ui
+                                        .add(egui::TextEdit::singleline(&mut text).desired_width(150.0))
+                                        .on_hover_text(tr!("Nombre de la cuenta"));
+                                    if program == "claude" {
+                                        account_usage(ui, limits.as_ref(), tokens);
+                                    }
+                                    edit
+                                })
+                                .inner;
                             if edit.changed() {
                                 ui.data_mut(|d| d.insert_temp(id, text.clone()));
                             }
@@ -379,4 +401,66 @@ impl App {
             }
         });
     }
+}
+
+/// Uso del plan de una cuenta (5 h y semanal, de la última vez que se usó desde Forge) y
+/// sus tokens de los últimos 30 días.
+fn account_usage(
+    ui: &mut egui::Ui,
+    limits: Option<&forge_core::accounts::AccountLimits>,
+    tokens: Option<u64>,
+) {
+    let windows = limits.map_or(&[][..], |l| l.windows.as_slice());
+    if windows.is_empty() && tokens.is_none() {
+        ui.label(
+            RichText::new(tr!("Sin uso todavía"))
+                .size(11.0)
+                .color(theme::TEXT_4),
+        )
+        .on_hover_text(tr!("Aparece después de usar la cuenta desde Forge"));
+        return;
+    }
+    ui.horizontal(|ui| {
+        for w in windows {
+            let label = match w.kind.as_str() {
+                "five_hour" => "5h",
+                "seven_day" => tr!("semana"),
+                other => other,
+            };
+            let used = (w.percent_used / 100.0).clamp(0.0, 1.0) as f32;
+            let color = if used >= 0.8 {
+                theme::RED
+            } else {
+                theme::ORANGE
+            };
+            ui.label(RichText::new(label).size(11.0).color(theme::TEXT_3));
+            let (bar, _) = ui.allocate_exact_size(Vec2::new(48.0, 5.0), Sense::hover());
+            ui.painter().rect_filled(bar, 2.5, theme::SEPARATOR);
+            let mut fill = bar;
+            fill.set_width((bar.width() * used).max(if used > 0.0 { 3.0 } else { 0.0 }));
+            ui.painter().rect_filled(fill, 2.5, color);
+            ui.label(
+                RichText::new(format!("{:.0}%", w.percent_used))
+                    .size(11.0)
+                    .color(if used >= 0.8 {
+                        theme::RED
+                    } else {
+                        theme::TEXT_2
+                    }),
+            );
+            ui.add_space(6.0);
+        }
+        if let Some(n) = tokens {
+            ui.label(
+                RichText::new(tr!("{p0} tokens · 30 días", p0 = short_tokens(n)))
+                    .size(11.0)
+                    .color(theme::TEXT_3),
+            );
+        }
+    })
+    .response
+    .on_hover_text(match limits {
+        Some(l) => tr!("Uso del plan visto {p0}", p0 = store::ago_precise(l.at)),
+        None => tr!("Tokens usados desde Forge en 30 días").into(),
+    });
 }

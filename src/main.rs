@@ -194,6 +194,10 @@ fn main() -> eframe::Result {
             forge_core::events::record_usage();
             return Ok(());
         }
+        Some("agent-limits") => {
+            forge_core::events::record_limits();
+            return Ok(());
+        }
         Some("agent-event") => {
             // Codex pasa su JSON como argumento; `--project …` (del mod) no lo es.
             forge_core::events::record(
