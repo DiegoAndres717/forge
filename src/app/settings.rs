@@ -89,7 +89,10 @@ fn model_info(id: &str) -> &'static str {
 impl App {
     pub(super) fn settings_ui(&mut self, ctx: &egui::Context, cmds: &mut Vec<UiCmd>) {
         if !self.settings_open {
-            self.guard_form = None; // al volver a abrir se relee el archivo
+            // Al volver a abrir se releen los archivos.
+            self.guard_form = None;
+            self.agents_form = None;
+            self.routing_form = None;
             return;
         }
         let mut changed = false;
@@ -376,26 +379,12 @@ impl App {
             );
             ui.add_space(6.0);
             // Cada archivo por lo que hace (el nombre técnico, en gris).
-            let files = [
-                (
-                    icon::SQUARES_FOUR,
-                    tr!("Distribución y procesos"),
-                    tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."),
-                    "project.toml",
-                ),
-                (
-                    icon::ROBOT,
-                    tr!("Agentes"),
-                    tr!("Agentes propios y cómo se abren."),
-                    "agents.toml",
-                ),
-                (
-                    icon::SPARKLE,
-                    tr!("Revisión con IA"),
-                    tr!("Qué modelos revisan los cambios y con qué presupuesto."),
-                    "routing.toml",
-                ),
-            ];
+            let files = [(
+                icon::SQUARES_FOUR,
+                tr!("Distribución y procesos"),
+                tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."),
+                "project.toml",
+            )];
             let narrow = ui.available_width() < SIDE_BY_SIDE;
             for (glyph, title, what, file) in files {
                 let exists = ws.project.path.join(".forge").join(file).exists();
@@ -480,6 +469,8 @@ impl App {
             });
         });
         self.guard_form_ui(ui, cmds);
+        self.agents_form_ui(ui, cmds);
+        self.routing_form_ui(ui, cmds);
         let Some(i) = self.active else { return };
         let ws = &self.workspaces[i];
         theme::section(ui, tr!("Hooks de Git"));

@@ -35,6 +35,7 @@ mod memory_panel;
 mod menu;
 mod notify;
 mod palette;
+mod project_forms;
 mod settings;
 mod sidebar;
 mod update;
@@ -305,6 +306,8 @@ pub struct App {
     settings_open: bool,
     /// Formulario de Guard en Ajustes (se carga al abrirlo y se guarda solo).
     guard_form: Option<guard_form::GuardForm>,
+    agents_form: Option<project_forms::AgentsForm>,
+    routing_form: Option<project_forms::RoutingSettings>,
     /// Notificaciones activadas en Ajustes.
     notifications_enabled: bool,
     /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
@@ -377,6 +380,8 @@ impl App {
             toolbar_right: 0.0,
             settings_open: false,
             guard_form: None,
+            agents_form: None,
+            routing_form: None,
             notifications_enabled: true,
             notifications: false,
             next_update_check: None,

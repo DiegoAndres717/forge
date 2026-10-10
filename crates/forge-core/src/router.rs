@@ -1124,7 +1124,10 @@ pub fn write_template(project: &Path) -> Result<(), String> {
         return Err(tr!("{p0} ya existe", p0 = file.display()));
     }
     std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
-    let text = "# Router de modelos: qué modelo revisa según la tarea y el riesgo.\n\
+    std::fs::write(&file, TEMPLATE).map_err(|e| format!("{}: {e}", file.display()))
+}
+
+const TEMPLATE: &str = "# Router de modelos: qué modelo revisa según la tarea y el riesgo.\n\
                 [routing]\n\
                 profile = \"balanced\"          # economy | balanced | quality\n\
                 prefer_local = true             # clasificación con ollama si está instalado\n\
@@ -1136,12 +1139,93 @@ pub fn write_template(project: &Path) -> Result<(), String> {
                 # [routing.tasks.code_review]\n# provider = \"anthropic\"\n# model = \"haiku\"\n# effort = \"medium\"\n\n\
                 # [routing.tasks.architecture]\n# provider = \"anthropic\"\n# model = \"sonnet\"\n# effort = \"high\"\n\n\
                 # [routing.tasks.security]\n# provider = \"openai\"\n# model = \"gpt-5-codex\"\n# effort = \"high\"\n";
-    std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))
+
+/// Ajustes → Revisión con IA: lo que se cambia sin tocar el archivo.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoutingForm {
+    pub profile: Profile,
+    pub prefer_local: bool,
+    pub monthly_budget_usd: f64,
+    pub allow_escalation: bool,
+    pub max_cost_per_call_usd: f64,
+}
+
+impl RoutingForm {
+    pub fn load(project: &Path) -> Result<Self, String> {
+        let c = RouterConfig::load(project)?;
+        Ok(Self {
+            profile: c.profile,
+            prefer_local: c.prefer_local,
+            monthly_budget_usd: c.monthly_budget_usd,
+            allow_escalation: c.allow_escalation,
+            max_cost_per_call_usd: c.max_cost_per_call_usd,
+        })
+    }
+
+    /// Guarda en `.forge/routing.toml` (lo crea con la plantilla si no existe) cambiando
+    /// solo estos valores: los comentarios y las tareas propias se conservan.
+    pub fn save(&self, project: &Path) -> Result<(), String> {
+        let file = project.join(".forge/routing.toml");
+        let text = std::fs::read_to_string(&file).unwrap_or_else(|_| TEMPLATE.to_string());
+        let mut doc: toml_edit::DocumentMut = text
+            .parse()
+            .map_err(|e| format!("{}: {e}", file.display()))?;
+        let profile = match self.profile {
+            Profile::Economy => "economy",
+            Profile::Balanced => "balanced",
+            Profile::Quality => "quality",
+        };
+        let r = &mut doc["routing"];
+        r["profile"] = toml_edit::value(profile);
+        r["prefer_local"] = toml_edit::value(self.prefer_local);
+        r["monthly_budget_usd"] = toml_edit::value(self.monthly_budget_usd.max(0.0));
+        r["allow_escalation"] = toml_edit::value(self.allow_escalation);
+        r["max_cost_per_call_usd"] = toml_edit::value(self.max_cost_per_call_usd.max(0.0));
+        let out = doc.to_string();
+        toml::from_str::<RoutingFile>(&out).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
+        std::fs::write(&file, out).map_err(|e| format!("{}: {e}", file.display()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_routing_form_keeps_comments_and_tasks() {
+        let dir = std::env::temp_dir().join(format!("forge-routing-form-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut form = RoutingForm::load(&dir).unwrap();
+        assert_eq!(form.profile, Profile::Balanced);
+        form.profile = Profile::Economy;
+        form.monthly_budget_usd = 5.0;
+        form.save(&dir).unwrap();
+        let path = dir.join(".forge/routing.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("profile = \"economy\"") && text.contains("# Router de modelos"));
+        std::fs::write(
+            &path,
+            format!(
+                "{text}\n[routing.tasks.code_review]\nprovider = \"anthropic\"\nmodel = \"haiku\"\n"
+            ),
+        )
+        .unwrap();
+        form.max_cost_per_call_usd = 0.2;
+        form.save(&dir).unwrap();
+        let c = RouterConfig::load(&dir).unwrap();
+        assert_eq!(
+            (c.profile, c.monthly_budget_usd, c.max_cost_per_call_usd),
+            (Profile::Economy, 5.0, 0.2)
+        );
+        assert!(
+            c.tasks.contains_key("code_review"),
+            "las tareas propias siguen"
+        );
+        assert_eq!(RoutingForm::load(&dir).unwrap(), form);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn file(path: &str, added: usize) -> FileChange {
         FileChange {

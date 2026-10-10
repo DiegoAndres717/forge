@@ -459,17 +459,31 @@ fn ui_preview() {
         save(&mut harness, &out, name);
     }
     // El formulario de Guard: se baja con la rueda hasta él, en ancho y en estrecho.
-    for (size, name) in [
-        (Vec2::new(1440.0, 880.0), "11h-ajustes-guard"),
-        (Vec2::new(560.0, 900.0), "11i-ajustes-guard-estrecho"),
+    for (size, scroll, name) in [
+        (Vec2::new(1440.0, 880.0), 380.0, "11h-ajustes-guard"),
+        (Vec2::new(560.0, 900.0), 380.0, "11i-ajustes-guard-estrecho"),
+        (
+            Vec2::new(1440.0, 880.0),
+            880.0,
+            "11j-ajustes-agentes-proyecto",
+        ),
+        (Vec2::new(1440.0, 880.0), 5000.0, "11k-ajustes-revision-ia"),
     ] {
         harness.set_size(size);
         show_tab(&ctx, SettingsTab::Project);
         settle(&mut harness);
         harness.hover_at(egui::pos2(size.x / 2.0, size.y / 2.0));
+        // Primero arriba del todo (el desplazamiento se queda de la escena anterior).
         harness.event(egui::Event::MouseWheel {
             unit: egui::MouseWheelUnit::Point,
-            delta: Vec2::new(0.0, -380.0),
+            delta: Vec2::new(0.0, 20_000.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        settle(&mut harness);
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, -scroll),
             modifiers: egui::Modifiers::NONE,
             phase: egui::TouchPhase::Move,
         });

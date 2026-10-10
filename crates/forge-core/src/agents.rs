@@ -316,6 +316,133 @@ struct AgentEntry {
     environment: HashMap<String, String>,
 }
 
+/// Ajustes → Agentes del proyecto: un agente tal como se edita en el formulario.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgentForm {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub resume_command: String,
+    pub enabled: bool,
+    pub default: bool,
+    /// Conocido por Forge (Claude Code, Codex…): no se borra, se desactiva.
+    pub builtin: bool,
+    pub headless: Option<String>,
+    pub environment: HashMap<String, String>,
+}
+
+impl AgentForm {
+    /// Uno propio, vacío.
+    pub fn custom() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            command: String::new(),
+            resume_command: String::new(),
+            enabled: true,
+            default: false,
+            builtin: false,
+            headless: None,
+            environment: HashMap::new(),
+        }
+    }
+}
+
+/// Los agentes del proyecto para el formulario (los conocidos y los propios).
+pub fn load_form(project: &Path) -> Result<Vec<AgentForm>, String> {
+    let known = builtins();
+    Ok(load(project)?
+        .into_iter()
+        .map(|a| AgentForm {
+            builtin: known.iter().any(|b| b.id == a.id),
+            id: a.id,
+            name: a.name,
+            command: a.command,
+            resume_command: a.resume.unwrap_or_default(),
+            enabled: a.enabled,
+            default: a.default,
+            headless: a.headless,
+            environment: a.environment,
+        })
+        .collect())
+}
+
+/// Guarda el formulario en `.forge/agents.toml`: de los conocidos, solo lo que cambia;
+/// los propios, enteros. El resto del archivo (comentarios, `[[reviewers]]`) se conserva.
+pub fn save_form(project: &Path, agents: &[AgentForm]) -> Result<(), String> {
+    use toml_edit::{ArrayOfTables, DocumentMut, Item, Table, value};
+    let file = project.join(".forge/agents.toml");
+    let text = std::fs::read_to_string(&file).unwrap_or_else(|_| template());
+    let mut doc: DocumentMut = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    if agents.iter().filter(|a| a.default).count() > 1 {
+        return Err(tr!("Solo un agente puede ser el predeterminado.").into());
+    }
+    let known = builtins();
+    let mut seen = std::collections::HashSet::new();
+    let mut list = ArrayOfTables::new();
+    for a in agents {
+        let id = a.id.trim();
+        if id.is_empty() || id.contains(char::is_whitespace) {
+            return Err(tr!("Cada agente necesita un id sin espacios.").into());
+        }
+        if !seen.insert(id) {
+            return Err(tr!("Hay dos agentes con el id «{id}».", id = id));
+        }
+        if a.command.trim().is_empty() {
+            return Err(tr!("El agente «{id}» necesita un comando.", id = id));
+        }
+        let base = known.iter().find(|b| b.id == id);
+        let differs = |value: &str, base: Option<&str>| base != Some(value);
+        let mut t = Table::new();
+        t["id"] = value(id);
+        if differs(a.name.trim(), base.map(|b| b.name.as_str())) && !a.name.trim().is_empty() {
+            t["name"] = value(a.name.trim());
+        }
+        if differs(a.command.trim(), base.map(|b| b.command.as_str())) {
+            t["command"] = value(a.command.trim());
+        }
+        let resume = a.resume_command.trim();
+        if !resume.is_empty() && differs(resume, base.and_then(|b| b.resume.as_deref())) {
+            t["resume_command"] = value(resume);
+        }
+        if let Some(h) = &a.headless
+            && differs(h, base.and_then(|b| b.headless.as_deref()))
+        {
+            t["headless_command"] = value(h.as_str());
+        }
+        if !a.enabled {
+            t["enabled"] = value(false);
+        }
+        if a.default {
+            t["default"] = value(true);
+        }
+        if !a.environment.is_empty() {
+            let mut env = Table::new();
+            let mut vars: Vec<_> = a.environment.iter().collect();
+            vars.sort();
+            for (k, v) in vars {
+                env[k.as_str()] = value(v.as_str());
+            }
+            t["environment"] = Item::Table(env);
+        }
+        // Un conocido sin cambios no se escribe.
+        if base.is_none() || t.len() > 1 {
+            list.push(t);
+        }
+    }
+    if list.is_empty() {
+        doc.remove("agents");
+    } else {
+        doc["agents"] = Item::ArrayOfTables(list);
+    }
+    let out = doc.to_string();
+    toml::from_str::<AgentsFile>(&out).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
+    std::fs::write(&file, out).map_err(|e| format!("{}: {e}", file.display()))
+}
+
 /// Agentes del proyecto: los conocidos con los cambios de agents.toml, más los propios.
 pub fn load(project: &Path) -> Result<Vec<AgentSpec>, String> {
     let path = project.join(".forge/agents.toml");
@@ -703,6 +830,64 @@ mod tests {
                 .any(|a| a.id == "mi-agente" && a.environment.contains_key("MI_VARIABLE"))
         );
         assert!(agents.iter().find(|a| a.id == "claude").unwrap().default);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_agents_form_writes_only_what_changes() {
+        let dir = std::env::temp_dir().join(format!("forge-agents-form-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut agents = load_form(&dir).unwrap();
+        assert!(agents.iter().all(|a| a.builtin));
+        // Sin cambios: nada que escribir (solo la plantilla comentada).
+        save_form(&dir, &agents).unwrap();
+        let path = dir.join(".forge/agents.toml");
+        let tables = |t: &str| t.lines().filter(|l| l.trim() == "[[agents]]").count();
+        assert_eq!(tables(&std::fs::read_to_string(&path).unwrap()), 0);
+
+        agents
+            .iter_mut()
+            .find(|a| a.id == "opencode")
+            .unwrap()
+            .enabled = false;
+        let claude = agents.iter_mut().find(|a| a.id == "claude").unwrap();
+        claude.command = "claude --model opus".into();
+        claude.default = true;
+        agents.push(AgentForm {
+            id: "aider".into(),
+            name: "Aider".into(),
+            command: "aider".into(),
+            ..AgentForm::custom()
+        });
+        save_form(&dir, &agents).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# Agentes del proyecto"),
+            "comentarios conservados"
+        );
+        assert_eq!(tables(&text), 3, "{text}");
+        assert!(
+            !text.contains("id = \"codex\""),
+            "los que no cambian no se escriben"
+        );
+        let again = load_form(&dir).unwrap();
+        assert_eq!(again, agents);
+        let loaded = load(&dir).unwrap();
+        assert!(!loaded.iter().find(|a| a.id == "opencode").unwrap().enabled);
+
+        // Lo inválido no se escribe.
+        let mut bad = agents.clone();
+        bad.iter_mut().find(|a| a.id == "codex").unwrap().default = true;
+        assert!(save_form(&dir, &bad).is_err());
+        let mut bad = agents.clone();
+        bad.push(AgentForm {
+            id: "mi agente".into(),
+            command: "x".into(),
+            ..AgentForm::custom()
+        });
+        assert!(save_form(&dir, &bad).is_err());
+        assert_eq!(load_form(&dir).unwrap(), agents);
         let _ = std::fs::remove_dir_all(dir);
     }
 }
