@@ -59,6 +59,7 @@ fn mcp_server_shares_memory_between_clients() {
         [
             "memory_search",
             "memory_save",
+            "memory_update",
             "memory_list",
             "memory_delete",
             "plans_list",

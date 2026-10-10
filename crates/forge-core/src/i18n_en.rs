@@ -866,6 +866,19 @@ pub const EN: &[(&str, &str)] = &[
         "Memory #{id} does not exist.",
     ),
     ("falta `id`", "missing `id`"),
+    ("Memoria #{id} actualizada.", "Memory #{id} updated."),
+    (
+        "Guardar aunque ya exista una memoria parecida",
+        "Save even if a similar memory already exists",
+    ),
+    (
+        "Corrige o amplía una memoria existente (por id) en vez de guardar otra parecida. Solo cambia los campos que pases.",
+        "Fixes or extends an existing memory (by id) instead of saving a similar one. Only the fields you pass change.",
+    ),
+    (
+        "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si es otra cosa, vuelve a llamar a memory_save con force=true.",
+        "Not saved: a similar memory already exists.\n{p0}\nIf it's the same thing, update it with memory_update (id {id}); if it's something else, call memory_save again with force=true.",
+    ),
     (
         "No existe la idea #{id} en esta lista.",
         "Idea #{id} does not exist in this list.",
