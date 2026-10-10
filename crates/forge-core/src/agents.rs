@@ -176,6 +176,34 @@ impl AgentSpec {
     }
 }
 
+/// Plantilla comentada de `.forge/agents.toml`.
+pub fn template() -> String {
+    r#"# Agentes del proyecto. Cambia los que Forge ya conoce o añade los tuyos.
+# Conocidos: claude, codex, opencode, gemini, qwen, pi.
+
+# Abrir Claude Code con un modelo concreto y que sea el predeterminado (⌘⇧A):
+# [[agents]]
+# id = "claude"
+# command = "claude --model opus"
+# default = true
+
+# Ocultar un agente que no usas:
+# [[agents]]
+# id = "opencode"
+# enabled = false
+
+# Un agente propio:
+# [[agents]]
+# id = "mi-agente"
+# name = "Mi agente"
+# command = "mi-agente --interactivo"
+# resume_command = "mi-agente --continuar"   # opcional
+# [agents.environment]
+# MI_VARIABLE = "valor"
+"#
+    .into()
+}
+
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
 /// `--help` de cada CLI; las que no se pudieron comprobar se dejan vacías.
 pub fn builtins() -> Vec<AgentSpec> {
@@ -649,5 +677,32 @@ mod tests {
         let found = detect(&["sh".into(), "forge-no-existe-xyz".into()]);
         assert!(found["sh"].path.is_some());
         assert!(found["forge-no-existe-xyz"].path.is_none());
+    }
+
+    #[test]
+    fn the_agents_template_loads_commented_and_uncommented() {
+        let dir = std::env::temp_dir().join(format!("forge-agents-tpl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".forge")).unwrap();
+        std::fs::write(dir.join(".forge/agents.toml"), template()).unwrap();
+        assert_eq!(load(&dir).unwrap().len(), builtins().len());
+        let open: String = template()
+            .lines()
+            .map(|l| {
+                l.strip_prefix("# ")
+                    .filter(|l| !l.contains(' ') || l.contains('=') || l.starts_with('['))
+                    .unwrap_or(l)
+            })
+            .map(|l| format!("{l}\n"))
+            .collect();
+        std::fs::write(dir.join(".forge/agents.toml"), open).unwrap();
+        let agents = load(&dir).unwrap();
+        assert!(
+            agents
+                .iter()
+                .any(|a| a.id == "mi-agente" && a.environment.contains_key("MI_VARIABLE"))
+        );
+        assert!(agents.iter().find(|a| a.id == "claude").unwrap().default);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

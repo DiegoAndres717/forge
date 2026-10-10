@@ -227,6 +227,26 @@ pub fn paint_icon_button(ui: &Ui, rect: Rect, glyph: &str, response: &Response, 
 
 /// Botón principal (relleno con el color de acento). Para uno que puede estar
 /// deshabilitado: `ui.add_enabled(ok, theme::primary_button(..))`.
+/// ⓘ con una explicación: al pasar el ratón o al pulsarlo.
+pub fn help(ui: &mut Ui, text: &str) -> Response {
+    let response = ui
+        .add(
+            egui::Label::new(RichText::new(icon::INFO).size(14.0).color(TEXT_3))
+                .sense(Sense::click()),
+        )
+        .on_hover_cursor(egui::CursorIcon::Help);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+    let shown = response.clone().on_hover_ui(|ui| {
+        ui.set_max_width(320.0);
+        ui.label(text);
+    });
+    egui::Popup::from_toggle_button_response(&shown).show(|ui| {
+        ui.set_max_width(320.0);
+        ui.label(text);
+    });
+    shown
+}
+
 pub fn primary(ui: &mut Ui, text: impl Into<String>) -> Response {
     ui.add(primary_button(text))
 }

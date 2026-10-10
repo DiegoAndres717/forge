@@ -1646,4 +1646,98 @@ pub const EN: &[(&str, &str)] = &[
         "Tokens usados desde Forge en 30 días",
         "Tokens used from Forge in 30 days",
     ),
+    ("Abrir archivo", "Open file"),
+    (
+        "Actívalo para usar ⌥ como Meta en la terminal (⌥B y ⌥F saltan palabras). Desactívalo si usas ⌥ para escribir caracteres como @ o #.",
+        "Turn it on to use ⌥ as Meta in the terminal (⌥B and ⌥F jump words). Turn it off if you use ⌥ to type characters like @ or #.",
+    ),
+    (
+        "Al pulsar el agente en este proyecto se abre con esta cuenta",
+        "Clicking the agent in this project opens it with this account",
+    ),
+    ("Avisarme", "Notify me"),
+    (
+        "Avisos de macOS cuando Forge está en segundo plano: un agente termina o te necesita, un proceso falla o Guard bloquea un cambio.",
+        "macOS notifications while Forge is in the background: an agent finishes or needs you, a process fails or Guard blocks a change.",
+    ),
+    (
+        "Aún no hay uso registrado. Aparece al usar Claude Code abierto desde Forge.",
+        "No usage recorded yet. It shows up once you use Claude Code opened from Forge.",
+    ),
+    (
+        "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas.",
+        "Which model Claude Code opens with from Forge (sidebar, ⌘⇧A, ⌘K). A claude typed by hand in the terminal uses whatever you type.",
+    ),
+    ("Crear con plantilla", "Create from template"),
+    (
+        "El más capaz, para lo difícil. Gasta tu plan más rápido.",
+        "The most capable, for hard problems. Uses up your plan faster.",
+    ),
+    ("Escribe para cambiar el nombre", "Type to rename"),
+    (
+        "Escribe para cambiar el nombre; se guarda al salir del campo o con Enter",
+        "Type to rename; it saves when you leave the field or press Enter",
+    ),
+    ("Este proyecto", "This project"),
+    (
+        "Guard en cada commit y push",
+        "Guard on every commit and push",
+    ),
+    ("Hooks de Git", "Git hooks"),
+    (
+        "Idioma de Forge. Los agentes responden en el idioma en que les escribas.",
+        "Forge's language. Agents reply in the language you write to them in.",
+    ),
+    (
+        "Instala hooks de Git que pasan Project Guard antes de cada commit y push, también si los haces desde fuera de Forge. Si algo no cumple las reglas, Git no deja continuar.",
+        "Installs Git hooks that run Project Guard before every commit and push, even ones made outside Forge. If something breaks the rules, Git won't let it through.",
+    ),
+    ("Instalados", "Installed"),
+    (
+        "La cuenta de siempre (~/.claude o ~/.codex). No se puede borrar.",
+        "The usual account (~/.claude or ~/.codex). It can't be deleted.",
+    ),
+    (
+        "Lo abre en tu editor de texto",
+        "Opens it in your text editor",
+    ),
+    (
+        "Lo crea con los scripts que encuentre en package.json",
+        "Creates it with the scripts found in package.json",
+    ),
+    (
+        "Lo crea con una plantilla comentada (con ejemplos) y lo abre en tu editor",
+        "Creates it from a commented template (with examples) and opens it in your editor",
+    ),
+    ("Modelo", "Model"),
+    ("No instalados", "Not installed"),
+    (
+        "Opus piensa el plan y Sonnet lo ejecuta: calidad de Opus con menos gasto.",
+        "Opus makes the plan and Sonnet carries it out: Opus quality for less.",
+    ),
+    (
+        "Rápido y capaz: buen equilibrio para el día a día y gasta menos de tu plan.",
+        "Fast and capable: a good everyday balance that uses less of your plan.",
+    ),
+    (
+        "Se borran su inicio de sesión y su historial.",
+        "Its login and history will be deleted.",
+    ),
+    (
+        "Tamaño del texto de las terminales. También con ⌘+ y ⌘−; ⌘0 vuelve al normal.",
+        "Text size in the terminals. Also ⌘+ and ⌘−; ⌘0 resets it.",
+    ),
+    (
+        "Usa el modelo que tengas elegido en Claude Code (con /model o en sus ajustes). Forge no lo cambia.",
+        "Uses the model you picked in Claude Code (with /model or in its settings). Forge doesn't change it.",
+    ),
+    ("Usada en este proyecto", "Used in this project"),
+    ("Usar como Meta", "Use as Meta"),
+    ("Usar en este proyecto", "Use in this project"),
+    ("Uso", "Usage"),
+    (
+        "Vuelve a leer los archivos de .forge/ si los cambiaste a mano",
+        "Reads the .forge/ files again if you edited them by hand",
+    ),
+    ("✓ Guardado", "✓ Saved"),
 ];

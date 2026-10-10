@@ -1,6 +1,90 @@
-// Ventana de Ajustes (⌘,): idioma, notificaciones, terminal y atajos al proyecto actual.
+// Ventana de Ajustes (⌘,), por pestañas: General, Agentes, Uso y Este proyecto. Cada
+// opción lleva un ⓘ que explica qué hace; los cambios se guardan solos.
 use super::*;
 use forge_core::i18n::{Lang, lang};
+
+/// Pestañas de Ajustes.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) enum SettingsTab {
+    #[default]
+    General,
+    Agents,
+    Usage,
+    Project,
+}
+
+impl SettingsTab {
+    fn label(self) -> String {
+        let (glyph, name) = match self {
+            Self::General => (icon::GEAR, tr!("General")),
+            Self::Agents => (icon::ROBOT, tr!("Agentes")),
+            Self::Usage => (icon::CHART_BAR, tr!("Uso")),
+            Self::Project => (icon::FOLDER, tr!("Este proyecto")),
+        };
+        format!("{glyph}  {name}")
+    }
+}
+
+fn tab_id() -> egui::Id {
+    egui::Id::new("settings-tab")
+}
+
+/// Abre Ajustes en una pestaña.
+pub(super) fn show_tab(ctx: &egui::Context, tab: SettingsTab) {
+    ctx.data_mut(|d| d.insert_temp(tab_id(), tab));
+}
+
+/// Desde este ancho la etiqueta va al lado del control; por debajo, encima.
+const SIDE_BY_SIDE: f32 = 480.0;
+
+/// Una opción: su nombre con el ⓘ y el control. Si no cabe al lado, va debajo.
+fn row(ui: &mut egui::Ui, label: &str, help: &str, add: impl FnOnce(&mut egui::Ui)) {
+    let title = |ui: &mut egui::Ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(label).color(theme::TEXT));
+            theme::help(ui, help);
+        });
+    };
+    if ui.available_width() < SIDE_BY_SIDE {
+        title(ui);
+        add(ui);
+    } else {
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(180.0, 22.0),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_width(180.0);
+                    title(ui);
+                },
+            );
+            ui.vertical(add);
+        });
+    }
+    ui.add_space(10.0);
+}
+
+/// Texto de ayuda en gris, debajo de un control.
+fn hint(ui: &mut egui::Ui, text: &str) {
+    ui.label(RichText::new(text).size(11.5).color(theme::TEXT_3));
+}
+
+/// Modelos con los que Forge abre Claude Code: (id, nombre, para qué sirve).
+fn model_info(id: &str) -> &'static str {
+    match id {
+        "" => tr!(
+            "Usa el modelo que tengas elegido en Claude Code (con /model o en sus ajustes). Forge no lo cambia."
+        ),
+        "sonnet" => {
+            tr!("Rápido y capaz: buen equilibrio para el día a día y gasta menos de tu plan.")
+        }
+        "opus" => tr!("El más capaz, para lo difícil. Gasta tu plan más rápido."),
+        "opusplan" => {
+            tr!("Opus piensa el plan y Sonnet lo ejecuta: calidad de Opus con menos gasto.")
+        }
+        _ => "",
+    }
+}
 
 impl App {
     pub(super) fn settings_ui(&mut self, ctx: &egui::Context, cmds: &mut Vec<UiCmd>) {
@@ -9,10 +93,15 @@ impl App {
         }
         let mut changed = false;
         // A la medida de la ventana: más ancho si cabe, y nunca más alto que ella (el
-        // contenido se desplaza y la cabecera queda fija).
+        // contenido se desplaza y la cabecera y las pestañas quedan fijas).
         let screen = ctx.content_rect();
-        let width = (screen.width() - 64.0).clamp(340.0, 760.0);
-        let max_height = (screen.height() - 140.0).max(200.0);
+        let width = (screen.width() - 64.0).clamp(300.0, 760.0);
+        // Mismo alto en todas las pestañas: la ventana no salta al cambiar.
+        let body_height = (screen.height() - 190.0).clamp(200.0, 560.0);
+        let mut tab: SettingsTab = ctx.data(|d| d.get_temp(tab_id())).unwrap_or_default();
+        if tab == SettingsTab::Project && self.active.is_none() {
+            tab = SettingsTab::General;
+        }
         let modal = egui::Modal::new(egui::Id::new("settings"))
             .frame(
                 egui::Frame::new()
@@ -32,227 +121,64 @@ impl App {
                         }
                     });
                 });
-                ui.add_space(8.0);
-                egui::ScrollArea::vertical()
-                    .id_salt("settings-scroll")
-                    .max_height(max_height)
-                    // Si no cabe, que use toda la altura disponible (por defecto se encoge).
-                    .min_scrolled_height(max_height)
-                    .auto_shrink([false, true])
-                    .show(ui, |ui| {
-                theme::section(ui, tr!("General"));
-                theme::card(ui, |ui| {
-                    egui::Grid::new("settings-general").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-                        ui.label(tr!("Idioma"));
-                        ui.horizontal(|ui| {
-                            for (l, label) in [(Lang::En, "English"), (Lang::Es, "Español")] {
-                                if ui.selectable_label(lang() == l, label).clicked() {
-                                    cmds.push(UiCmd::SetLang(l));
-                                }
+                ui.add_space(10.0);
+                // Pestañas; en un ancho pequeño, un desplegable.
+                let mut tabs = vec![
+                    SettingsTab::General,
+                    SettingsTab::Agents,
+                    SettingsTab::Usage,
+                ];
+                if self.active.is_some() {
+                    tabs.push(SettingsTab::Project);
+                }
+                if width < 520.0 {
+                    egui::ComboBox::from_id_salt("settings-tabs")
+                        .selected_text(tab.label())
+                        .width(width)
+                        .show_ui(ui, |ui| {
+                            for t in &tabs {
+                                ui.selectable_value(&mut tab, *t, t.label());
                             }
                         });
-                        ui.end_row();
-                        ui.label(tr!("Modelo de Claude"));
-                        let current = crate::claude_plugin::CLAUDE_MODEL.lock().map(|m| m.clone()).unwrap_or_default();
-                        let label = |v: &str| {
-                            crate::claude_plugin::MODELS
-                                .iter()
-                                .find(|(id, _)| *id == v)
-                                .map_or(v.to_string(), |(_, l)| forge_core::i18n::t(l).to_string())
-                        };
-                        egui::ComboBox::from_id_salt("claude-model")
-                            .selected_text(label(&current))
-                            .show_ui(ui, |ui| {
-                                for (id, name) in crate::claude_plugin::MODELS {
-                                    if ui.selectable_label(current == id, forge_core::i18n::t(name)).clicked() {
-                                        if let Ok(mut m) = crate::claude_plugin::CLAUDE_MODEL.lock() {
-                                            *m = id.to_string();
-                                        }
-                                        self.db(|s| s.set_setting("claude_model", id));
-                                    }
-                                }
-                            })
-                            .response
-                            .on_hover_text(tr!("Al abrir Claude desde Forge (barra lateral, ⌘⇧A). Un claude escrito a mano usa lo que escribas."));
-                        ui.end_row();
-                        ui.label(tr!("Notificaciones"));
-                        let mut on = self.notifications_enabled;
-                        if ui
-                            .checkbox(&mut on, tr!("Avisar cuando un agente termina, un proceso falla o Guard bloquea"))
-                            .changed()
-                        {
-                            self.notifications_enabled = on;
-                            self.db(|s| s.set_setting("notifications", if on { "on" } else { "off" }));
+                } else {
+                    ui.horizontal(|ui| {
+                        for t in &tabs {
+                            ui.selectable_value(&mut tab, *t, RichText::new(t.label()).size(13.5));
                         }
-                        ui.end_row();
                     });
-                });
-
-                ui.add_space(6.0);
-                theme::section(ui, tr!("Terminal"));
-                theme::card(ui, |ui| {
-                    egui::Grid::new("settings-terminal").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
-                        ui.label(tr!("Tamaño de letra"));
-                        changed |= ui
-                            .add(egui::Slider::new(&mut self.settings.font_size, 9.0..=28.0).step_by(1.0)
-                                    .fixed_decimals(0)
-                                    .trailing_fill(true).suffix(" pt"))
-                            .on_hover_cursor(egui::CursorIcon::PointingHand)
-                            .changed();
-                        ui.end_row();
-                        ui.label(tr!("Tecla Option"));
-                        changed |= ui
-                            .checkbox(&mut self.settings.option_as_meta, tr!("Como Meta (atajos de terminal: ⌥B, ⌥F…)"))
-                            .changed();
-                        ui.end_row();
-                    });
-                    ui.label(
-                        RichText::new(tr!("Fuentes propias y más opciones: ~/.config/forge/config.toml"))
-                            .size(11.0)
-                            .color(theme::TEXT_3),
-                    );
-                });
-
-                self.accounts_ui(ui, cmds);
-
-                // Tokens de Claude abierto desde Forge (subagentes incluidos), 30 días.
-                let usage = self
-                    .db(|s| s.agent_usage(None, store::now() - 30 * 86_400))
-                    .unwrap_or_default();
-                if !usage.is_empty() {
-                    ui.add_space(6.0);
-                    theme::section(ui, tr!("Uso de modelos (30 días)"));
-                    theme::card(ui, |ui| {
-                        let total: u64 = usage.iter().map(|u| u.total()).sum::<u64>().max(1);
-                        egui::Grid::new("settings-usage").num_columns(3).spacing([16.0, 6.0]).show(ui, |ui| {
-                            for u in &usage {
-                                ui.label(RichText::new(&u.model).strong());
-                                ui.label(format!(
-                                    "{} tokens · {}%",
-                                    short_tokens(u.total()),
-                                    u.total() * 100 / total
-                                ));
-                                ui.label(
-                                    RichText::new(tr!(
-                                        "{sub} de {turns} turnos por subagentes",
-                                        sub = u.subagent_turns,
-                                        turns = u.turns
-                                    ))
+                }
+                ui.separator();
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical()
+                    .id_salt(("settings-scroll", tab as u8))
+                    .max_height(body_height)
+                    .min_scrolled_height(body_height)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        match tab {
+                            SettingsTab::General => changed |= self.general_tab(ui, cmds),
+                            SettingsTab::Agents => self.agents_tab(ui, cmds),
+                            SettingsTab::Usage => self.usage_tab(ui),
+                            SettingsTab::Project => self.project_tab(ui, cmds),
+                        }
+                        // Versión instalada, al pie (como "Acerca de").
+                        ui.add_space(12.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(
+                                RichText::new(format!("Forge {}", env!("CARGO_PKG_VERSION")))
                                     .size(11.5)
                                     .color(theme::TEXT_3),
-                                );
-                                ui.end_row();
-                            }
-                        });
-                        ui.label(
-                            RichText::new(tr!("Claude Code abierto desde Forge delega búsquedas en Haiku y revisiones en Sonnet; aquí ves a dónde van los tokens."))
-                                .size(11.0)
-                                .color(theme::TEXT_3),
-                        );
-                    });
-                }
-
-                if let Some(i) = self.active {
-                    let ws = &self.workspaces[i];
-                    ui.add_space(6.0);
-                    theme::section(ui, &tr!("Este proyecto · {name}", name = ws.project.name()));
-                    theme::card(ui, |ui| {
-                        ui.label(
-                            RichText::new(tr!("Se guarda en la carpeta .forge/ del proyecto: súbela al repositorio para compartirla con tu equipo."))
-                                .size(11.5)
-                                .color(theme::TEXT_3),
-                        );
-                        ui.add_space(4.0);
-                        // Cada archivo por lo que hace (el nombre técnico, en gris).
-                        let files = [
-                            (icon::SQUARES_FOUR, tr!("Distribución y procesos"), tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."), "project.toml"),
-                            (icon::SHIELD_CHECK, tr!("Reglas de Guard"), tr!("Qué se revisa antes de un commit, un push o un pull request."), "rules.toml"),
-                            (icon::ROBOT, tr!("Agentes"), tr!("Agentes propios y cómo se abren."), "agents.toml"),
-                            (icon::SPARKLE, tr!("Revisión con IA"), tr!("Qué modelos revisan los cambios y con qué presupuesto."), "routing.toml"),
-                        ];
-                        for (glyph, title, what, file) in files {
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(glyph).size(16.0).color(theme::ACCENT));
-                                ui.vertical(|ui| {
-                                    ui.spacing_mut().item_spacing.y = 1.0;
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(title).color(theme::TEXT));
-                                        ui.label(RichText::new(file).size(11.0).color(theme::TEXT_4));
-                                    });
-                                    ui.label(RichText::new(what).size(11.5).color(theme::TEXT_3));
-                                });
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    // Sin project.toml: se crea con los scripts de package.json.
-                                    if file == "project.toml" && !ws.project.has_config() {
-                                        if theme::primary(ui, tr!("Crear")).on_hover_text(tr!("Detecta los scripts de package.json")).clicked() {
-                                            cmds.push(UiCmd::CreateConfig);
-                                        }
-                                    } else if theme::secondary(ui, tr!("Editar")).clicked() {
-                                        cmds.push(UiCmd::EditFile(file));
-                                    }
-                                });
-                            });
-                        }
-                        ui.add_space(4.0);
-                        ui.horizontal_wrapped(|ui| {
-                            if ws.project.has_config()
-                                && theme::secondary(ui, format!("{}  {}", icon::ARROW_CLOCKWISE, tr!("Recargar tras editar"))).clicked()
+                            );
+                            if ui
+                                .link(RichText::new(tr!("Buscar actualizaciones")).size(11.5))
+                                .clicked()
                             {
-                                cmds.push(UiCmd::ReloadConfig);
-                            }
-                            if ws.project.default_layout().is_some()
-                                && theme::secondary(ui, format!("{}  {}", icon::SQUARES_FOUR, tr!("Restablecer la distribución de paneles"))).clicked()
-                            {
-                                cmds.push(UiCmd::ResetLayout);
+                                cmds.push(UiCmd::CheckUpdates);
                             }
                         });
-                        ui.separator();
-                        let installed = matches!(
-                            forge_core::hooks::status(&ws.project.path),
-                            Ok(s) if s.iter().all(|(_, state)| matches!(state, forge_core::hooks::HookState::Installed))
-                        );
-                        ui.horizontal(|ui| {
-                            ui.vertical(|ui| {
-                                ui.spacing_mut().item_spacing.y = 1.0;
-                                ui.label(if installed {
-                                    tr!("Hooks de Git instalados")
-                                } else {
-                                    tr!("Hooks de Git no instalados")
-                                });
-                                ui.label(
-                                    RichText::new(tr!("Pasan Guard solo antes de cada commit y push."))
-                                        .size(11.5)
-                                        .color(theme::TEXT_3),
-                                );
-                            });
-                            if installed {
-                                if theme::secondary(ui, tr!("Quitar")).clicked() {
-                                    cmds.push(UiCmd::HooksUninstall);
-                                }
-                            } else if theme::primary(ui, tr!("Instalar")).clicked() {
-                                cmds.push(UiCmd::HooksInstall);
-                            }
-                        });
-                    });
-                }
-
-                // Versión instalada, al pie (como "Acerca de").
-                ui.add_space(8.0);
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        RichText::new(format!("Forge {}", env!("CARGO_PKG_VERSION")))
-                            .size(11.5)
-                            .color(theme::TEXT_3),
-                    );
-                    if ui
-                        .link(RichText::new(tr!("Buscar actualizaciones")).size(11.5))
-                        .clicked()
-                    {
-                        cmds.push(UiCmd::CheckUpdates);
-                    }
-                });
                     });
             });
+        ctx.data_mut(|d| d.insert_temp(tab_id(), tab));
         if modal.should_close() {
             self.settings_open = false;
         }
@@ -262,6 +188,327 @@ impl App {
                 self.error = Some(e);
             }
         }
+    }
+
+    /// Idioma, avisos y terminal. Devuelve si cambió algo de `Settings` (se guarda aparte).
+    fn general_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) -> bool {
+        let mut changed = false;
+        theme::section(ui, tr!("General"));
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("Idioma"),
+                tr!("Idioma de Forge. Los agentes responden en el idioma en que les escribas."),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        for (l, label) in [(Lang::En, "English"), (Lang::Es, "Español")] {
+                            if ui.selectable_label(lang() == l, label).clicked() {
+                                cmds.push(UiCmd::SetLang(l));
+                            }
+                        }
+                    });
+                },
+            );
+            row(
+                ui,
+                tr!("Notificaciones"),
+                tr!(
+                    "Avisos de macOS cuando Forge está en segundo plano: un agente termina o te necesita, un proceso falla o Guard bloquea un cambio."
+                ),
+                |ui| {
+                    let mut on = self.notifications_enabled;
+                    if ui.checkbox(&mut on, tr!("Avisarme")).changed() {
+                        self.notifications_enabled = on;
+                        self.db(|s| s.set_setting("notifications", if on { "on" } else { "off" }));
+                    }
+                },
+            );
+        });
+        theme::section(ui, tr!("Terminal"));
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("Tamaño de letra"),
+                tr!(
+                    "Tamaño del texto de las terminales. También con ⌘+ y ⌘−; ⌘0 vuelve al normal."
+                ),
+                |ui| {
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut self.settings.font_size, 9.0..=28.0)
+                                .step_by(1.0)
+                                .fixed_decimals(0)
+                                .trailing_fill(true)
+                                .suffix(" pt"),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .changed();
+                },
+            );
+            row(
+                ui,
+                tr!("Tecla Option"),
+                tr!(
+                    "Actívalo para usar ⌥ como Meta en la terminal (⌥B y ⌥F saltan palabras). Desactívalo si usas ⌥ para escribir caracteres como @ o #."
+                ),
+                |ui| {
+                    changed |= ui
+                        .checkbox(&mut self.settings.option_as_meta, tr!("Usar como Meta"))
+                        .changed();
+                },
+            );
+            hint(
+                ui,
+                tr!("Fuentes propias y más opciones: ~/.config/forge/config.toml"),
+            );
+        });
+        changed
+    }
+
+    /// Modelo de Claude y cuentas de los agentes.
+    fn agents_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        theme::section(ui, "Claude Code");
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("Modelo"),
+                tr!(
+                    "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas."
+                ),
+                |ui| {
+                    let current = crate::claude_plugin::CLAUDE_MODEL
+                        .lock()
+                        .map(|m| m.clone())
+                        .unwrap_or_default();
+                    let name = |v: &str| {
+                        crate::claude_plugin::MODELS
+                            .iter()
+                            .find(|(id, _)| *id == v)
+                            .map_or(v.to_string(), |(_, l)| forge_core::i18n::t(l).to_string())
+                    };
+                    egui::ComboBox::from_id_salt("claude-model")
+                        .selected_text(name(&current))
+                        .width(ui.available_width().min(320.0))
+                        .show_ui(ui, |ui| {
+                            for (id, label) in crate::claude_plugin::MODELS {
+                                if ui
+                                    .selectable_label(current == id, forge_core::i18n::t(label))
+                                    .on_hover_text(model_info(id))
+                                    .clicked()
+                                {
+                                    if let Ok(mut m) = crate::claude_plugin::CLAUDE_MODEL.lock() {
+                                        *m = id.to_string();
+                                    }
+                                    self.db(|s| s.set_setting("claude_model", id));
+                                }
+                            }
+                        });
+                    hint(ui, model_info(&current));
+                },
+            );
+        });
+        self.accounts_ui(ui, cmds);
+    }
+
+    /// A dónde van los tokens (Claude Code abierto desde Forge, 30 días).
+    fn usage_tab(&mut self, ui: &mut egui::Ui) {
+        theme::section(ui, tr!("Uso de modelos (30 días)"));
+        let usage = self
+            .db(|s| s.agent_usage(None, store::now() - 30 * 86_400))
+            .unwrap_or_default();
+        theme::card(ui, |ui| {
+            if usage.is_empty() {
+                hint(
+                    ui,
+                    tr!(
+                        "Aún no hay uso registrado. Aparece al usar Claude Code abierto desde Forge."
+                    ),
+                );
+                return;
+            }
+            let total: u64 = usage.iter().map(|u| u.total()).sum::<u64>().max(1);
+            for u in &usage {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(&u.model).strong());
+                    ui.label(format!(
+                        "{} tokens · {}%",
+                        short_tokens(u.total()),
+                        u.total() * 100 / total
+                    ));
+                    ui.label(
+                        RichText::new(tr!(
+                            "{sub} de {turns} turnos por subagentes",
+                            sub = u.subagent_turns,
+                            turns = u.turns
+                        ))
+                        .size(11.5)
+                        .color(theme::TEXT_3),
+                    );
+                });
+                ui.add_space(4.0);
+            }
+            hint(
+                ui,
+                tr!(
+                    "Claude Code abierto desde Forge delega búsquedas en Haiku y revisiones en Sonnet; aquí ves a dónde van los tokens."
+                ),
+            );
+        });
+    }
+
+    /// Configuración del proyecto abierto (carpeta .forge/) y hooks de Git.
+    fn project_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let Some(i) = self.active else { return };
+        let ws = &self.workspaces[i];
+        theme::section(ui, &ws.project.name());
+        theme::card(ui, |ui| {
+            hint(
+                ui,
+                tr!(
+                    "Se guarda en la carpeta .forge/ del proyecto: súbela al repositorio para compartirla con tu equipo."
+                ),
+            );
+            ui.add_space(6.0);
+            // Cada archivo por lo que hace (el nombre técnico, en gris).
+            let files = [
+                (
+                    icon::SQUARES_FOUR,
+                    tr!("Distribución y procesos"),
+                    tr!("Qué terminales se abren y qué procesos (dev, api…) tiene el proyecto."),
+                    "project.toml",
+                ),
+                (
+                    icon::SHIELD_CHECK,
+                    tr!("Reglas de Guard"),
+                    tr!("Qué se revisa antes de un commit, un push o un pull request."),
+                    "rules.toml",
+                ),
+                (
+                    icon::ROBOT,
+                    tr!("Agentes"),
+                    tr!("Agentes propios y cómo se abren."),
+                    "agents.toml",
+                ),
+                (
+                    icon::SPARKLE,
+                    tr!("Revisión con IA"),
+                    tr!("Qué modelos revisan los cambios y con qué presupuesto."),
+                    "routing.toml",
+                ),
+            ];
+            let narrow = ui.available_width() < SIDE_BY_SIDE;
+            for (glyph, title, what, file) in files {
+                let exists = ws.project.path.join(".forge").join(file).exists();
+                let text = |ui: &mut egui::Ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(glyph).size(16.0).color(theme::ACCENT));
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 1.0;
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(RichText::new(title).color(theme::TEXT));
+                                ui.label(RichText::new(file).size(11.0).color(theme::TEXT_4));
+                            });
+                            ui.label(RichText::new(what).size(11.5).color(theme::TEXT_3));
+                        });
+                    });
+                };
+                let button = |ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>| {
+                    if file == "project.toml" && !ws.project.has_config() {
+                        if theme::primary(ui, tr!("Crear"))
+                            .on_hover_text(tr!(
+                                "Lo crea con los scripts que encuentre en package.json"
+                            ))
+                            .clicked()
+                        {
+                            cmds.push(UiCmd::CreateConfig);
+                        }
+                    } else {
+                        let (label, tip) = if exists {
+                            (tr!("Abrir archivo"), tr!("Lo abre en tu editor de texto"))
+                        } else {
+                            (
+                                tr!("Crear con plantilla"),
+                                tr!(
+                                    "Lo crea con una plantilla comentada (con ejemplos) y lo abre en tu editor"
+                                ),
+                            )
+                        };
+                        if theme::secondary(ui, label).on_hover_text(tip).clicked() {
+                            cmds.push(UiCmd::EditFile(file));
+                        }
+                    }
+                };
+                if narrow {
+                    text(ui);
+                    button(ui, cmds);
+                } else {
+                    ui.horizontal(|ui| {
+                        text(ui);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            button(ui, cmds);
+                        });
+                    });
+                }
+                ui.add_space(6.0);
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ws.project.has_config()
+                    && theme::secondary(
+                        ui,
+                        format!("{}  {}", icon::ARROW_CLOCKWISE, tr!("Recargar tras editar")),
+                    )
+                    .on_hover_text(tr!(
+                        "Vuelve a leer los archivos de .forge/ si los cambiaste a mano"
+                    ))
+                    .clicked()
+                {
+                    cmds.push(UiCmd::ReloadConfig);
+                }
+                if ws.project.default_layout().is_some()
+                    && theme::secondary(
+                        ui,
+                        format!(
+                            "{}  {}",
+                            icon::SQUARES_FOUR,
+                            tr!("Restablecer la distribución de paneles")
+                        ),
+                    )
+                    .clicked()
+                {
+                    cmds.push(UiCmd::ResetLayout);
+                }
+            });
+        });
+        theme::section(ui, tr!("Hooks de Git"));
+        theme::card(ui, |ui| {
+            let installed = matches!(
+                forge_core::hooks::status(&ws.project.path),
+                Ok(s) if s.iter().all(|(_, state)| matches!(state, forge_core::hooks::HookState::Installed))
+            );
+            row(
+                ui,
+                tr!("Guard en cada commit y push"),
+                tr!(
+                    "Instala hooks de Git que pasan Project Guard antes de cada commit y push, también si los haces desde fuera de Forge. Si algo no cumple las reglas, Git no deja continuar."
+                ),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(if installed {
+                            RichText::new(tr!("Instalados")).color(theme::GREEN)
+                        } else {
+                            RichText::new(tr!("No instalados")).color(theme::TEXT_3)
+                        });
+                        if installed {
+                            if theme::secondary(ui, tr!("Quitar")).clicked() {
+                                cmds.push(UiCmd::HooksUninstall);
+                            }
+                        } else if theme::primary(ui, tr!("Instalar")).clicked() {
+                            cmds.push(UiCmd::HooksInstall);
+                        }
+                    });
+                },
+            );
+        });
     }
 }
 
@@ -312,86 +559,22 @@ impl App {
                         .collect(),
                     _ => HashMap::new(),
                 };
-                egui::Grid::new(("accounts", program))
-                    .num_columns(3)
-                    .spacing([12.0, 6.0])
-                    .show(ui, |ui| {
-                        for a in &accounts {
-                            let id = egui::Id::new(("account-name", program, a.id));
-                            let mut text = ui
-                                .data(|d| d.get_temp::<String>(id))
-                                .unwrap_or_else(|| a.name.clone());
-                            let limits = self
-                                .store
-                                .as_ref()
-                                .and_then(|s| s.account_limits(program, a.id));
-                            let tokens = usage.get(&a.id).copied();
-                            let edit = ui
-                                .vertical(|ui| {
-                                    let edit = ui
-                                        .add(egui::TextEdit::singleline(&mut text).desired_width(150.0))
-                                        .on_hover_text(tr!("Nombre de la cuenta"));
-                                    if program == "claude" {
-                                        account_usage(ui, limits.as_ref(), tokens);
-                                    }
-                                    edit
-                                })
-                                .inner;
-                            if edit.changed() {
-                                ui.data_mut(|d| d.insert_temp(id, text.clone()));
-                            }
-                            if edit.lost_focus() {
-                                if !text.trim().is_empty() && text.trim() != a.name {
-                                    cmds.push(UiCmd::AccountRename(program.into(), a.id, text.clone()));
-                                }
-                                ui.data_mut(|d| d.remove::<String>(id));
-                            }
-                            ui.horizontal(|ui| {
-                                if ws.is_some() {
-                                    if ui
-                                        .selectable_label(chosen == Some(a.id), tr!("En este proyecto"))
-                                        .on_hover_text(tr!("Se abre con esta cuenta al pulsar el agente en este proyecto"))
-                                        .clicked()
-                                    {
-                                        cmds.push(UiCmd::UseAccount(program.into(), a.id));
-                                    }
-                                    if ui
-                                        .button(tr!("Iniciar sesión"))
-                                        .on_hover_text(tr!("Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)"))
-                                        .clicked()
-                                    {
-                                        cmds.push(UiCmd::AccountLogin(program.into(), a.id));
-                                    }
-                                }
-                                if a.is_main() {
-                                    ui.label(RichText::new(tr!("principal")).size(11.0).color(theme::TEXT_3));
-                                }
-                            });
-                            if a.is_main() {
-                                ui.label("");
-                            } else {
-                                let confirm = egui::Id::new(("account-delete", program, a.id));
-                                let asked = ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false);
-                                if asked {
-                                    ui.horizontal(|ui| {
-                                        if ui
-                                            .button(RichText::new(tr!("Borrar su login e historial")).color(theme::RED))
-                                            .clicked()
-                                        {
-                                            cmds.push(UiCmd::AccountDelete(program.into(), a.id));
-                                            ui.data_mut(|d| d.remove::<bool>(confirm));
-                                        }
-                                        if ui.button(tr!("Cancelar")).clicked() {
-                                            ui.data_mut(|d| d.remove::<bool>(confirm));
-                                        }
-                                    });
-                                } else if theme::icon_button(ui, icon::TRASH, tr!("Borrar cuenta")).clicked() {
-                                    ui.data_mut(|d| d.insert_temp(confirm, true));
-                                }
-                            }
-                            ui.end_row();
-                        }
-                    });
+                for (n, a) in accounts.iter().enumerate() {
+                    if n > 0 {
+                        ui.separator();
+                    }
+                    let limits = self
+                        .store
+                        .as_ref()
+                        .and_then(|s| s.account_limits(program, a.id));
+                    let tokens = usage.get(&a.id).copied();
+                    account_row(ui, cmds, program, a, chosen, ws.is_some());
+                    if program == "claude" {
+                        account_usage(ui, limits.as_ref(), tokens);
+                    }
+                    ui.add_space(4.0);
+                }
+                ui.add_space(4.0);
                 if ui
                     .button(tr!("{p0}  Añadir cuenta", p0 = icon::PLUS))
                     .clicked()
@@ -420,7 +603,7 @@ fn account_usage(
         .on_hover_text(tr!("Aparece después de usar la cuenta desde Forge"));
         return;
     }
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         for w in windows {
             let label = match w.kind.as_str() {
                 "five_hour" => "5h",
@@ -463,4 +646,128 @@ fn account_usage(
         Some(l) => tr!("Uso del plan visto {p0}", p0 = store::ago_precise(l.at)),
         None => tr!("Tokens usados desde Forge en 30 días").into(),
     });
+}
+
+/// Una cuenta: su nombre (se cambia escribiendo; se guarda al salir del campo o con Enter),
+/// y lo que se puede hacer con ella. Todo baja de línea si no cabe.
+fn account_row(
+    ui: &mut egui::Ui,
+    cmds: &mut Vec<UiCmd>,
+    program: &str,
+    a: &forge_core::accounts::Account,
+    chosen: Option<i64>,
+    in_project: bool,
+) {
+    let id = egui::Id::new(("account-name", program, a.id));
+    let saved = egui::Id::new(("account-saved", program, a.id));
+    let mut text = ui
+        .data(|d| d.get_temp::<String>(id))
+        .unwrap_or_else(|| a.name.clone());
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(icon::PENCIL_SIMPLE).color(theme::TEXT_3))
+            .on_hover_text(tr!("Escribe para cambiar el nombre"));
+        // Deja sitio a la papelera; el campo ocupa el resto (nunca menos de 120).
+        let width =
+            (ui.available_width() - if a.is_main() { 90.0 } else { 40.0 }).clamp(120.0, 320.0);
+        let edit = ui
+            .add(
+                egui::TextEdit::singleline(&mut text)
+                    .desired_width(width)
+                    .hint_text(tr!("Nombre de la cuenta")),
+            )
+            .on_hover_text(tr!(
+                "Escribe para cambiar el nombre; se guarda al salir del campo o con Enter"
+            ));
+        if edit.changed() {
+            ui.data_mut(|d| d.insert_temp(id, text.clone()));
+        }
+        if edit.lost_focus() {
+            if !text.trim().is_empty() && text.trim() != a.name {
+                cmds.push(UiCmd::AccountRename(program.into(), a.id, text.clone()));
+                ui.data_mut(|d| d.insert_temp(saved, ui.input(|i| i.time)));
+            }
+            ui.data_mut(|d| d.remove::<String>(id));
+        }
+        // "✓ Guardado" un par de segundos tras renombrar.
+        let now = ui.input(|i| i.time);
+        if ui
+            .data(|d| d.get_temp::<f64>(saved))
+            .is_some_and(|t| now - t < 2.0)
+        {
+            ui.label(
+                RichText::new(tr!("✓ Guardado"))
+                    .size(11.5)
+                    .color(theme::GREEN),
+            );
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
+        } else if a.is_main() {
+            ui.label(
+                RichText::new(tr!("principal"))
+                    .size(11.0)
+                    .color(theme::TEXT_3),
+            )
+            .on_hover_text(tr!(
+                "La cuenta de siempre (~/.claude o ~/.codex). No se puede borrar."
+            ));
+        }
+        if !a.is_main() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let confirm = egui::Id::new(("account-delete", program, a.id));
+                if !ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false)
+                    && theme::icon_button(ui, icon::TRASH, tr!("Borrar cuenta")).clicked()
+                {
+                    ui.data_mut(|d| d.insert_temp(confirm, true));
+                }
+            });
+        }
+    });
+    // Confirmación de borrado, en su propia línea.
+    let confirm = egui::Id::new(("account-delete", program, a.id));
+    if ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(tr!("Se borran su inicio de sesión y su historial."))
+                    .color(theme::TEXT_2),
+            );
+            if ui
+                .button(RichText::new(tr!("Borrar")).color(theme::RED))
+                .clicked()
+            {
+                cmds.push(UiCmd::AccountDelete(program.into(), a.id));
+                ui.data_mut(|d| d.remove::<bool>(confirm));
+            }
+            if ui.button(tr!("Cancelar")).clicked() {
+                ui.data_mut(|d| d.remove::<bool>(confirm));
+            }
+        });
+    }
+    if in_project {
+        ui.horizontal_wrapped(|ui| {
+            let here = chosen == Some(a.id);
+            let label = if here {
+                format!("{}  {}", icon::CHECK, tr!("Usada en este proyecto"))
+            } else {
+                tr!("Usar en este proyecto").to_string()
+            };
+            if ui
+                .selectable_label(here, label)
+                .on_hover_text(tr!(
+                    "Al pulsar el agente en este proyecto se abre con esta cuenta"
+                ))
+                .clicked()
+            {
+                cmds.push(UiCmd::UseAccount(program.into(), a.id));
+            }
+            if ui
+                .button(tr!("Iniciar sesión"))
+                .on_hover_text(tr!(
+                    "Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)"
+                ))
+                .clicked()
+            {
+                cmds.push(UiCmd::AccountLogin(program.into(), a.id));
+            }
+        });
+    }
 }

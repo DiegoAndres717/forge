@@ -423,12 +423,34 @@ fn ui_preview() {
     });
     harness.state_mut().sync_accounts();
     harness.state_mut().settings_open = true;
-    settle(&mut harness);
-    save(&mut harness, &out, "11-ajustes");
-    // Pantalla pequeña: el modal no se sale, el contenido se desplaza.
+    let ctx = harness.ctx.clone();
+    use super::settings::{SettingsTab, show_tab};
+    for (tab, name) in [
+        (SettingsTab::General, "11-ajustes"),
+        (SettingsTab::Agents, "11c-ajustes-agentes"),
+        (SettingsTab::Usage, "11d-ajustes-uso"),
+        (SettingsTab::Project, "11e-ajustes-proyecto"),
+    ] {
+        show_tab(&ctx, tab);
+        settle(&mut harness);
+        save(&mut harness, &out, name);
+    }
+    // Pantallas pequeñas: el modal no se sale, las etiquetas van encima y las pestañas
+    // pasan a un desplegable.
     harness.set_size(Vec2::new(1000.0, 620.0));
+    show_tab(&ctx, SettingsTab::General);
     settle(&mut harness);
     save(&mut harness, &out, "11b-ajustes-pequeno");
+    harness.set_size(Vec2::new(560.0, 760.0));
+    for (tab, name) in [
+        (SettingsTab::Agents, "11f-ajustes-estrecho-agentes"),
+        (SettingsTab::Project, "11g-ajustes-estrecho-proyecto"),
+    ] {
+        show_tab(&ctx, tab);
+        settle(&mut harness);
+        save(&mut harness, &out, name);
+    }
+    show_tab(&ctx, SettingsTab::General);
     harness.set_size(Vec2::new(1440.0, 880.0));
     harness.state_mut().settings_open = false;
     harness.state_mut().db(|s| s.delete_account("claude", 1));
