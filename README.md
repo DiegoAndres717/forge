@@ -136,6 +136,7 @@ Any `claude` started inside a Forge terminal — typed by hand, `claude --resume
 - **Cheaper subagents** — `forge:explorer` (Haiku) searches and reads code, `forge:reviewer` (Sonnet) runs tests and reviews, `forge:architect` (Opus) takes the hard problems. The main model delegates and keeps its context and cache.
 - **Live status band** above the prompt — Guard status, plans in progress and backlog, the model working right now (● opus / ↳ explorer: … (haiku)), session tokens (new vs. cached) and your plan usage bars (5h and weekly).
 - **Usage per model** — every turn, subagents included, is recorded; see it in Settings.
+- **Starts with your project in mind** — every conversation (and every one after compaction or `/clear`) begins with the project's key decisions, conventions, Guard rules and plans in progress.
 - **Zero-token commands** — `/forge-plans`, `/forge-guard`, `/forge-remember` (type `/forge` to list them).
 
 ## Keyboard shortcuts
@@ -179,6 +180,7 @@ forge doctor                          checks git, database, settings, hooks and 
 forge ai route | usage                change risk / model usage this month
 forge memory search|add|list|delete   project memory
 forge plans [show|add|start|done|phase|task]   plans and backlog (outside the repository)
+forge context                         project summary agents get at the start
 forge mcp                             MCP server for agents
 ```
 
