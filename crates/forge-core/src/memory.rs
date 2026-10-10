@@ -76,10 +76,6 @@ fn fts_query(query: &str) -> Option<String> {
     (!terms.is_empty()).then(|| terms.join(" "))
 }
 
-fn key(project: &Path) -> String {
-    project.to_string_lossy().into_owned()
-}
-
 impl Store {
     pub fn add_memory(
         &self,
@@ -104,7 +100,7 @@ impl Store {
         self.conn
             .execute(
                 "INSERT INTO memories (project, kind, title, body, tags, source, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![key(project), kind, title.trim(), body.trim(), tags.trim(), source, now()],
+                params![self.project_key(project), kind, title.trim(), body.trim(), tags.trim(), source, now()],
             )
             .map_err(|e| e.to_string())?;
         Ok(self.conn.last_insert_rowid())
@@ -132,18 +128,21 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![fts, key(project), kind, limit as i64], |r| {
-                Ok(Memory {
-                    id: r.get(0)?,
-                    kind: r.get(1)?,
-                    title: r.get(2)?,
-                    body: r.get(3)?,
-                    tags: r.get(4)?,
-                    source: r.get(5)?,
-                    created_at: r.get(6)?,
-                    snippet: r.get(7)?,
-                })
-            })
+            .query_map(
+                params![fts, self.project_key(project), kind, limit as i64],
+                |r| {
+                    Ok(Memory {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        title: r.get(2)?,
+                        body: r.get(3)?,
+                        tags: r.get(4)?,
+                        source: r.get(5)?,
+                        created_at: r.get(6)?,
+                        snippet: r.get(7)?,
+                    })
+                },
+            )
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
             .map_err(|e| e.to_string())
@@ -163,18 +162,21 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![key(project), kind, limit as i64], |r| {
-                Ok(Memory {
-                    id: r.get(0)?,
-                    kind: r.get(1)?,
-                    title: r.get(2)?,
-                    body: r.get(3)?,
-                    tags: r.get(4)?,
-                    source: r.get(5)?,
-                    created_at: r.get(6)?,
-                    snippet: None,
-                })
-            })
+            .query_map(
+                params![self.project_key(project), kind, limit as i64],
+                |r| {
+                    Ok(Memory {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        title: r.get(2)?,
+                        body: r.get(3)?,
+                        tags: r.get(4)?,
+                        source: r.get(5)?,
+                        created_at: r.get(6)?,
+                        snippet: None,
+                    })
+                },
+            )
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
             .map_err(|e| e.to_string())
@@ -184,7 +186,7 @@ impl Store {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM memories WHERE project = ?1",
-                params![key(project)],
+                params![self.project_key(project)],
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())
@@ -194,7 +196,7 @@ impl Store {
         self.conn
             .execute(
                 "DELETE FROM memories WHERE id = ?1 AND project = ?2",
-                params![id, key(project)],
+                params![id, self.project_key(project)],
             )
             .map(|n| n > 0)
             .map_err(|e| e.to_string())
@@ -309,5 +311,79 @@ mod tests {
             "el índice se actualiza al borrar"
         );
         assert!(store.add_memory(p, "otra-cosa", "x", "", "", "u").is_err());
+    }
+
+    #[test]
+    fn memories_follow_the_git_remote_not_the_folder() {
+        let tmp = std::env::temp_dir().join(format!("forge-identity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let git = |dir: &Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap()
+                .status
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        let a = tmp.join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        git(&a, &["init", "-q"]);
+        git(
+            &a,
+            &["remote", "add", "origin", "git@github.com:Org/Repo.git"],
+        );
+        git(
+            &a,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        );
+
+        // Lo guardado antes con la ruta pasa a la clave del remoto.
+        let store = Store::in_memory().unwrap();
+        store
+            .conn
+            .execute(
+                "INSERT INTO memories (project, kind, title, body, source, created_at) VALUES (?1, 'decision', 'Vieja', '', 'u', 1)",
+                [a.to_string_lossy()],
+            )
+            .unwrap();
+        store.add_memory(&a, "note", "Nueva", "", "", "u").unwrap();
+        assert_eq!(store.project_key(&a), "git:github.com/org/repo");
+        assert_eq!(store.count_memories(&a).unwrap(), 2);
+
+        // Carpeta movida, otro clon (con https) y un worktree: la misma memoria.
+        let moved = tmp.join("movida");
+        std::fs::rename(&a, &moved).unwrap();
+        let clone = tmp.join("clon");
+        std::fs::create_dir_all(&clone).unwrap();
+        git(&clone, &["init", "-q"]);
+        git(
+            &clone,
+            &["remote", "add", "origin", "https://github.com/org/repo"],
+        );
+        let worktree = tmp.join("wt");
+        git(
+            &moved,
+            &["worktree", "add", "-q", worktree.to_str().unwrap()],
+        );
+        for dir in [&moved, &clone, &worktree] {
+            assert_eq!(store.count_memories(dir).unwrap(), 2, "{dir:?}");
+        }
+        // Una subcarpeta del repo es otro proyecto.
+        let sub = moved.join("api");
+        std::fs::create_dir_all(&sub).unwrap();
+        assert_eq!(store.project_key(&sub), "git:github.com/org/repo/api");
+        let _ = std::fs::remove_dir_all(tmp);
     }
 }

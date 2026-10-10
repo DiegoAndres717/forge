@@ -1,6 +1,8 @@
 // Persistencia local (SQLite): proyectos recientes, workspaces abiertos y su layout.
 use crate::tr;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{Connection, OptionalExtension, params};
@@ -18,6 +20,8 @@ pub struct ProjectRow {
 
 pub struct Store {
     pub conn: Connection,
+    /// Claves de proyecto ya resueltas (ver `project_key`).
+    keys: Mutex<HashMap<PathBuf, String>>,
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -122,7 +126,33 @@ impl Store {
         crate::memory::init(&conn).map_err(err)?;
         crate::ideas::init(&conn).map_err(err)?;
         crate::events::init(&conn).map_err(err)?;
-        Ok(Self { conn })
+        Ok(Self {
+            conn,
+            keys: Mutex::default(),
+        })
+    }
+
+    /// Clave de un proyecto para su memoria y sus planes: el remoto de Git (y la subcarpeta),
+    /// así siguen ahí al mover la carpeta, en otro clon o en un worktree. Sin remoto, la ruta.
+    /// La primera vez pasa a la clave nueva lo que se guardó con la ruta.
+    pub fn project_key(&self, project: &Path) -> String {
+        let mut keys = self.keys.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(key) = keys.get(project) {
+            return key.clone();
+        }
+        let path = path_key(project);
+        let key = crate::git::remote_identity(project)
+            .map_or_else(|| path.clone(), |id| format!("git:{id}"));
+        if key != path {
+            for table in ["memories", "ideas"] {
+                let _ = self.conn.execute(
+                    &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
+                    params![key, path],
+                );
+            }
+        }
+        keys.insert(project.to_path_buf(), key.clone());
+        key
     }
 
     /// Registra la apertura de un proyecto (lo crea si es nuevo).

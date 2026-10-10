@@ -58,6 +58,53 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Identidad estable de un repositorio: el remoto (origin o el primero) normalizado, más la
+/// subcarpeta si el proyecto es parte del repo. `None` si no es un repo o no tiene remoto.
+pub fn remote_identity(repo: &Path) -> Option<String> {
+    let remotes = git(repo, &["config", "--get-regexp", r"^remote\..*\.url$"]).ok()?;
+    let urls: Vec<(&str, &str)> = remotes.lines().filter_map(|l| l.split_once(' ')).collect();
+    let url = urls
+        .iter()
+        .find(|(k, _)| *k == "remote.origin.url")
+        .or(urls.first())?
+        .1;
+    let prefix = git(repo, &["rev-parse", "--show-prefix"]).unwrap_or_default();
+    let prefix = prefix.trim().trim_end_matches('/');
+    let base = normalize_remote(url);
+    Some(if prefix.is_empty() {
+        base
+    } else {
+        format!("{base}/{prefix}")
+    })
+}
+
+/// `git@github.com:Org/Repo.git`, `https://user@github.com/org/repo` y
+/// `ssh://git@github.com:22/org/repo.git` → `github.com/org/repo`.
+pub fn normalize_remote(url: &str) -> String {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    let (scheme, rest) = match url.split_once("://") {
+        Some((_, rest)) => (true, rest),
+        None => (false, url),
+    };
+    // Usuario (`git@`), solo si va antes de la ruta.
+    let rest = match rest.find('@') {
+        Some(at) if at < rest.find('/').unwrap_or(usize::MAX) => &rest[at + 1..],
+        _ => rest,
+    };
+    let split = if scheme {
+        rest.split_once('/')
+            .map(|(host, path)| (host.split(':').next().unwrap_or(host), path))
+    } else {
+        // Forma scp (`host:ruta`); una ruta local se queda tal cual.
+        rest.split_once(':').filter(|(host, _)| !host.contains('/'))
+    };
+    match split {
+        Some((host, path)) => format!("{host}/{}", path.trim_start_matches('/')).to_lowercase(),
+        None => rest.to_lowercase(),
+    }
+}
+
 pub fn status(repo: &Path) -> Result<Status, String> {
     let out = git(
         repo,
@@ -201,6 +248,19 @@ pub fn create_branch(repo: &Path, name: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remotes_normalize_to_the_same_identity() {
+        for url in [
+            "git@github.com:Org/Repo.git",
+            "https://github.com/org/repo",
+            "https://user@github.com/org/repo.git/",
+            "ssh://git@github.com:22/org/repo.git",
+        ] {
+            assert_eq!(normalize_remote(url), "github.com/org/repo", "{url}");
+        }
+        assert_eq!(normalize_remote("/srv/git/repo.git"), "/srv/git/repo");
+    }
 
     #[test]
     fn parses_porcelain_status() {
