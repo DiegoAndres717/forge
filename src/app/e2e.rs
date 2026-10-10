@@ -1344,3 +1344,20 @@ fn a_process_added_in_settings_shows_up() {
         "en el panel PROCESOS"
     );
 }
+
+/// Sin procesos, la barra lateral ofrece añadir uno y lleva al formulario de Ajustes.
+#[test]
+fn add_process_in_the_sidebar_opens_its_form() {
+    let _serial = serial();
+    let mut h = app(project("no-processes"));
+    h.run_steps(3);
+    assert!(ws(h.state()).processes.list.is_empty());
+    h.get_by_label("Añadir proceso").click();
+    h.run_steps(3);
+    assert!(h.state().settings_open);
+    assert!(
+        h.query_by_label_contains("Servidores y tareas que Forge arranca")
+            .is_some(),
+        "abre en Este proyecto, con el formulario de procesos"
+    );
+}

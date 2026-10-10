@@ -1,0 +1,30 @@
+[project]
+name = "forge"
+
+[workspace]
+restore_panels = true
+# default_layout = "development"
+
+# Comandos guardados: aparecen en la barra lateral y se abren en un panel nuevo.
+# [[commands]]
+# name = "Dev server"
+# command = "npm run dev"
+
+# Procesos administrados: panel PROCESOS de la barra lateral (iniciar, detener, logs, puertos).
+# [[processes]]
+# id = "frontend"
+# name = "Frontend"
+# command = "npm run dev"
+# restart = "on-workspace-open"   # manual | on-workspace-open | never
+# auto_restart = "on-failure"     # never | on-failure | always
+# health_check = { url = "http://localhost:5173" }   # o { port = 5432 } o { command = "pg_isready" }
+
+# Variables de entorno para todos los paneles y procesos.
+# [environment]
+# NODE_ENV = "development"
+
+# Layout predefinido (se usa al abrir sin sesión guardada o con "Restablecer layout").
+# [layouts.development]
+# split = "row"
+# first = { name = "Claude Code", command = "claude" }
+# second = { split = "column", first = { command = "npm run dev" }, second = {} }
