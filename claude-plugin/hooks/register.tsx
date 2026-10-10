@@ -270,6 +270,8 @@ export const register: Register = on => {
     const subagents = working.filter(([key]) => key !== 'main')
     const now = Date.now()
     const windows = await read($, limits)
+    // The Forge account this session runs with (only set when there are several).
+    const account = await $.env.get('FORGE_ACCOUNT').catch(() => undefined)
     const plan = WINDOWS.flatMap(([kind, label]) => {
       const w = windows.find(l => l.kind === kind)
       if (!w) return []
@@ -285,6 +287,7 @@ export const register: Register = on => {
     return (
       <Text>
         <Text color="claude" bold>Forge</Text>
+        {account ? <Text color="claude">{` · ${account}`}</Text> : null}
         {status ? sep : null}
         {status ? <Text dimColor>Guard </Text> : null}
         {status ? <Text color={GUARD_COLOR[status.guard] ?? 'subtle'}>{status.guard}</Text> : null}

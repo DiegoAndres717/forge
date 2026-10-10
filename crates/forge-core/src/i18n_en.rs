@@ -1550,4 +1550,54 @@ pub const EN: &[(&str, &str)] = &[
     ("{p0}  Ir a «{p1}»", "{p0}  Go to “{p1}”"),
     ("{p0}  Sesión nueva", "{p0}  New session"),
     ("{p0}: sesión nueva", "{p0}: new session"),
+    (
+        "Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)",
+        "Opens the agent with this account so you can sign in (only the first time)",
+    ),
+    ("Abrir {p0} · {p1}", "Open {p0} · {p1}"),
+    (
+        "Añadir, renombrar o iniciar sesión (Ajustes)",
+        "Add, rename or sign in (Settings)",
+    ),
+    ("Borrar cuenta", "Delete account"),
+    (
+        "Borrar su login e historial",
+        "Delete its login and history",
+    ),
+    (
+        "Cierra antes las terminales que usan esa cuenta.",
+        "Close the terminals using that account first.",
+    ),
+    ("Cuenta {n}", "Account {n}"),
+    ("Cuentas", "Accounts"),
+    ("En este proyecto", "In this project"),
+    ("Iniciar sesión", "Sign in"),
+    ("Nombre de la cuenta", "Account name"),
+    (
+        "Se abre con esta cuenta al pulsar el agente en este proyecto",
+        "Clicking the agent in this project opens it with this account",
+    ),
+    (
+        "Usa varias cuentas a la vez sin cerrar sesión. Cada una guarda su inicio de sesión e historial; los ajustes, las instrucciones y las skills se comparten con la principal.",
+        "Use several accounts at once without signing out. Each keeps its own login and history; settings, instructions and skills are shared with the main one.",
+    ),
+    (
+        "Usar esta cuenta en este proyecto",
+        "Use this account in this project",
+    ),
+    ("cuenta", "account"),
+    ("principal", "main"),
+    ("{p0}  Añadir cuenta", "{p0}  Add account"),
+    ("{p0}  Cuentas…", "{p0}  Accounts…"),
+    ("Principal", "Main"),
+    (
+        "{program} no admite varias cuentas",
+        "{program} doesn't support several accounts",
+    ),
+    ("la cuenta necesita un nombre", "the account needs a name"),
+    ("No existe esa cuenta.", "That account doesn't exist."),
+    (
+        "La cuenta principal no se puede borrar.",
+        "The main account can't be deleted.",
+    ),
 ];

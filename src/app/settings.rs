@@ -113,6 +113,8 @@ impl App {
                     );
                 });
 
+                self.accounts_ui(ui, cmds);
+
                 // Tokens de Claude abierto desde Forge (subagentes incluidos), 30 días.
                 let usage = self
                     .db(|s| s.agent_usage(None, store::now() - 30 * 86_400))
@@ -269,5 +271,112 @@ fn short_tokens(n: u64) -> String {
         1_000_000.. => format!("{:.1}M", n as f64 / 1_000_000.0),
         1_000.. => format!("{}k", n / 1_000),
         _ => n.to_string(),
+    }
+}
+
+impl App {
+    /// Cuentas de Claude Code y Codex: varias a la vez, cada una con su login.
+    fn accounts_ui(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
+        let programs: Vec<(&str, &str)> = [("claude", "Claude Code"), ("codex", "Codex")]
+            .into_iter()
+            .filter(|(p, _)| detected.get(*p).is_some_and(|d| d.path.is_some()))
+            .collect();
+        if programs.is_empty() {
+            return;
+        }
+        let ws = self.active.map(|i| &self.workspaces[i]);
+        ui.add_space(6.0);
+        theme::section(ui, tr!("Cuentas"));
+        theme::card(ui, |ui| {
+            ui.label(
+                RichText::new(tr!("Usa varias cuentas a la vez sin cerrar sesión. Cada una guarda su inicio de sesión e historial; los ajustes, las instrucciones y las skills se comparten con la principal."))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            for (program, label) in programs {
+                ui.add_space(8.0);
+                ui.label(RichText::new(label).strong());
+                let accounts = self
+                    .store
+                    .as_ref()
+                    .map(|s| s.accounts(program))
+                    .unwrap_or_default();
+                let chosen = ws.and_then(|w| w.account_for(program, None)).map(|a| a.id);
+                egui::Grid::new(("accounts", program))
+                    .num_columns(3)
+                    .spacing([12.0, 6.0])
+                    .show(ui, |ui| {
+                        for a in &accounts {
+                            let id = egui::Id::new(("account-name", program, a.id));
+                            let mut text = ui
+                                .data(|d| d.get_temp::<String>(id))
+                                .unwrap_or_else(|| a.name.clone());
+                            let edit = ui
+                                .add(egui::TextEdit::singleline(&mut text).desired_width(150.0))
+                                .on_hover_text(tr!("Nombre de la cuenta"));
+                            if edit.changed() {
+                                ui.data_mut(|d| d.insert_temp(id, text.clone()));
+                            }
+                            if edit.lost_focus() {
+                                if !text.trim().is_empty() && text.trim() != a.name {
+                                    cmds.push(UiCmd::AccountRename(program.into(), a.id, text.clone()));
+                                }
+                                ui.data_mut(|d| d.remove::<String>(id));
+                            }
+                            ui.horizontal(|ui| {
+                                if ws.is_some() {
+                                    if ui
+                                        .selectable_label(chosen == Some(a.id), tr!("En este proyecto"))
+                                        .on_hover_text(tr!("Se abre con esta cuenta al pulsar el agente en este proyecto"))
+                                        .clicked()
+                                    {
+                                        cmds.push(UiCmd::UseAccount(program.into(), a.id));
+                                    }
+                                    if ui
+                                        .button(tr!("Iniciar sesión"))
+                                        .on_hover_text(tr!("Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)"))
+                                        .clicked()
+                                    {
+                                        cmds.push(UiCmd::AccountLogin(program.into(), a.id));
+                                    }
+                                }
+                                if a.is_main() {
+                                    ui.label(RichText::new(tr!("principal")).size(11.0).color(theme::TEXT_3));
+                                }
+                            });
+                            if a.is_main() {
+                                ui.label("");
+                            } else {
+                                let confirm = egui::Id::new(("account-delete", program, a.id));
+                                let asked = ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false);
+                                if asked {
+                                    ui.horizontal(|ui| {
+                                        if ui
+                                            .button(RichText::new(tr!("Borrar su login e historial")).color(theme::RED))
+                                            .clicked()
+                                        {
+                                            cmds.push(UiCmd::AccountDelete(program.into(), a.id));
+                                            ui.data_mut(|d| d.remove::<bool>(confirm));
+                                        }
+                                        if ui.button(tr!("Cancelar")).clicked() {
+                                            ui.data_mut(|d| d.remove::<bool>(confirm));
+                                        }
+                                    });
+                                } else if theme::icon_button(ui, icon::TRASH, tr!("Borrar cuenta")).clicked() {
+                                    ui.data_mut(|d| d.insert_temp(confirm, true));
+                                }
+                            }
+                            ui.end_row();
+                        }
+                    });
+                if ui
+                    .button(tr!("{p0}  Añadir cuenta", p0 = icon::PLUS))
+                    .clicked()
+                {
+                    cmds.push(UiCmd::AccountAdd(program.into()));
+                }
+            }
+        });
     }
 }

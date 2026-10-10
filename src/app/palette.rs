@@ -215,6 +215,20 @@ impl App {
                     hint,
                     cmd(UiCmd::AgentClick(agent.id.clone(), false)),
                 );
+                // Con varias cuentas: abrir directamente con cada una.
+                if ws.has_accounts(agent.program()) {
+                    for a in ws.accounts_of(agent.program()) {
+                        add(
+                            icon::USER,
+                            tr!("Abrir {p0} · {p1}", p0 = agent.name, p1 = a.name),
+                            tr!("cuenta"),
+                            Run::Cmds(vec![
+                                UiCmd::UseAccount(a.program.clone(), a.id),
+                                UiCmd::AgentClick(agent.id.clone(), false),
+                            ]),
+                        );
+                    }
+                }
                 add(
                     icon::PLUS,
                     tr!("{p0}: sesión nueva", p0 = agent.name),

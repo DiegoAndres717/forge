@@ -23,19 +23,17 @@ pub fn resume_command(program: &str, command: &str, id: &str) -> Option<String> 
 }
 
 /// Última sesión interactiva del agente en `cwd` (las de modo no interactivo no cuentan).
-pub fn last_session(program: &str, cwd: &Path) -> Option<LastSession> {
+/// `config`: carpeta de la cuenta; sin ella, la de siempre (o la de su variable de entorno).
+pub fn last_session(program: &str, cwd: &Path, config: Option<&Path>) -> Option<LastSession> {
     let home = PathBuf::from(std::env::var_os("HOME")?);
+    let dir = |var: &str, default: &str| {
+        config.map(Path::to_path_buf).unwrap_or_else(|| {
+            std::env::var_os(var).map_or_else(|| home.join(default), PathBuf::from)
+        })
+    };
     match program {
-        "claude" => {
-            let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
-                .map_or_else(|| home.join(".claude"), PathBuf::from);
-            claude(&dir, cwd)
-        }
-        "codex" => {
-            let dir =
-                std::env::var_os("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from);
-            codex(&dir, cwd)
-        }
+        "claude" => claude(&dir("CLAUDE_CONFIG_DIR", ".claude"), cwd),
+        "codex" => codex(&dir("CODEX_HOME", ".codex"), cwd),
         _ => None,
     }
 }

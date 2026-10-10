@@ -142,3 +142,20 @@ test('outside Forge the first message carries no Forge context', async ($, on) =
   const result = await $.prompt.context({ blocks: [] })
   expect(result.blocks.map(b => b.name)).toEqual(['currentDate'])
 })
+
+test('the band names the Forge account when there are several', async ($, on) => {
+  mock.env(on, { FORGE_ACCOUNT: 'Trabajo' })
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { percent: 10 } as never,
+    rateLimits: [{ kind: 'five_hour', percentUsed: 20 }],
+    changed: ['rateLimits'],
+  })
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  expect(JSON.stringify(await drawn.drawn())).toContain(' · Trabajo')
+})

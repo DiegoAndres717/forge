@@ -22,6 +22,10 @@ pub struct Store {
     pub conn: Connection,
     /// Claves de proyecto ya resueltas (ver `project_key`).
     keys: Mutex<HashMap<PathBuf, String>>,
+    /// Carpeta de las cuentas de agentes (junto a la base; `None` en memoria).
+    pub accounts_root: Option<PathBuf>,
+    /// $HOME, donde están las carpetas principales de los agentes.
+    pub home: Option<PathBuf>,
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -55,7 +59,9 @@ impl Store {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(err)?;
         }
-        Self::init(Connection::open(path).map_err(err)?)
+        let mut store = Self::init(Connection::open(path).map_err(err)?)?;
+        store.accounts_root = path.parent().map(|d| d.join("accounts"));
+        Ok(store)
     }
 
     /// Base en memoria (tests).
@@ -129,6 +135,8 @@ impl Store {
         Ok(Self {
             conn,
             keys: Mutex::default(),
+            accounts_root: None,
+            home: std::env::var_os("HOME").map(PathBuf::from),
         })
     }
 

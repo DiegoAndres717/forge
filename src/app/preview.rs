@@ -395,6 +395,9 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "13-bienvenida");
     harness.state_mut().welcome = None;
+    // Con una segunda cuenta de Claude, para ver la sección Cuentas.
+    harness.state_mut().db(|s| s.add_account("claude", "Work"));
+    harness.state_mut().sync_accounts();
     harness.state_mut().settings_open = true;
     settle(&mut harness);
     save(&mut harness, &out, "11-ajustes");
@@ -404,6 +407,8 @@ fn ui_preview() {
     save(&mut harness, &out, "11b-ajustes-pequeno");
     harness.set_size(Vec2::new(1440.0, 880.0));
     harness.state_mut().settings_open = false;
+    harness.state_mut().db(|s| s.delete_account("claude", 1));
+    harness.state_mut().sync_accounts();
     *harness.state().update.lock().unwrap() = Some(super::update::Update::Available(
         forge_core::updates::Release {
             tag: "v0.2.0".into(),
