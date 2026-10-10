@@ -175,6 +175,21 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Project memory at the start of every conversation (and again after compaction or
+  // /clear): key decisions and conventions, Guard rules and the plans in progress, so
+  // Claude starts knowing them instead of having to remember to look them up.
+  on('prompt.context', async ($, e, next) => {
+    const result = await next(e)
+    const out = await forge($, ['context'])
+    const text = out && out.exitCode === 0 ? out.stdout.trim() : ''
+    if (!text) return result
+    const block = {
+      name: 'forge',
+      text: `${text}\n\nFrom Forge (this project's memory and plans). Search more with memory_search and plans_list; save new decisions and fixed bugs with memory_save.`,
+    }
+    return { ...result, blocks: [...result.blocks, block] }
+  })
+
   // The delegation policy, added to the main session's system prompt.
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
