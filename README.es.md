@@ -5,7 +5,7 @@
 # Forge
 
 **Un espacio de trabajo nativo para macOS para programar con agentes de IA.**<br>
-Terminales, procesos, agentes, memoria del proyecto y un Guard que revisa cada cambio antes de que salga de tu máquina: una ventana por proyecto.
+Terminales, procesos, agentes, **Forge Memory** y un Guard que revisa cada cambio antes de que salga de tu máquina: una ventana por proyecto.
 
 [![CI](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DiegoAndres717/forge?label=versión&cacheSeconds=300)](https://github.com/DiegoAndres717/forge/releases/latest)
@@ -27,7 +27,7 @@ Terminales, procesos, agentes, memoria del proyecto y un Guard que revisa cada c
 Cuando trabajas con Claude Code, Codex u OpenCode, el día se reparte entre pestañas de terminal, servidores de desarrollo, notas y "¿pasaron los tests antes del push?". Forge reúne cada proyecto en un solo lugar:
 
 - **Abres una carpeta y recuperas todo**: terminales, divisiones, servidores y agentes tal como los dejaste.
-- **Agentes que planifican y recuerdan**: los planes por fases, el backlog y la memoria del proyecto se comparten con todos los agentes vía MCP.
+- **Agentes que planifican y recuerdan**: los planes por fases, el backlog y Forge Memory (la memoria del proyecto) se comparten con todos los agentes vía MCP.
 - **Nada sale roto**: Project Guard aplica tus reglas (tamaño, secretos, lint, tests, build) antes de cada commit, push y pull request.
 - **Nativo y ligero**: escrito en Rust con interfaz dibujada en GPU; sin Electron ni navegador embebido.
 
@@ -65,7 +65,7 @@ Reglas deterministas antes de **commit / push / PR**: tamaño del cambio, archiv
 <td>
 
 ### Planes y memoria
-Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**: cada fase con su estado, una rama de Git opcional y tareas que va tachando mientras trabaja. Lo que surja para después va al **backlog**; un clic en *Planificar con Claude Code* lo convierte en plan. Tres secciones (En progreso · Backlog · Completado), **guardado fuera del repo** y compartido por MCP con Claude Code, Codex y OpenCode, junto con la memoria del proyecto (decisiones, errores resueltos, convenciones).
+Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**: cada fase con su estado, una rama de Git opcional y tareas que va tachando mientras trabaja. Lo que surja para después va al **backlog**; un clic en *Planificar con Claude Code* lo convierte en plan. Tres secciones (En progreso · Backlog · Completado), **guardado fuera del repo** y compartido por MCP con Claude Code, Codex y OpenCode, junto con **Forge Memory**, la memoria del proyecto: decisiones, errores resueltos y convenciones, sin duplicados y ligada al remoto de Git (sigue al repo aunque cambies de carpeta, clon o worktree).
 
 </td>
 <td><img src="docs/screenshots/plans.png" alt="Planes"></td>

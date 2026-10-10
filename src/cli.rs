@@ -31,7 +31,7 @@ Uso:
   forge ai route [commit|push|pr]       riesgo del cambio y qué modelos lo revisarían (sin gastar)
   forge ai usage                        consumo de modelos de este mes
   forge ai init                         crea .forge/routing.toml
-  forge memory search <texto> [--kind k]   busca en la memoria del proyecto
+  forge memory search <texto> [--kind k]   busca en Forge Memory (memoria del proyecto)
   forge memory add <tipo> \"título\" \"texto\" [--tags a,b]
   forge memory list [--kind k] · forge memory delete <id>
   forge plans [--all] [--general]          planes y backlog (fuera del repositorio)
@@ -76,7 +76,7 @@ Usage:
   forge ai route [commit|push|pr]       change risk and which models would review it (free)
   forge ai usage                        model usage this month
   forge ai init                         creates .forge/routing.toml
-  forge memory search <text> [--kind k]    searches the project memory
+  forge memory search <text> [--kind k]    searches Forge Memory (project memory)
   forge memory add <kind> \"title\" \"text\" [--tags a,b]
   forge memory list [--kind k] · forge memory delete <id>
   forge plans [--all] [--general]          plans and backlog (outside the repository)
