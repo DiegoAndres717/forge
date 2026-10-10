@@ -114,6 +114,14 @@ Descarga la última versión, comprueba su SHA-256, instala `Forge.app` en `/App
    xattr -dr com.apple.quarantine /Applications/Forge.app
    ```
 
+### Homebrew
+
+```sh
+brew install --cask diegoandres717/tap/forge
+```
+
+Para actualizar: `brew upgrade --cask forge`.
+
 ### Compilar desde el código
 
 ```sh

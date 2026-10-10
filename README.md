@@ -114,6 +114,14 @@ It downloads the latest release, checks its SHA-256, installs `Forge.app` in `/A
    xattr -dr com.apple.quarantine /Applications/Forge.app
    ```
 
+### Homebrew
+
+```sh
+brew install --cask diegoandres717/tap/forge
+```
+
+Update with `brew upgrade --cask forge`.
+
 ### Build from source
 
 ```sh
