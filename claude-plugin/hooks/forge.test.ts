@@ -135,3 +135,10 @@ test('the band shows which model is working right now and on what', async ($, on
   expect(after).not.toContain('explorer: find the login')
   expect(after).toContain('9k')
 })
+
+test('outside Forge the first message carries no Forge context', async ($, on) => {
+  mock.env(on, {})
+  on('prompt.context', () => ({ blocks: [{ name: 'currentDate', text: 'today' }] }))
+  const result = await $.prompt.context({ blocks: [] })
+  expect(result.blocks.map(b => b.name)).toEqual(['currentDate'])
+})
