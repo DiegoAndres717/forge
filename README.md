@@ -104,6 +104,14 @@ curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/i
 
 It downloads the latest release, checks its SHA-256, installs `Forge.app` in `/Applications` (or `~/Applications`) and links the `forge` command. Run it again to update. Installed this way, macOS doesn't show the "cannot be opened" warning.
 
+### Homebrew
+
+```sh
+brew install --cask diegoandres717/tap/forge
+```
+
+Update with `brew upgrade --cask forge`.
+
 ### Download
 
 1. Download `Forge-x.y.z.dmg` from the [latest release](https://github.com/DiegoAndres717/forge/releases/latest).
@@ -113,14 +121,6 @@ It downloads the latest release, checks its SHA-256, installs `Forge.app` in `/A
    ```sh
    xattr -dr com.apple.quarantine /Applications/Forge.app
    ```
-
-### Homebrew
-
-```sh
-brew install --cask diegoandres717/tap/forge
-```
-
-Update with `brew upgrade --cask forge`.
 
 ### Build from source
 
