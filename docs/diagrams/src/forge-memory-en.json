@@ -1,0 +1,211 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Forge Memory",
+  "locale": "en",
+  "output": "forge-memory-en/forge-memory.en.html",
+  "quality_profile": "showcase"
+ },
+ "components": [
+  {
+   "id": "claude",
+   "type": "frontend",
+   "label": "Claude Code",
+   "sublabel": "with the Forge mod",
+   "pos": [
+    40,
+    200
+   ],
+   "size": [
+    200,
+    64
+   ]
+  },
+  {
+   "id": "codex",
+   "type": "frontend",
+   "label": "Codex",
+   "sublabel": "MCP client",
+   "pos": [
+    350,
+    384
+   ],
+   "size": [
+    140,
+    64
+   ]
+  },
+  {
+   "id": "opencode",
+   "type": "frontend",
+   "label": "OpenCode",
+   "sublabel": "MCP client",
+   "pos": [
+    520,
+    384
+   ],
+   "size": [
+    140,
+    64
+   ]
+  },
+  {
+   "id": "mcp",
+   "type": "backend",
+   "label": "forge mcp",
+   "sublabel": "memory_* · plans_* · project_context",
+   "pos": [
+    360,
+    180
+   ],
+   "size": [
+    280,
+    104
+   ]
+  },
+  {
+   "id": "db",
+   "type": "database",
+   "label": "forge.db (SQLite)",
+   "sublabel": "~/Library/Application Support/Forge",
+   "pos": [
+    800,
+    192
+   ],
+   "size": [
+    240,
+    80
+   ]
+  },
+  {
+   "id": "context",
+   "type": "backend",
+   "label": "forge context",
+   "sublabel": "decisions · conventions · plans",
+   "pos": [
+    40,
+    40
+   ],
+   "size": [
+    200,
+    72
+   ]
+  },
+  {
+   "id": "app",
+   "type": "frontend",
+   "label": "Forge app + CLI",
+   "sublabel": "Memory ⌘⇧M · Plans · forge memory",
+   "pos": [
+    800,
+    384
+   ],
+   "size": [
+    240,
+    64
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "Local only · never in the repo",
+   "wraps": [
+    "db"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "claude-mcp",
+   "from": "claude",
+   "to": "mcp",
+   "label": "MCP (stdio)",
+   "variant": "emphasis"
+  },
+  {
+   "id": "codex-mcp",
+   "from": "codex",
+   "to": "mcp",
+   "label": "MCP",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "opencode-mcp",
+   "from": "opencode",
+   "to": "mcp",
+   "label": "MCP",
+   "fromSide": "top",
+   "toSide": "bottom"
+  },
+  {
+   "id": "mcp-db",
+   "from": "mcp",
+   "to": "db",
+   "label": "keyed by Git remote",
+   "variant": "emphasis"
+  },
+  {
+   "id": "db-context",
+   "from": "db",
+   "to": "context",
+   "label": "read",
+   "fromSide": "top",
+   "toSide": "right",
+   "via": [
+    [
+     920,
+     76
+    ]
+   ]
+  },
+  {
+   "id": "context-claude",
+   "from": "context",
+   "to": "claude",
+   "label": "hook injects at start",
+   "variant": "dashed",
+   "fromSide": "bottom",
+   "toSide": "top"
+  },
+  {
+   "id": "app-db",
+   "from": "app",
+   "to": "db",
+   "label": "read / write",
+   "fromSide": "top",
+   "toSide": "bottom"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Project identity",
+   "items": [
+    "Key = normalized Git remote (+ subfolder), e.g. git:github.com/org/repo",
+    "Falls back to the folder path",
+    "Follows the repo across moved folders, clones and worktrees"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "No duplicates",
+   "items": [
+    "memory_save first looks for a memory on the same topic",
+    "If found, it does not save: use memory_update on that id",
+    "force=true saves anyway"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "Session start",
+   "items": [
+    "prompt.context hook runs forge context",
+    "Injects decisions, architecture, conventions, Guard rules and plans in progress",
+    "Again after compaction or /clear"
+   ]
+  }
+ ]
+}
