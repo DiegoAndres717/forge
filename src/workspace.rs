@@ -259,6 +259,8 @@ enum HeaderAction {
     NewTab,
     ShowTab(PanelId),
     CloseTab(PanelId),
+    /// Reordenar: la terminal pasa a esta posición de su grupo.
+    MoveTab(PanelId, usize),
     Rotate,
     /// Con un panel maximizado: maximizar este otro en su lugar.
     Show(PanelId),
@@ -294,6 +296,8 @@ pub struct Workspace {
     seen_failures: Vec<String>,
     /// Bytes que había escrito cada terminal la última vez que se vio el proyecto.
     seen_output: HashMap<PanelId, u64>,
+    /// Salida de cada terminal la última vez que estuvo a la vista (avisos en la lista).
+    tab_seen: HashMap<PanelId, u64>,
     /// Bytes de cada terminal cuando se guardó su historial (para no reescribirlo igual).
     history_saved: HashMap<PanelId, u64>,
     /// Avisos ya notificados desde la última vez que se vio el proyecto (uno por aviso).
@@ -348,6 +352,7 @@ impl Workspace {
             seen: Instant::now(),
             seen_failures: Vec::new(),
             seen_output: HashMap::new(),
+            tab_seen: HashMap::new(),
             history_saved: HashMap::new(),
             notified: Vec::new(),
             sticky: None,
@@ -1085,6 +1090,12 @@ impl Workspace {
         self.layout.parent_dir(self.focus)
     }
 
+    /// ¿La terminal tiene aviso en la lista (escribió oculta o falló)? (tests)
+    #[cfg(test)]
+    pub fn has_tab_alert(&self, id: PanelId) -> bool {
+        self.tab_alert(id).is_some()
+    }
+
     #[cfg(test)]
     pub fn focused(&self) -> PanelId {
         self.focus
@@ -1359,6 +1370,10 @@ impl Workspace {
         let key = self.project.path.clone();
         let mut header_actions = Vec::new();
         for (id, rect) in self.rects(area) {
+            // Lo que la terminal visible ya mostró no cuenta como aviso al ocultarla.
+            if let Some(bytes) = self.panel_output(id) {
+                self.tab_seen.insert(id, bytes);
+            }
             let (header, body) = rect.split_top_bottom_at_y(rect.min.y + HEADER);
             header_actions.extend(self.header(ui, id, header).into_iter().map(|a| (id, a)));
             // Varias terminales en este panel y sitio de sobra: lista a la derecha (VS Code).
@@ -1448,6 +1463,13 @@ impl Workspace {
                 }
                 HeaderAction::ShowTab(tab) => self.show_tab(tab),
                 HeaderAction::CloseTab(tab) => self.close(tab),
+                HeaderAction::MoveTab(tab, to) => {
+                    if let Some(group) = self.tabs.iter_mut().find(|g| g.contains(&tab)) {
+                        group.retain(|p| *p != tab);
+                        let to = to.min(group.len());
+                        group.insert(to, tab);
+                    }
+                }
                 HeaderAction::Show(other) => {
                     self.focus = other;
                     self.maximized = Some(other);
@@ -1473,6 +1495,35 @@ impl Workspace {
             }
         }
         label
+    }
+
+    /// Bytes que ha escrito la terminal de un panel (shell o proceso).
+    fn panel_output(&self, id: PanelId) -> Option<u64> {
+        match &self.panels.get(&id)?.content {
+            Content::Shell(t) => Some(t.output_bytes()),
+            Content::Process(p) => self
+                .processes
+                .get(p)
+                .and_then(|m| m.terminal.as_ref())
+                .map(|t| t.output_bytes()),
+        }
+    }
+
+    /// Aviso de una terminal oculta: rojo si su proceso falló, acento si escribió algo
+    /// desde la última vez que se vio.
+    fn tab_alert(&self, id: PanelId) -> Option<Color32> {
+        if let Some(Content::Process(p)) = self.panels.get(&id).map(|p| &p.content)
+            && self.processes.get(p).is_some_and(|m| {
+                matches!(m.status, crate::processes::Status::Failed(_))
+                    || matches!(m.status, crate::processes::Status::Exited { code } if code != 0)
+            })
+        {
+            return Some(crate::theme::RED);
+        }
+        let seen = self.tab_seen.get(&id).copied().unwrap_or(0);
+        self.panel_output(id)
+            .filter(|bytes| *bytes > seen)
+            .map(|_| crate::theme::ACCENT)
     }
 
     /// Icono de una terminal en la lista: proceso, agente o shell.
@@ -1514,8 +1565,37 @@ impl Workspace {
             }
             let label = self.tab_name(*tab);
             let response = ui
-                .interact(row, egui::Id::new(("tab-row", &key, *tab)), Sense::click())
+                .interact(
+                    row,
+                    egui::Id::new(("tab-row", &key, *tab)),
+                    Sense::click_and_drag(),
+                )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
+            // Arrastrar para reordenar: una línea marca dónde caerá.
+            let slot = |y: f32| {
+                (((y - rect.min.y - 6.0) / TAB_ROW).round().max(0.0) as usize).min(tabs.len())
+            };
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                if let Some(p) = ui.ctx().pointer_interact_pos() {
+                    let y = rect.min.y + 6.0 + slot(p.y) as f32 * TAB_ROW;
+                    painter.hline(
+                        (rect.min.x + 8.0)..=(rect.max.x - 8.0),
+                        y,
+                        egui::Stroke::new(2.0, theme::ACCENT),
+                    );
+                }
+            }
+            if response.drag_stopped()
+                && let Some(p) = ui.ctx().pointer_interact_pos()
+            {
+                let to = slot(p.y);
+                // Soltarla después de sí misma la deja una posición antes.
+                let to = if to > i { to - 1 } else { to };
+                if to != i {
+                    actions.push(HeaderAction::MoveTab(*tab, to));
+                }
+            }
             let spoken = tr!(
                 "Terminal {n} de {total}: {name}",
                 n = i + 1,
@@ -1602,6 +1682,9 @@ impl Workspace {
                     &close,
                     theme::TEXT_3,
                 );
+            } else if let Some(color) = self.tab_alert(*tab).filter(|_| !current) {
+                // Escribió algo (o falló) mientras estaba oculta.
+                painter.circle_filled(trash.center(), 3.5, color);
             }
             if close.on_hover_text(&hint).clicked() {
                 actions.push(HeaderAction::CloseTab(*tab));

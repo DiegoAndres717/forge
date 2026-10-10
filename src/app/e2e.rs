@@ -1080,3 +1080,63 @@ fn stacked_terminals_from_the_panel_ui() {
     h.run_steps(3);
     assert_eq!(ws(h.state()).panel_count(), 2);
 }
+
+/// Una terminal que escribe mientras está oculta lleva aviso en la lista; las filas se
+/// reordenan arrastrándolas.
+#[test]
+fn hidden_terminals_show_activity_and_rows_reorder_by_drag() {
+    let _serial = serial();
+    let mut h = app(project("tabs-polish"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let first = ws(h.state()).focused();
+    // Escribe dentro de un segundo; mientras, se pasa a otra terminal del panel.
+    h.event(egui::Event::Text("sleep 1; echo zzoculta".into()));
+    h.key_press(Key::Enter);
+    h.run_steps(2);
+    h.key_press_modifiers(CMD, Key::T);
+    h.run_steps(3);
+    let second = ws(h.state()).focused();
+    assert_ne!(first, second);
+    wait_until(&mut h, "aviso de la terminal oculta", |a| {
+        ws(a).has_tab_alert(first)
+    });
+    assert!(
+        !ws(h.state()).has_tab_alert(second),
+        "la visible no lleva aviso"
+    );
+
+    // Arrastrar la segunda fila por encima de la primera.
+    h.key_press_modifiers(CMD, Key::T);
+    h.run_steps(3);
+    let tabs = ws(h.state()).panel_tabs(first);
+    assert_eq!(tabs.len(), 3);
+    let row = |h: &Harness<'_, App>, n: usize| {
+        h.get_by_label_contains(&format!("Terminal {n} de 3"))
+            .rect()
+            .center()
+    };
+    let (from, to) = (row(&h, 3), row(&h, 1));
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(egui::Event::PointerMoved(from));
+    h.event(button(from, true));
+    h.run_steps(2);
+    for k in 1..=6 {
+        let y = from.y + (to.y - 10.0 - from.y) * k as f32 / 6.0;
+        h.event(egui::Event::PointerMoved(egui::pos2(from.x, y)));
+        h.run_steps(1);
+    }
+    h.event(button(egui::pos2(from.x, to.y - 10.0), false));
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).panel_tabs(first),
+        vec![tabs[2], tabs[0], tabs[1]],
+        "la tercera pasa a la primera posición"
+    );
+}

@@ -445,6 +445,12 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].new_tab(&ctx);
     settle(&mut harness);
     save(&mut harness, &out, "17-terminales");
+    // Ventana pequeña: el panel es estrecho y la lista pasa a ser el chip "n/3 ▾".
+    harness.set_size(Vec2::new(900.0, 620.0));
+    settle(&mut harness);
+    save(&mut harness, &out, "17b-terminales-estrecho");
+    harness.set_size(Vec2::new(1440.0, 880.0));
+    settle(&mut harness);
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 
