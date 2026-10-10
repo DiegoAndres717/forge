@@ -18,6 +18,8 @@ import type { Active, Band, Limit, ModelTokens } from '../types'
 
 const band = atom({ plugin: 'forge', key: 'band' } as const, null as Band | null)
 const tokens = atom({ plugin: 'forge', key: 'tokens' } as const, {} as ModelTokens)
+/** Usage windows already reported to Forge as exhausted (`kind:resetsAt`). */
+const limitsReported = new Set<string>()
 const limits = atom({ plugin: 'forge', key: 'limits' } as const, [] as Limit[])
 const active = atom({ plugin: 'forge', key: 'active' } as const, {} as Active)
 const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<string, string>)
@@ -171,7 +173,17 @@ export const register: Register = on => {
 
   // Plan usage windows: pushed after each turn and when a window moves a point.
   on('session.measure', async ($, e, next) => {
-    if (e.changed.includes('rateLimits')) await update($, limits, () => e.rateLimits)
+    if (e.changed.includes('rateLimits')) {
+      await update($, limits, () => e.rateLimits)
+      // A window ran out: Forge offers to carry on with another account (once per window).
+      for (const w of e.rateLimits ?? []) {
+        const key = `${w.kind}:${w.resetsAt ?? ''}`
+        if (w.percentUsed >= 100 && !limitsReported.has(key)) {
+          limitsReported.add(key)
+          void forge($, ['agent-event', 'limit'], JSON.stringify({ message: `${w.kind} limit reached`, origin: 'Claude Code' }))
+        }
+      }
+    }
     return next(e)
   })
 

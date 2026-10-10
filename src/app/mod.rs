@@ -234,6 +234,8 @@ enum UiCmd {
     AccountDelete(String, i64),
     /// Abre el agente en esa cuenta para iniciar sesión.
     AccountLogin(String, i64),
+    /// Sigue la conversación de una terminal de agente con otra cuenta: (terminal, cuenta).
+    Handoff(crate::layout::PanelId, i64),
     OpenDefaultAgent,
     DetectAgents,
     GuardRun,
@@ -711,6 +713,18 @@ impl App {
                 } else {
                     self.db(|s| s.delete_account(&program, id));
                     self.sync_accounts();
+                }
+            }
+            UiCmd::Handoff(panel, account) => {
+                if let Some(i) = self.active
+                    && let Some(program) = self.workspaces[i].panel_program(panel)
+                {
+                    let path = self.workspaces[i].project.path.clone();
+                    self.db(|s| s.set_project_account(&path, &program, account));
+                    self.sync_accounts();
+                    if let Err(e) = self.workspaces[i].handoff(ctx, panel) {
+                        self.error = Some(e);
+                    }
                 }
             }
             UiCmd::AccountLogin(program, id) => {
@@ -1279,6 +1293,9 @@ impl eframe::App for App {
                 );
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
+                }
+                if let Some((panel, account)) = ws.handoff_request.take() {
+                    cmds.push(UiCmd::Handoff(panel, account));
                 }
                 if ws.is_empty() && !ws.is_dormant() {
                     cmds.push(UiCmd::Close(i));

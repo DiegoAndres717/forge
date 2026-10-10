@@ -23,6 +23,11 @@ impl App {
                     .iter_mut()
                     .find(|w| w.project.path == event.project)
                 {
+                    if event.kind == "limit"
+                        && let Some(panel) = event.panel
+                    {
+                        ws.limit_reached(panel);
+                    }
                     ws.agent_event(event.text);
                 }
             }

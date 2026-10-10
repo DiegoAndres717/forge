@@ -1600,4 +1600,38 @@ pub const EN: &[(&str, &str)] = &[
         "La cuenta principal no se puede borrar.",
         "The main account can't be deleted.",
     ),
+    (
+        "No encuentro esa conversación.",
+        "I can't find that conversation.",
+    ),
+    (
+        "{name} llegó al límite de uso de esta cuenta",
+        "{name} reached this account's usage limit",
+    ),
+    (
+        "No encuentro la conversación de esa terminal.",
+        "I can't find that terminal's conversation.",
+    ),
+    (
+        "Seguir esta conversación con otra cuenta",
+        "Continue this conversation with another account",
+    ),
+    ("Seguir con «{p0}»", "Continue with “{p0}”"),
+    (
+        "Esta cuenta llegó a su límite de uso.",
+        "This account reached its usage limit.",
+    ),
+    (
+        "Añade otra en Ajustes → Cuentas.",
+        "Add another in Settings → Accounts.",
+    ),
+    (
+        "Pasa esta conversación a esa cuenta y la continúa allí",
+        "Moves this conversation to that account and continues it there",
+    ),
+    ("Cerrar aviso", "Dismiss"),
+    (
+        "{p0}  Seguir la conversación con «{p1}»",
+        "{p0}  Continue the conversation with “{p1}”",
+    ),
 ];

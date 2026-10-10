@@ -436,6 +436,24 @@ impl App {
                             cmds.push(UiCmd::UseAccount(a.program.clone(), a.id));
                         }
                     }
+                    // Con su terminal abierta: pasar esa conversación a otra cuenta.
+                    if let Some(panel) = open.first() {
+                        for a in ws.accounts_of(agent.program()) {
+                            if current == Some(a.id) {
+                                continue;
+                            }
+                            if ui
+                                .button(tr!(
+                                    "{p0}  Seguir la conversación con «{p1}»",
+                                    p0 = icon::USER_SWITCH,
+                                    p1 = a.name
+                                ))
+                                .clicked()
+                            {
+                                cmds.push(UiCmd::Handoff(*panel, a.id));
+                            }
+                        }
+                    }
                     if ui
                         .button(tr!("{p0}  Cuentas…", p0 = icon::USER))
                         .on_hover_text(tr!("Añadir, renombrar o iniciar sesión (Ajustes)"))

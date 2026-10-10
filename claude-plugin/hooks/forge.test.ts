@@ -159,3 +159,25 @@ test('the band names the Forge account when there are several', async ($, on) =>
   })
   expect(JSON.stringify(await drawn.drawn())).toContain(' · Trabajo')
 })
+
+test('an exhausted usage window tells Forge once so it can offer another account', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const sent: string[][] = []
+  on('process.run', ($, e) => {
+    sent.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  const measure = (percentUsed: number) =>
+    $.session.measure({
+      context: { percent: 10 } as never,
+      rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: '2026-10-10T20:00:00Z' }],
+      changed: ['rateLimits'],
+    })
+  await measure(90)
+  await measure(100)
+  await measure(100)
+  const limits = sent.filter(argv => argv.includes('limit'))
+  expect(limits.length).toBe(1)
+  expect(limits[0]?.slice(0, 3)).toEqual(['/forge', 'agent-event', 'limit'])
+})

@@ -11,6 +11,12 @@ pub struct AgentEvent {
     pub project: PathBuf,
     /// Texto para el usuario: "Claude Code terminó" o el mensaje del agente.
     pub text: String,
+    /// `stop`, `waiting` o `limit` (la cuenta llegó a su límite de uso).
+    #[serde(default)]
+    pub kind: String,
+    /// Terminal de Forge que lo manda (`FORGE_PANEL`).
+    #[serde(default)]
+    pub panel: Option<u64>,
 }
 
 /// Tokens de un turno de un agente (lo manda el mod de Forge para Claude Code).
@@ -183,6 +189,7 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
     let text = match (kind, message) {
         ("waiting", Some(message)) => waiting_text(&name, &message),
         ("waiting", None) => crate::tr!("{name} espera tu respuesta", name = name),
+        ("limit", _) => crate::tr!("{name} llegó al límite de uso de esta cuenta", name = name),
         // El mod de Forge manda la primera línea de la respuesta como resumen.
         (_, Some(summary)) => format!("{name}: {summary}"),
         _ => crate::tr!("{name} terminó", name = name),
@@ -190,6 +197,10 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
     let event = AgentEvent {
         project: PathBuf::from(project),
         text,
+        kind: kind.into(),
+        panel: std::env::var("FORGE_PANEL")
+            .ok()
+            .and_then(|p| p.parse().ok()),
     };
     let dir = PathBuf::from(dir);
     let id = format!(

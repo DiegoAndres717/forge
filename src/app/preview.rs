@@ -459,6 +459,12 @@ fn ui_preview() {
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
 
+    // La cuenta de un agente llegó a su límite: franja para seguir con otra.
+    let focused = harness.state().workspaces[0].focused();
+    harness.state_mut().workspaces[0].limit_reached(focused);
+    settle(&mut harness);
+    save(&mut harness, &out, "18-limite");
+
     harness.state_mut().active = None;
     settle(&mut harness);
     save(&mut harness, &out, "4-inicio");
