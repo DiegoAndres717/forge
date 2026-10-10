@@ -353,7 +353,12 @@ impl App {
                 ui,
                 glyph,
                 color,
-                &format!("{}{star}", agent.name),
+                &match ws.account_for(agent.program(), None) {
+                    Some(a) if ws.has_accounts(agent.program()) => {
+                        format!("{} · {}{star}", agent.name, a.name)
+                    }
+                    _ => format!("{}{star}", agent.name),
+                },
                 &detail,
                 false,
             );
@@ -418,6 +423,27 @@ impl App {
                     {
                         cmds.push(UiCmd::OpenAgent(agent.id.clone(), true));
                     }
+                }
+                if forge_core::accounts::supported(agent.program()) {
+                    ui.separator();
+                    let current = ws.account_for(agent.program(), None).map(|a| a.id);
+                    for a in ws.accounts_of(agent.program()) {
+                        if ui
+                            .radio(current == Some(a.id), &a.name)
+                            .on_hover_text(tr!("Usar esta cuenta en este proyecto"))
+                            .clicked()
+                        {
+                            cmds.push(UiCmd::UseAccount(a.program.clone(), a.id));
+                        }
+                    }
+                    if ui
+                        .button(tr!("{p0}  Cuentas…", p0 = icon::USER))
+                        .on_hover_text(tr!("Añadir, renombrar o iniciar sesión (Ajustes)"))
+                        .clicked()
+                    {
+                        cmds.push(UiCmd::OpenSettings);
+                    }
+                    ui.separator();
                 }
                 if ui
                     .button(tr!("{p0}  Copiar comando", p0 = icon::COPY))

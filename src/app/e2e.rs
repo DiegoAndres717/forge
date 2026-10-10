@@ -1176,3 +1176,46 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     );
     assert_eq!(ws(h.state()).agent_panels("fake").len(), 2);
 }
+
+/// Con otra cuenta elegida en el proyecto, un `claude` escrito a mano en una terminal
+/// nueva usa su carpeta (CLAUDE_CONFIG_DIR).
+#[test]
+fn a_chosen_account_reaches_new_terminals_of_the_project() {
+    let _serial = serial();
+    let dir = project("accounts");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let mut h = app_with(store, Some(dir.clone()));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AccountAdd("claude".into()), area);
+    h.state_mut()
+        .apply(&ctx, UiCmd::UseAccount("claude".into(), 1), area);
+    let w = ws(h.state());
+    assert!(w.has_accounts("claude"));
+    assert_eq!(w.account_for("claude", None).map(|a| a.id), Some(1));
+    assert!(dir.join(".accounts/claude-1").is_dir());
+
+    h.state_mut().workspaces[0].new_tab(&ctx);
+    assert_eq!(ws(h.state()).panel_count(), 2);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.event(egui::Event::Text(
+        "echo \"${CLAUDE_CONFIG_DIR##*/}\"zz".into(),
+    ));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "la terminal ve la cuenta", |a| {
+        ws(a).shell_text().contains("claude-1zz")
+    });
+
+    // Una cuenta con terminales abiertas no se borra; sin ellas, sí (y su carpeta).
+    h.state_mut()
+        .apply(&ctx, UiCmd::UseAccount("claude".into(), 0), area);
+    h.state_mut()
+        .apply(&ctx, UiCmd::AccountDelete("claude".into(), 1), area);
+    assert!(!dir.join(".accounts/claude-1").exists());
+    assert!(!ws(h.state()).has_accounts("claude"));
+}

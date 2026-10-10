@@ -14,6 +14,7 @@ use crate::processes;
 use crate::theme::{self, icon};
 use crate::workspace::{AllowForm, NoteForm, Workspace, WsAction, tilde, tone_color};
 use crate::{Settings, load_settings, metrics};
+use forge_core::accounts::Account;
 use forge_core::agents;
 use forge_core::candidate;
 use forge_core::guard::{self, Rules, Stage};
@@ -226,6 +227,13 @@ enum UiCmd {
     AgentClick(String, bool),
     /// Lleva a una terminal del proyecto activo.
     GoToPanel(crate::layout::PanelId),
+    /// Elige la cuenta del agente en el proyecto activo: (programa, id de cuenta).
+    UseAccount(String, i64),
+    AccountAdd(String),
+    AccountRename(String, i64, String),
+    AccountDelete(String, i64),
+    /// Abre el agente en esa cuenta para iniciar sesión.
+    AccountLogin(String, i64),
     OpenDefaultAgent,
     DetectAgents,
     GuardRun,
@@ -411,6 +419,27 @@ impl App {
         app
     }
 
+    /// Cuentas de los agentes y las elegidas en un proyecto (programa → id).
+    fn account_state(&mut self, project: &Path) -> (Vec<Account>, HashMap<String, i64>) {
+        let Some(store) = self.store.as_ref() else {
+            return Default::default();
+        };
+        let accounts = store.all_accounts();
+        let chosen = ["claude", "codex"]
+            .into_iter()
+            .map(|p| (p.to_string(), store.project_account(project, p).id))
+            .collect();
+        (accounts, chosen)
+    }
+
+    fn sync_accounts(&mut self) {
+        for i in 0..self.workspaces.len() {
+            let path = self.workspaces[i].project.path.clone();
+            let (accounts, chosen) = self.account_state(&path);
+            self.workspaces[i].set_accounts(accounts, chosen);
+        }
+    }
+
     /// Ejecuta una operación sobre la base de datos y convierte el error en aviso.
     fn db<T>(&mut self, f: impl FnOnce(&Store) -> Result<T, String>) -> Option<T> {
         let result = f(self.store.as_ref()?);
@@ -444,11 +473,15 @@ impl App {
         let saved = self.db(|s| s.workspace(&path)).flatten();
         let name = project.name();
         self.db(|s| s.touch(&path, &name));
+        let mut ws = Workspace::asleep(project, saved);
+        let (accounts, chosen) = self.account_state(&path);
+        ws.set_accounts(accounts, chosen);
         if !awake {
-            self.workspaces.push(Workspace::asleep(project, saved));
+            self.workspaces.push(ws);
             return;
         }
-        self.workspaces.push(Workspace::open(ctx, project, saved));
+        ws.wake(ctx);
+        self.workspaces.push(ws);
         self.active = Some(self.workspaces.len() - 1);
         self.save();
         self.detect_agents(ctx, false);
@@ -650,6 +683,43 @@ impl App {
             UiCmd::AgentClick(id, new) => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.agent_click(ctx, &id, new, area);
+                }
+            }
+            UiCmd::UseAccount(program, id) => {
+                if let Some(path) = self.active.map(|i| self.workspaces[i].project.path.clone()) {
+                    self.db(|s| s.set_project_account(&path, &program, id));
+                    self.sync_accounts();
+                }
+            }
+            UiCmd::AccountAdd(program) => {
+                let n = self.db(|s| Ok(s.accounts(&program).len())).unwrap_or(1) + 1;
+                self.db(|s| s.add_account(&program, &tr!("Cuenta {n}", n = n)));
+                self.sync_accounts();
+            }
+            UiCmd::AccountRename(program, id, name) => {
+                self.db(|s| s.rename_account(&program, id, &name));
+                self.sync_accounts();
+            }
+            UiCmd::AccountDelete(program, id) => {
+                if self
+                    .workspaces
+                    .iter()
+                    .any(|w| w.account_in_use(&program, id))
+                {
+                    self.error =
+                        Some(tr!("Cierra antes las terminales que usan esa cuenta.").into());
+                } else {
+                    self.db(|s| s.delete_account(&program, id));
+                    self.sync_accounts();
+                }
+            }
+            UiCmd::AccountLogin(program, id) => {
+                if let Some(i) = self.active {
+                    let path = self.workspaces[i].project.path.clone();
+                    self.db(|s| s.set_project_account(&path, &program, id));
+                    self.sync_accounts();
+                    self.settings_open = false;
+                    self.workspaces[i].login(ctx, &program, area);
                 }
             }
             UiCmd::GoToPanel(panel) => {

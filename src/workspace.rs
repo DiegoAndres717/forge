@@ -11,6 +11,7 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Rect, Sense, Vec2};
 use crate::layout::{self, Dir, Node, PanelId, Toward};
 use crate::processes::{Processes, Tone};
 use crate::terminal::{Metrics, Terminal};
+use forge_core::accounts::{self, Account};
 use forge_core::agents::AgentSpec;
 use forge_core::project::{LayoutSpec, Project, SavedCommand, SplitSpec, StartPolicy};
 use forge_core::sessions::{LastSession, last_session, resume_command};
@@ -41,6 +42,9 @@ pub struct PanelState {
     /// Agente abierto en el panel (al restaurar se reanuda su última sesión).
     #[serde(default)]
     pub agent: Option<String>,
+    /// Cuenta del agente (ver `forge_core::accounts`); `None` = la elegida en el proyecto.
+    #[serde(default)]
+    pub account: Option<i64>,
 }
 
 const HEADER: f32 = 30.0;
@@ -80,6 +84,7 @@ struct Panel {
     command: Option<String>,
     /// Agente del panel: al restaurar se reanuda su sesión si el agente lo permite.
     agent: Option<String>,
+    account: Option<i64>,
 }
 
 /// `/Users/x/dev` → `~/dev`
@@ -290,6 +295,9 @@ pub struct Workspace {
     branch: (Option<String>, Option<Instant>),
     /// Última sesión de cada agente en la carpeta (id de agente → sesión), releída cada poco.
     sessions: (HashMap<String, LastSession>, Option<Instant>),
+    /// Cuentas de los agentes (todas) y la elegida en este proyecto para cada programa.
+    accounts: Vec<Account>,
+    chosen: HashMap<String, i64>,
     /// Último error (p. ej. no se pudo abrir un shell); la app lo muestra y lo limpia.
     pub error: Option<String>,
     /// Dormido: sin terminales ni procesos; guarda el estado para restaurarlo al despertar.
@@ -314,6 +322,7 @@ pub struct Workspace {
 impl Workspace {
     /// Abre el workspace: sesión guardada → layout predefinido → un panel en la raíz.
     /// Inicia los procesos `on-workspace-open` y los que estaban en marcha al cerrar.
+    #[cfg(test)]
     pub fn open(ctx: &egui::Context, project: Project, saved: Option<WorkspaceState>) -> Self {
         let mut ws = Self::new(project);
         ws.start(ctx, saved);
@@ -352,6 +361,8 @@ impl Workspace {
             tabs: Vec::new(),
             branch: (None, None),
             sessions: (HashMap::new(), None),
+            accounts: Vec::new(),
+            chosen: HashMap::new(),
             error: None,
             dormant: None,
             seen: Instant::now(),
@@ -594,6 +605,7 @@ impl Workspace {
                 name: state.name,
                 command: None,
                 agent: None,
+                account: None,
             };
             self.insert(id, panel);
             return true;
@@ -617,6 +629,24 @@ impl Workspace {
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
+        }
+        let account = spec
+            .as_ref()
+            .and_then(|s| self.account_for(s.program(), state.account))
+            .cloned();
+        if let Some(a) = &account {
+            env.extend(a.env());
+            if self.has_accounts(&a.program) {
+                env.insert("FORGE_ACCOUNT".into(), a.name.clone());
+            }
+        }
+        if spec.is_none() {
+            // Un `claude` o `codex` escrito a mano usa la cuenta elegida en el proyecto.
+            for program in ["claude", "codex"] {
+                if let Some(a) = self.account_for(program, None) {
+                    env.extend(a.env());
+                }
+            }
         }
         // Agentes que lo permiten: se les conecta la memoria del proyecto por MCP.
         // Con el mod de Forge cargado, Claude ya trae el MCP de Forge (lo declara el mod, y
@@ -656,6 +686,7 @@ impl Workspace {
                     name: state.name,
                     command,
                     agent: state.agent,
+                    account: account.map(|a| a.id),
                 };
                 self.insert(id, panel);
                 true
@@ -747,18 +778,96 @@ impl Workspace {
             command: Some(command),
             process: None,
             agent: Some(spec.id.clone()),
+            account: None,
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
         self.add_panel(ctx, dir, state);
     }
 
-    /// Terminales vivas de un agente, la más reciente primero.
+    /// Pone las cuentas y las elegidas en el proyecto (programa → id de cuenta).
+    pub fn set_accounts(&mut self, accounts: Vec<Account>, chosen: HashMap<String, i64>) {
+        if accounts != self.accounts || chosen != self.chosen {
+            self.sessions.1 = None;
+        }
+        self.accounts = accounts;
+        self.chosen = chosen;
+    }
+
+    /// Cuenta con la que se abre ese programa aquí (`id` o la elegida en el proyecto);
+    /// `None` si el agente no tiene cuentas.
+    pub fn account_for(&self, program: &str, id: Option<i64>) -> Option<&Account> {
+        if !accounts::supported(program) {
+            return None;
+        }
+        let id = id
+            .or_else(|| self.chosen.get(program).copied())
+            .unwrap_or(0);
+        self.accounts
+            .iter()
+            .find(|a| a.program == program && a.id == id)
+    }
+
+    /// Cuentas de un programa.
+    pub fn accounts_of(&self, program: &str) -> Vec<&Account> {
+        self.accounts
+            .iter()
+            .filter(|a| a.program == program)
+            .collect()
+    }
+
+    /// Alguna terminal viva usa esa cuenta.
+    pub fn account_in_use(&self, program: &str, id: i64) -> bool {
+        self.panels.values().any(|p| {
+            p.account == Some(id)
+                && matches!(&p.content, Content::Shell(t) if !t.exited())
+                && p.agent.as_ref().is_some_and(|a| {
+                    self.project
+                        .agents
+                        .iter()
+                        .any(|s| &s.id == a && s.program() == program)
+                })
+        })
+    }
+
+    /// Abre el agente en la cuenta elegida para iniciar sesión (Claude lo pide al abrirse;
+    /// Codex con `codex login`).
+    pub fn login(&mut self, ctx: &egui::Context, program: &str, area: Rect) {
+        let Some(spec) = self
+            .project
+            .agents
+            .iter()
+            .find(|a| a.program() == program)
+            .cloned()
+        else {
+            return;
+        };
+        let command = match self.account_for(program, None) {
+            Some(a) if program == "codex" => a.login_command().to_string(),
+            _ => spec.command.clone(),
+        };
+        self.open_agent_with(ctx, &spec, command, area);
+    }
+
+    /// Hay más de una cuenta de ese agente: entonces se dice cuál en pestañas y lista.
+    pub fn has_accounts(&self, program: &str) -> bool {
+        self.accounts_of(program).len() > 1
+    }
+
+    /// Terminales vivas de un agente con la cuenta elegida, la más reciente primero.
     pub fn agent_panels(&self, id: &str) -> Vec<PanelId> {
+        let program = self
+            .project
+            .agents
+            .iter()
+            .find(|a| a.id == id)
+            .map_or("", |a| a.program());
+        let account = self.account_for(program, None).map(|a| a.id);
         let mut found: Vec<PanelId> = self
             .panels
             .iter()
             .filter(|(_, p)| {
                 p.agent.as_deref() == Some(id)
+                    && p.account == account
                     && matches!(&p.content, Content::Shell(t) if !t.exited())
             })
             .map(|(id, _)| *id)
@@ -791,7 +900,12 @@ impl Workspace {
                 .project
                 .agents
                 .iter()
-                .filter_map(|a| Some((a.id.clone(), last_session(a.program(), &root)?)))
+                .filter_map(|a| {
+                    let dir = self
+                        .account_for(a.program(), None)
+                        .and_then(|x| x.dir.as_deref());
+                    Some((a.id.clone(), last_session(a.program(), &root, dir)?))
+                })
                 .collect();
             self.sessions = (found, Some(Instant::now()));
         }
@@ -824,12 +938,17 @@ impl Workspace {
         command: String,
         area: Rect,
     ) {
+        let name = match self.account_for(spec.program(), None) {
+            Some(a) if self.has_accounts(&a.program) => format!("{} · {}", spec.name, a.name),
+            _ => spec.name.clone(),
+        };
         let state = PanelState {
-            name: Some(spec.name.clone()),
+            name: Some(name),
             cwd: self.project.root(),
             command: Some(command),
             process: None,
             agent: Some(spec.id.clone()),
+            account: None,
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
         self.add_panel(ctx, dir, state);
@@ -853,6 +972,7 @@ impl Workspace {
             command: None,
             process: None,
             agent: None,
+            account: None,
         }
     }
 
@@ -982,6 +1102,7 @@ impl Workspace {
                     command: command.clone(),
                     process: None,
                     agent: None,
+                    account: None,
                 };
                 self.spawn_panel(ctx, id, state).then_some(Node::Leaf(id))
             }
@@ -1021,6 +1142,7 @@ impl Workspace {
                         command: p.command.clone(),
                         process: None,
                         agent: p.agent.clone(),
+                        account: p.account,
                     },
                     Content::Process(process) => PanelState {
                         name: p.name.clone(),
@@ -1028,6 +1150,7 @@ impl Workspace {
                         command: None,
                         process: Some(process.clone()),
                         agent: None,
+                        account: None,
                     },
                 };
                 (*id, state)
@@ -1064,6 +1187,7 @@ impl Workspace {
             command: None,
             process: None,
             agent: None,
+            account: None,
         };
         let (current, id) = (self.focus, self.next_id);
         if self.panels.is_empty() || !self.spawn_panel(ctx, id, state) {
@@ -1249,6 +1373,7 @@ impl Workspace {
             command: Some(command.command.clone()),
             process: None,
             agent: None,
+            account: None,
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
         self.add_panel(ctx, dir, state);
@@ -1273,6 +1398,7 @@ impl Workspace {
             command: None,
             process: Some(process.to_string()),
             agent: None,
+            account: None,
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
         self.add_panel(ctx, dir, state);
@@ -1307,6 +1433,7 @@ impl Workspace {
                 command: None,
                 process: None,
                 agent: None,
+                account: None,
             },
         );
     }
