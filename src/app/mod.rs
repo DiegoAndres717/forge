@@ -222,6 +222,10 @@ enum UiCmd {
     MemoryDelete(i64),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
+    /// Clic en un agente: (id, sesión nueva). Ver `Workspace::agent_click`.
+    AgentClick(String, bool),
+    /// Lleva a una terminal del proyecto activo.
+    GoToPanel(crate::layout::PanelId),
     OpenDefaultAgent,
     DetectAgents,
     GuardRun,
@@ -643,6 +647,16 @@ impl App {
                     ws.open_agent(ctx, &id, resume, area);
                 }
             }
+            UiCmd::AgentClick(id, new) => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    ws.agent_click(ctx, &id, new, area);
+                }
+            }
+            UiCmd::GoToPanel(panel) => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    ws.go_to_panel(panel);
+                }
+            }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
@@ -748,7 +762,7 @@ impl App {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     match agents::default_agent(&ws.project.agents, &detected).map(|a| a.id.clone())
                     {
-                        Some(id) => ws.open_agent(ctx, &id, false, area),
+                        Some(id) => ws.agent_click(ctx, &id, false, area),
                         None => {
                             self.error = Some(
                                 tr!(

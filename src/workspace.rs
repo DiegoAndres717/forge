@@ -11,7 +11,9 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, Rect, Sense, Vec2};
 use crate::layout::{self, Dir, Node, PanelId, Toward};
 use crate::processes::{Processes, Tone};
 use crate::terminal::{Metrics, Terminal};
+use forge_core::agents::AgentSpec;
 use forge_core::project::{LayoutSpec, Project, SavedCommand, SplitSpec, StartPolicy};
+use forge_core::sessions::{LastSession, last_session, resume_command};
 
 /// Estado restaurable de un workspace (se guarda como JSON en la fila del proyecto).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -286,6 +288,8 @@ pub struct Workspace {
     next_id: PanelId,
     renaming: Option<(PanelId, String)>,
     branch: (Option<String>, Option<Instant>),
+    /// Última sesión de cada agente en la carpeta (id de agente → sesión), releída cada poco.
+    sessions: (HashMap<String, LastSession>, Option<Instant>),
     /// Último error (p. ej. no se pudo abrir un shell); la app lo muestra y lo limpia.
     pub error: Option<String>,
     /// Dormido: sin terminales ni procesos; guarda el estado para restaurarlo al despertar.
@@ -347,6 +351,7 @@ impl Workspace {
             renaming: None,
             tabs: Vec::new(),
             branch: (None, None),
+            sessions: (HashMap::new(), None),
             error: None,
             dormant: None,
             seen: Instant::now(),
@@ -747,14 +752,78 @@ impl Workspace {
         self.add_panel(ctx, dir, state);
     }
 
-    pub fn open_agent(&mut self, ctx: &egui::Context, id: &str, resume: bool, area: Rect) {
+    /// Terminales vivas de un agente, la más reciente primero.
+    pub fn agent_panels(&self, id: &str) -> Vec<PanelId> {
+        let mut found: Vec<PanelId> = self
+            .panels
+            .iter()
+            .filter(|(_, p)| {
+                p.agent.as_deref() == Some(id)
+                    && matches!(&p.content, Content::Shell(t) if !t.exited())
+            })
+            .map(|(id, _)| *id)
+            .collect();
+        found.sort_unstable_by_key(|p| std::cmp::Reverse(*p));
+        found
+    }
+
+    /// Lleva a una terminal (aunque esté detrás de otra en su grupo).
+    pub fn go_to_panel(&mut self, id: PanelId) {
+        if self.layout.ids().contains(&id) {
+            self.focus = id;
+            if self.maximized.is_some() {
+                self.maximized = Some(id);
+            }
+        } else {
+            self.show_tab(id);
+        }
+    }
+
+    /// Última sesión de cada agente en el proyecto (se relee cada 15 s).
+    pub fn last_sessions(&mut self) -> &HashMap<String, LastSession> {
+        if self
+            .sessions
+            .1
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(15))
+        {
+            let root = self.project.root();
+            let found = self
+                .project
+                .agents
+                .iter()
+                .filter_map(|a| Some((a.id.clone(), last_session(a.program(), &root)?)))
+                .collect();
+            self.sessions = (found, Some(Instant::now()));
+        }
+        &self.sessions.0
+    }
+
+    /// Clic en un agente: a su terminal abierta; si no hay, reanuda su última sesión en el
+    /// proyecto; y si nunca se usó aquí, una nueva. `new` fuerza una sesión nueva.
+    pub fn agent_click(&mut self, ctx: &egui::Context, id: &str, new: bool, area: Rect) {
+        if !new && let Some(panel) = self.agent_panels(id).first().copied() {
+            self.go_to_panel(panel);
+            return;
+        }
         let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
             return;
         };
-        let command = match (&spec.resume, resume) {
-            (Some(r), true) => r.clone(),
-            _ => spec.command.clone(),
-        };
+        let session = (!new)
+            .then(|| self.last_sessions().get(id).cloned())
+            .flatten();
+        let command = session
+            .and_then(|s| resume_command(spec.program(), &spec.command, &s.id))
+            .unwrap_or_else(|| spec.command.clone());
+        self.open_agent_with(ctx, &spec, command, area);
+    }
+
+    fn open_agent_with(
+        &mut self,
+        ctx: &egui::Context,
+        spec: &AgentSpec,
+        command: String,
+        area: Rect,
+    ) {
         let state = PanelState {
             name: Some(spec.name.clone()),
             cwd: self.project.root(),
@@ -764,6 +833,17 @@ impl Workspace {
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
         self.add_panel(ctx, dir, state);
+    }
+
+    pub fn open_agent(&mut self, ctx: &egui::Context, id: &str, resume: bool, area: Rect) {
+        let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
+            return;
+        };
+        let command = match (&spec.resume, resume) {
+            (Some(r), true) => r.clone(),
+            _ => spec.command.clone(),
+        };
+        self.open_agent_with(ctx, &spec, command, area);
     }
 
     fn root_panel(&self) -> PanelState {
@@ -1482,7 +1562,7 @@ impl Workspace {
     }
 
     /// Nombre corto para la lista de terminales: de una ruta, solo la última carpeta.
-    fn tab_name(&self, id: PanelId) -> String {
+    pub fn tab_name(&self, id: PanelId) -> String {
         let label = self.label(id);
         if label.starts_with('/') || label.starts_with('~') {
             let last = label

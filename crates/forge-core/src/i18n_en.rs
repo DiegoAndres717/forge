@@ -1530,4 +1530,24 @@ pub const EN: &[(&str, &str)] = &[
     ("Ayuda", "Help"),
     ("Bienvenida a Forge", "Welcome to Forge"),
     ("Todas las acciones (⌘K)", "All Actions (⌘K)"),
+    ("abierto", "open"),
+    ("{n} abiertos", "{n} open"),
+    ("Clic: ir a su terminal", "Click: go to its terminal"),
+    (
+        "Clic: reanudar «{p0}» ({p1})",
+        "Click: resume “{p0}” ({p1})",
+    ),
+    (
+        "Clic: reanudar la última sesión ({p0})",
+        "Click: resume the last session ({p0})",
+    ),
+    ("Clic: sesión nueva", "Click: new session"),
+    (
+        "{p0} {p1}\n{p2}\n\n{click}\n⌥-clic o +: sesión nueva · clic derecho: más",
+        "{p0} {p1}\n{p2}\n\n{click}\n⌥-click or +: new session · right-click: more",
+    ),
+    ("Sesión nueva", "New session"),
+    ("{p0}  Ir a «{p1}»", "{p0}  Go to “{p1}”"),
+    ("{p0}  Sesión nueva", "{p0}  New session"),
+    ("{p0}: sesión nueva", "{p0}: new session"),
 ];

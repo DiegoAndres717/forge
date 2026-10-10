@@ -17,6 +17,7 @@ pub mod pr;
 pub mod project;
 pub mod reviewers;
 pub mod router;
+pub mod sessions;
 pub mod store;
 pub mod updates;
 

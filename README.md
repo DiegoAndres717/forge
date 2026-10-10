@@ -126,7 +126,7 @@ forge help
 
 1. Open Forge and pick a folder (or drag one onto the window, or run `forge .`).
 2. It works with no setup. To save your layout and processes, use **Settings → Create .forge/project.toml** in the sidebar: Forge fills it with the scripts it finds in `package.json`.
-3. Click **Claude Code**, **Codex** or **OpenCode** in the sidebar to start an agent in the project.
+3. Click **Claude Code**, **Codex** or **OpenCode** in the sidebar to start an agent in the project. Click it again later and it takes you to its open terminal or resumes your last session (the row shows when and what it was about); **+** starts a new one.
 4. Press `⌘G` before committing to see whether the change is ready.
 
 ## Claude Code mod

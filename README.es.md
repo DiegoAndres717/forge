@@ -128,7 +128,7 @@ El idioma se cambia en Ajustes (`⌘,`).
 
 1. Abre Forge y elige una carpeta (o arrástrala a la ventana, o ejecuta `forge .`).
 2. Funciona sin configurar nada. Para guardar tu layout y tus procesos, usa **Ajustes → Crear .forge/project.toml** en la barra lateral: Forge lo rellena con los scripts que encuentre en `package.json`.
-3. Pulsa **Claude Code**, **Codex** u **OpenCode** en la barra lateral para abrir un agente en el proyecto.
+3. Pulsa **Claude Code**, **Codex** u **OpenCode** en la barra lateral para abrir un agente en el proyecto. Si vuelves a pulsarlo, te lleva a su terminal abierta o reanuda tu última sesión (la fila dice cuándo fue y de qué iba); **+** abre una nueva.
 4. Pulsa `⌘G` antes de hacer commit para ver si el cambio está listo.
 
 ## Mod de Claude Code

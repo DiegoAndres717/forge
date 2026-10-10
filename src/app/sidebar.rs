@@ -259,9 +259,10 @@ impl App {
             });
     }
 
-    /// Sección AGENTES: instalados (con versión) y configurados; clic abre, clic derecho reanuda.
+    /// Sección AGENTES: instalados y configurados. Clic: a su terminal abierta, o reanuda su
+    /// última sesión, o una nueva; + o ⌥-clic: sesión nueva; clic derecho: más.
     pub(super) fn agents_ui(
-        ws: &Workspace,
+        ws: &mut Workspace,
         detected: &HashMap<String, agents::Detection>,
         detecting: bool,
         ui: &mut egui::Ui,
@@ -287,6 +288,7 @@ impl App {
         });
         let default = agents::default_agent(&ws.project.agents, detected).map(|a| a.id.clone());
         let mut missing = Vec::new();
+        let sessions = ws.last_sessions().clone();
         for agent in ws.project.agents.iter().filter(|a| a.enabled) {
             let found = detected.get(agent.program());
             let installed = found.is_some_and(|d| d.path.is_some());
@@ -305,6 +307,31 @@ impl App {
                 .and_then(|d| d.version.as_deref())
                 .map(short_version)
                 .unwrap_or_default();
+            let open = ws.agent_panels(&agent.id);
+            let session = sessions.get(&agent.id).cloned();
+            let row_rect =
+                Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 26.0));
+            let hovered = installed && ui.rect_contains_pointer(row_rect);
+            let detail = match (&session, open.len()) {
+                _ if hovered => String::new(), // sitio para el +
+                (_, 1) => tr!("abierto").into(),
+                (_, n @ 2..) => tr!("{n} abiertos", n = n),
+                (Some(s), _) => forge_core::store::ago_precise(s.when),
+                (None, _) => version.clone(),
+            };
+            let click = match (&session, open.is_empty()) {
+                (_, false) => tr!("Clic: ir a su terminal").into(),
+                (Some(s), true) if !s.topic.is_empty() => tr!(
+                    "Clic: reanudar «{p0}» ({p1})",
+                    p0 = s.topic,
+                    p1 = forge_core::store::ago_precise(s.when)
+                ),
+                (Some(s), true) => tr!(
+                    "Clic: reanudar la última sesión ({p0})",
+                    p0 = forge_core::store::ago_precise(s.when)
+                ),
+                (None, true) => tr!("Clic: sesión nueva").into(),
+            };
             let color = if installed {
                 theme::ORANGE
             } else {
@@ -312,9 +339,11 @@ impl App {
             };
             let tip = match found.and_then(|d| d.path.as_ref()) {
                 Some(path) => tr!(
-                    "{p0}\n{p1}\nClic: abrir · clic derecho: reanudar y más",
+                    "{p0} {p1}\n{p2}\n\n{click}\n⌥-clic o +: sesión nueva · clic derecho: más",
                     p0 = agent.command,
-                    p1 = path.display()
+                    p1 = version,
+                    p2 = path.display(),
+                    click = click
                 ),
                 None => tr!("{p0} no está instalado", p0 = agent.program()),
             };
@@ -325,7 +354,7 @@ impl App {
                 glyph,
                 color,
                 &format!("{}{star}", agent.name),
-                &version,
+                &detail,
                 false,
             );
             if has_logo {
@@ -337,18 +366,45 @@ impl App {
             }
             let row = row.on_hover_text(tip);
             if row.clicked() && installed {
-                cmds.push(UiCmd::OpenAgent(agent.id.clone(), false));
+                let new = ui.input(|i| i.modifiers.alt);
+                cmds.push(UiCmd::AgentClick(agent.id.clone(), new));
+            }
+            if hovered {
+                let at = Rect::from_center_size(
+                    egui::pos2(row.rect.max.x - 16.0, row.rect.center().y),
+                    Vec2::splat(22.0),
+                );
+                let plus = ui
+                    .put(
+                        at,
+                        egui::Button::new(RichText::new(icon::PLUS).color(theme::TEXT_3))
+                            .frame(false),
+                    )
+                    .on_hover_text(tr!("Sesión nueva"));
+                if plus.clicked() {
+                    cmds.push(UiCmd::AgentClick(agent.id.clone(), true));
+                }
             }
             row.context_menu(|ui| {
                 ui.set_min_width(240.0);
+                for panel in &open {
+                    let label = tr!(
+                        "{p0}  Ir a «{p1}»",
+                        p0 = icon::TERMINAL_WINDOW,
+                        p1 = ws.tab_name(*panel)
+                    );
+                    if ui.button(label).clicked() {
+                        cmds.push(UiCmd::GoToPanel(*panel));
+                    }
+                }
                 if ui
                     .add_enabled(
                         installed,
-                        egui::Button::new(tr!("{p0}  Abrir", p0 = icon::TERMINAL_WINDOW)),
+                        egui::Button::new(tr!("{p0}  Sesión nueva", p0 = icon::PLUS)),
                     )
                     .clicked()
                 {
-                    cmds.push(UiCmd::OpenAgent(agent.id.clone(), false));
+                    cmds.push(UiCmd::AgentClick(agent.id.clone(), true));
                 }
                 if let Some(resume) = &agent.resume {
                     let button = egui::Button::new(tr!(
