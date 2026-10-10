@@ -5,7 +5,7 @@
 # Forge
 
 **A native macOS workspace for building software with AI agents.**<br>
-Terminals, processes, agents, project memory and a Guard that checks every change before it leaves your machine — one window per project.
+Terminals, processes, agents, **Forge Memory** and a Guard that checks every change before it leaves your machine — one window per project.
 
 [![CI](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml/badge.svg)](https://github.com/DiegoAndres717/forge/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/DiegoAndres717/forge?label=release&cacheSeconds=300)](https://github.com/DiegoAndres717/forge/releases/latest)
@@ -27,7 +27,7 @@ Terminals, processes, agents, project memory and a Guard that checks every chang
 When you work with Claude Code, Codex or OpenCode, your day is scattered across terminal tabs, dev servers, notes and "did the tests pass before I pushed?". Forge puts each project in one place:
 
 - **Open a folder, get your setup back** — terminals, splits, running dev servers and agents, exactly as you left them.
-- **Agents that plan and remember** — phased plans, the backlog and project memory are shared with every agent through MCP.
+- **Agents that plan and remember** — phased plans, the backlog and Forge Memory (the project memory) are shared with every agent through MCP.
 - **Nothing ships broken** — Project Guard runs your rules (size, secrets, lint, tests, build) before each commit, push and pull request.
 - **Native and light** — written in Rust with a GPU-rendered UI; no Electron, no embedded browser.
 
@@ -65,7 +65,7 @@ Deterministic rules before **commit / push / PR**: change size, forbidden files,
 <td>
 
 ### Plans & memory
-Tell the AI what you want to build and it saves a **plan in phases** — each phase with its status, an optional Git branch and tasks it ticks off as it works. Ideas for later go to the **backlog**; one click on *Plan with Claude Code* turns one into a plan. Three sections (In progress · Backlog · Completed), **stored outside the repo**, shared over MCP with Claude Code, Codex and OpenCode, together with the project memory (decisions, fixed errors, conventions).
+Tell the AI what you want to build and it saves a **plan in phases** — each phase with its status, an optional Git branch and tasks it ticks off as it works. Ideas for later go to the **backlog**; one click on *Plan with Claude Code* turns one into a plan. Three sections (In progress · Backlog · Completed), **stored outside the repo**, shared over MCP with Claude Code, Codex and OpenCode, together with **Forge Memory**, the project memory: decisions, fixed errors and conventions, without duplicates and tied to the Git remote (it follows the repo across folders, clones and worktrees).
 
 </td>
 <td><img src="docs/screenshots/plans.png" alt="Plans"></td>
@@ -179,7 +179,7 @@ forge hooks install|uninstall|status  pre-commit and pre-push hooks
 forge agent list | open <id>          detected agents / open one here
 forge doctor                          checks git, database, settings, hooks and agents
 forge ai route | usage                change risk / model usage this month
-forge memory search|add|list|delete   project memory
+forge memory search|add|list|delete   Forge Memory (project memory)
 forge plans [show|add|start|done|phase|task]   plans and backlog (outside the repository)
 forge context                         project summary agents get at the start
 forge mcp                             MCP server for agents

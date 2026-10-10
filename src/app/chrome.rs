@@ -323,7 +323,7 @@ impl App {
             if theme::icon_toggle(
                 ui,
                 icon::BRAIN,
-                tr!("Memoria del proyecto (⌘⇧M)"),
+                tr!("Forge Memory · memoria del proyecto (⌘⇧M)"),
                 ws.memory.open,
             )
             .clicked()
