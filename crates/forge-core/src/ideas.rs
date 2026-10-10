@@ -158,10 +158,6 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
-fn key(project: Option<&Path>) -> String {
-    project.map_or(String::new(), |p| p.to_string_lossy().into_owned())
-}
-
 fn check_status(status: &str) -> Result<&'static str, String> {
     normalize_status(status).ok_or_else(|| {
         tr!(
@@ -172,6 +168,11 @@ fn check_status(status: &str) -> Result<&'static str, String> {
 }
 
 impl Store {
+    /// '' = lista general.
+    fn list_key(&self, project: Option<&Path>) -> String {
+        project.map_or(String::new(), |p| self.project_key(p))
+    }
+
     /// Una idea para el backlog (sin fases).
     pub fn add_idea(
         &self,
@@ -202,7 +203,7 @@ impl Store {
             .execute(
                 "INSERT INTO ideas (project, title, note, status, source, updated_by, created_at, updated_at, phases)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?6, ?7)",
-                params![key(project), title.trim(), note.trim(), status, source, t, to_json(&phases)],
+                params![self.list_key(project), title.trim(), note.trim(), status, source, t, to_json(&phases)],
             )
             .map_err(|e| e.to_string())?;
         Ok(self.conn.last_insert_rowid())
@@ -234,7 +235,14 @@ impl Store {
             .execute(
                 "UPDATE ideas SET phases = ?3, status = ?4, updated_by = ?5, updated_at = ?6
                  WHERE project = ?1 AND id = ?2",
-                params![key(project), id, to_json(&phases), status, by, now()],
+                params![
+                    self.list_key(project),
+                    id,
+                    to_json(&phases),
+                    status,
+                    by,
+                    now()
+                ],
             )
             .map_err(|e| e.to_string())?;
         Ok(changed > 0)
@@ -310,7 +318,7 @@ impl Store {
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map(params![key(project), include_done], |r| {
+            .query_map(params![self.list_key(project), include_done], |r| {
                 Ok(Idea {
                     id: r.get(0)?,
                     title: r.get(1)?,
@@ -333,7 +341,7 @@ impl Store {
         self.conn
             .query_row(
                 "SELECT COUNT(*) FROM ideas WHERE project = ?1 AND status != 'done'",
-                params![key(project)],
+                params![self.list_key(project)],
                 |r| r.get(0),
             )
             .map_err(|e| e.to_string())
@@ -360,7 +368,7 @@ impl Store {
                         note = COALESCE(?5, note), updated_by = ?6, updated_at = ?7
                  WHERE project = ?1 AND id = ?2",
                 params![
-                    key(project),
+                    self.list_key(project),
                     id,
                     status,
                     title.map(str::trim),
@@ -377,7 +385,7 @@ impl Store {
         self.conn
             .execute(
                 "DELETE FROM ideas WHERE project = ?1 AND id = ?2",
-                params![key(project), id],
+                params![self.list_key(project), id],
             )
             .map(|n| n > 0)
             .map_err(|e| e.to_string())
