@@ -600,7 +600,7 @@ fn clickable_controls_show_the_pointing_hand() {
     let mut h = app(project("cursor"));
     h.key_press_modifiers(CMD, Key::Comma);
     h.run_steps(3);
-    for label in ["Avisar cuando", "Español"] {
+    for label in ["Avisarme", "Español"] {
         h.get_by_label_contains(label).hover();
         h.run_steps(2);
         assert_eq!(
@@ -609,6 +609,27 @@ fn clickable_controls_show_the_pointing_hand() {
             "{label}"
         );
     }
+}
+
+/// Ajustes por pestañas: cada opción con su ⓘ, y la pestaña elegida muestra lo suyo.
+#[test]
+fn settings_tabs_show_their_options_with_help() {
+    let _serial = serial();
+    let mut h = app(project("settings-tabs"));
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Idioma de Forge").is_some(),
+        "ⓘ del idioma"
+    );
+    assert!(h.query_by_label_contains("Crear con plantilla").is_none());
+    h.get_by_label_contains("Este proyecto").click();
+    h.run_steps(3);
+    assert!(
+        h.query_all_by_label_contains("Crear con plantilla").count() >= 1,
+        "archivos que faltan"
+    );
+    assert!(h.query_by_label_contains("Idioma").is_none());
 }
 
 #[test]

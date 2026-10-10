@@ -163,6 +163,8 @@ enum UiCmd {
     EditFile(&'static str),
     /// Abre la ventana de Ajustes.
     OpenSettings,
+    /// Abre Ajustes en una pestaña.
+    OpenSettingsTab(settings::SettingsTab),
     /// Abre la paleta de comandos (⌘K).
     OpenPalette,
     /// Vuelve a mostrar la bienvenida.
@@ -638,14 +640,32 @@ impl App {
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::OpenSettings => self.settings_open = true,
+            UiCmd::OpenSettingsTab(tab) => {
+                settings::show_tab(ctx, tab);
+                self.settings_open = true;
+            }
             UiCmd::OpenPalette => self.open_palette(),
             UiCmd::ShowWelcome => self.welcome = Some(0),
             UiCmd::EditFile(name) => {
                 let Some(i) = self.active else { return };
-                let file = self.workspaces[i].project.path.join(".forge").join(name);
+                let project = &self.workspaces[i].project;
+                let file = project.path.join(".forge").join(name);
+                // Si no existe, se crea con su plantilla comentada (nunca vacío).
                 if !file.exists() {
                     let _ = std::fs::create_dir_all(file.parent().unwrap_or(&file));
-                    let _ = std::fs::write(&file, "");
+                    let created = match name {
+                        "project.toml" => project.write_template(),
+                        "rules.toml" => guard::write_template(&project.path),
+                        "routing.toml" => forge_core::router::write_template(&project.path),
+                        "agents.toml" => {
+                            std::fs::write(&file, agents::template()).map_err(|e| e.to_string())
+                        }
+                        _ => std::fs::write(&file, "").map_err(|e| e.to_string()),
+                    };
+                    if let Err(e) = created {
+                        self.error = Some(e);
+                        return;
+                    }
                 }
                 if let Err(e) = std::process::Command::new("open")
                     .arg("-t")

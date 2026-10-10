@@ -459,7 +459,7 @@ impl App {
                         .on_hover_text(tr!("Añadir, renombrar o iniciar sesión (Ajustes)"))
                         .clicked()
                     {
-                        cmds.push(UiCmd::OpenSettings);
+                        cmds.push(UiCmd::OpenSettingsTab(super::settings::SettingsTab::Agents));
                     }
                     ui.separator();
                 }
