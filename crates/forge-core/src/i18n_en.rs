@@ -1741,4 +1741,129 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("✓ Guardado", "✓ Saved"),
     ("30 días", "30 days"),
+    (
+        "No se pudo leer .forge/rules.toml",
+        "Couldn't read .forge/rules.toml",
+    ),
+    (
+        "Qué revisa Forge antes de que un cambio salga de tu máquina. Se guarda solo en .forge/rules.toml.",
+        "What Forge checks before a change leaves your machine. Saved automatically to .forge/rules.toml.",
+    ),
+    ("Qué se exige en cada paso", "What each step requires"),
+    (
+        "Antes de un commit, un push o un pull request, Guard pasa estas comprobaciones. Lint, tipos, tests y build usan las comprobaciones de abajo con ese id.",
+        "Before a commit, a push or a pull request, Guard runs these checks. Lint, types, tests and build use the checks below with that id.",
+    ),
+    ("Lint", "Lint"),
+    ("Tipos", "Types"),
+    ("Tests", "Tests"),
+    ("Build", "Build"),
+    (
+        "Revisa el estilo y errores comunes (p. ej. eslint, clippy).",
+        "Checks style and common mistakes (e.g. eslint, clippy).",
+    ),
+    (
+        "Comprueba los tipos (p. ej. tsc, cargo check).",
+        "Checks types (e.g. tsc, cargo check).",
+    ),
+    ("Corre los tests.", "Runs the tests."),
+    (
+        "Comprueba que el proyecto compila.",
+        "Checks that the project builds.",
+    ),
+    (
+        "Un modelo revisa el cambio (configúralo en Revisión con IA). Gasta tokens.",
+        "A model reviews the change (set it up in AI review). Uses tokens.",
+    ),
+    ("Activado", "Enabled"),
+    (
+        "Si está apagado, Guard no revisa nada en ese paso.",
+        "When off, Guard doesn't check anything at that step.",
+    ),
+    (
+        "{p0} Se pide «{id}» pero no hay ninguna comprobación con ese id: añádela abajo o pulsa Detectar.",
+        "{p0} “{id}” is required but no check has that id: add it below or press Detect.",
+    ),
+    ("Tamaño del cambio", "Change size"),
+    (
+        "Cambios muy grandes son difíciles de revisar. Los lockfiles y archivos generados no cuentan.",
+        "Very large changes are hard to review. Lockfiles and generated files don't count.",
+    ),
+    ("líneas como máximo", "lines at most"),
+    (
+        "Por encima de esto, Guard bloquea el cambio.",
+        "Above this, Guard blocks the change.",
+    ),
+    ("líneas para avisar", "lines to warn"),
+    (
+        "Por encima de esto, Guard avisa pero deja seguir.",
+        "Above this, Guard warns but lets it through.",
+    ),
+    ("archivos como máximo", "files at most"),
+    (
+        "Cuántos archivos puede tocar un cambio.",
+        "How many files a change may touch.",
+    ),
+    ("Secretos y archivos", "Secrets and files"),
+    (
+        "Para que no se suban por error contraseñas, claves ni archivos privados.",
+        "So passwords, keys and private files are not pushed by mistake.",
+    ),
+    ("Bloquear secretos", "Block secrets"),
+    (
+        "Busca claves de API, tokens y contraseñas en el cambio y lo bloquea si encuentra alguna.",
+        "Looks for API keys, tokens and passwords in the change and blocks it if it finds any.",
+    ),
+    ("Bloquear archivos .env", "Block .env files"),
+    (
+        "No deja subir archivos .env (suelen tener contraseñas). .env.example sí.",
+        "Doesn't let .env files through (they usually hold passwords). .env.example is fine.",
+    ),
+    ("Archivos prohibidos", "Forbidden files"),
+    (
+        "Uno por línea. Admite comodines: *.pem, secrets/**, id_rsa…",
+        "One per line. Wildcards work: *.pem, secrets/**, id_rsa…",
+    ),
+    ("Comprobaciones", "Checks"),
+    (
+        "Comandos que Guard ejecuta, en una copia aparte del proyecto. Con id lint, typecheck, tests o build se usan según las casillas de arriba; con otro id, en los pasos que marques.",
+        "Commands Guard runs in a separate copy of the project. With id lint, typecheck, tests or build they follow the boxes above; with another id, the steps you tick.",
+    ),
+    ("Nombre", "Name"),
+    (
+        "lint, typecheck, tests o build para usarla en las casillas; cualquier otro para elegir los pasos",
+        "lint, typecheck, tests or build to use it in the boxes; anything else to pick the steps",
+    ),
+    ("Bloquea", "Blocks"),
+    (
+        "Si falla, no deja seguir. Si no, solo avisa.",
+        "If it fails, nothing goes through. Otherwise it only warns.",
+    ),
+    ("Quitar comprobación", "Remove check"),
+    ("Comando, p. ej. npm test", "Command, e.g. npm test"),
+    ("Corre en:", "Runs on:"),
+    ("Añadir comprobación", "Add check"),
+    ("Detectar", "Detect"),
+    (
+        "Busca los scripts lint, typecheck, test y build de package.json, o los comandos de Cargo",
+        "Looks for the lint, typecheck, test and build scripts in package.json, or the Cargo commands",
+    ),
+    ("No encontré comprobaciones nuevas.", "No new checks found."),
+    (
+        "Para opciones avanzadas: lo abre en tu editor de texto",
+        "For advanced options: opens it in your text editor",
+    ),
+    (
+        "Completa el id y el comando para guardar.",
+        "Fill in the id and the command to save.",
+    ),
+    ("Guardando…", "Saving…"),
+    (
+        "Cada comprobación necesita un id y un comando.",
+        "Every check needs an id and a command.",
+    ),
+    (
+        "Hay dos comprobaciones con el id «{id}».",
+        "There are two checks with the id “{id}”.",
+    ),
 ];

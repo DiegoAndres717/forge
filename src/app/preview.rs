@@ -458,6 +458,24 @@ fn ui_preview() {
         settle(&mut harness);
         save(&mut harness, &out, name);
     }
+    // El formulario de Guard: se baja con la rueda hasta él, en ancho y en estrecho.
+    for (size, name) in [
+        (Vec2::new(1440.0, 880.0), "11h-ajustes-guard"),
+        (Vec2::new(560.0, 900.0), "11i-ajustes-guard-estrecho"),
+    ] {
+        harness.set_size(size);
+        show_tab(&ctx, SettingsTab::Project);
+        settle(&mut harness);
+        harness.hover_at(egui::pos2(size.x / 2.0, size.y / 2.0));
+        harness.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, -380.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        settle(&mut harness);
+        save(&mut harness, &out, name);
+    }
     show_tab(&ctx, SettingsTab::General);
     harness.set_size(Vec2::new(1440.0, 880.0));
     harness.state_mut().settings_open = false;

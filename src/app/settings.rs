@@ -89,6 +89,7 @@ fn model_info(id: &str) -> &'static str {
 impl App {
     pub(super) fn settings_ui(&mut self, ctx: &egui::Context, cmds: &mut Vec<UiCmd>) {
         if !self.settings_open {
+            self.guard_form = None; // al volver a abrir se relee el archivo
             return;
         }
         let mut changed = false;
@@ -155,6 +156,11 @@ impl App {
                     .min_scrolled_height(body_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
+                        // Casillas cuadradas (con el redondeo general parecen radios).
+                        let w = &mut ui.visuals_mut().widgets;
+                        for state in [&mut w.inactive, &mut w.hovered, &mut w.active] {
+                            state.corner_radius = egui::CornerRadius::same(3);
+                        }
                         match tab {
                             SettingsTab::General => changed |= self.general_tab(ui, cmds),
                             SettingsTab::Agents => self.agents_tab(ui, cmds),
@@ -378,12 +384,6 @@ impl App {
                     "project.toml",
                 ),
                 (
-                    icon::SHIELD_CHECK,
-                    tr!("Reglas de Guard"),
-                    tr!("Qué se revisa antes de un commit, un push o un pull request."),
-                    "rules.toml",
-                ),
-                (
                     icon::ROBOT,
                     tr!("Agentes"),
                     tr!("Agentes propios y cómo se abren."),
@@ -479,6 +479,9 @@ impl App {
                 }
             });
         });
+        self.guard_form_ui(ui, cmds);
+        let Some(i) = self.active else { return };
+        let ws = &self.workspaces[i];
         theme::section(ui, tr!("Hooks de Git"));
         theme::card(ui, |ui| {
             let installed = matches!(

@@ -1240,3 +1240,32 @@ fn a_chosen_account_reaches_new_terminals_of_the_project() {
     assert!(!dir.join(".accounts/claude-1").exists());
     assert!(!ws(h.state()).has_accounts("claude"));
 }
+
+/// El formulario de Guard guarda solo poco después de un cambio, sin botón.
+#[test]
+fn the_guard_form_saves_by_itself() {
+    let _serial = serial();
+    let dir = project("guard-form");
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Project);
+    h.state_mut().settings_open = true;
+    h.run_steps(3);
+    // Bajar hasta "Secretos y archivos".
+    h.hover_at(egui::pos2(640.0, 400.0));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: Vec2::new(0.0, -500.0),
+        modifiers: egui::Modifiers::NONE,
+        phase: egui::TouchPhase::Move,
+    });
+    h.run_steps(5);
+    h.get_by_label("Bloquear archivos .env").click();
+    let rules = dir.join(".forge/rules.toml");
+    wait_until(&mut h, "se guarda solo", |_| {
+        std::fs::read_to_string(&rules).is_ok_and(|t| t.contains("block_env_files = false"))
+    });
+    // Lo que había en el archivo sigue (el check de tests del proyecto de prueba).
+    let text = std::fs::read_to_string(&rules).unwrap();
+    assert!(text.contains("id = \"tests\""), "{text}");
+}
