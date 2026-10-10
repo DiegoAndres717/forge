@@ -14,7 +14,7 @@ Terminales, procesos, agentes, **Forge Memory** y un Guard que revisa cada cambi
 ![Rust](https://img.shields.io/badge/hecho%20con-Rust-orange?logo=rust)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue)](LICENSE)
 
-[Descargar](#instalar) · [Funciones](#funciones) · [Mod de Claude Code](#mod-de-claude-code) · [Atajos](#atajos-de-teclado) · [Preguntas](#preguntas-frecuentes) · [English](README.md)
+[Descargar](#instalar) · [Funciones](#funciones) · [Cómo funciona](#cómo-funciona) · [Mod de Claude Code](#mod-de-claude-code) · [Atajos](#atajos-de-teclado) · [Preguntas](#preguntas-frecuentes) · [English](README.md)
 
 <img src="docs/demo.gif" width="900" alt="Demo de Forge">
 
@@ -35,11 +35,11 @@ Cuando trabajas con Claude Code, Codex u OpenCode, el día se reparte entre pest
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/workspace.png" alt="Workspace"></td>
+<td width="50%"><img src="docs/screenshots/workspace.png" alt="Terminales"></td>
 <td width="50%">
 
-### Workspaces
-Terminales reales **al estilo VS Code**: varias en un mismo panel (**+** o `⌘T`), cambias desde la lista lateral (`⌘⇧]` / `⌘⇧[`), las reordenas arrastrando y ves cuáles escribieron algo mientras estaban ocultas. Divisiones que se giran, foco por teclado, búsqueda (`⌘F`), sugerencias de carpetas al escribir e historial que sobrevive a los reinicios. ⌘-clic abre enlaces, aunque estén partidos. Procesos administrados (`dev`, `api`…) con reinicio, puertos detectados y health checks. Todas las acciones están también en la **barra de menús de macOS** con su atajo.
+### Terminales y procesos
+Terminales reales **al estilo VS Code**: varias en un mismo panel (`⌘T`), cambias desde la lista lateral, las reordenas arrastrando y ves cuáles escribieron algo mientras estaban ocultas. Divisiones, búsqueda (`⌘F`), sugerencias de carpetas al escribir e historial que sobrevive a los reinicios. Procesos administrados (`dev`, `api`…) con reinicio, puertos detectados y health checks. Un clic en un agente te lleva a su terminal abierta o reanuda su última sesión.
 
 </td>
 </tr>
@@ -47,50 +47,44 @@ Terminales reales **al estilo VS Code**: varias en un mismo panel (**+** o `⌘T
 <td>
 
 ### Project Guard
-Reglas deterministas antes de **commit / push / PR**: tamaño del cambio, archivos prohibidos, detección de secretos y tus propias comprobaciones (`npm test`, `cargo clippy`…), ejecutadas en una copia aislada. Las excepciones piden motivo y quedan registradas. Crea el commit o abre el pull request (con `gh`) desde el panel.
+Reglas deterministas antes de **commit / push / PR**: tamaño del cambio, archivos prohibidos, detección de secretos y tus propias comprobaciones (`npm test`, `cargo clippy`…), en una copia aislada, más una revisión con IA opcional según el riesgo. Las excepciones piden motivo y quedan registradas. Crea el commit o abre el pull request desde el panel.
 
 </td>
 <td><img src="docs/screenshots/guard.png" alt="Project Guard"></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/palette.png" alt="Paleta de comandos"></td>
-<td>
-
-### Paleta de comandos
-`⌘K` llega a todo: abrir o reanudar un agente, iniciar o detener procesos, cambiar de proyecto, pasar Guard, cambiar ajustes. Busca en inglés y en español.
-
-</td>
-</tr>
-<tr>
-<td>
-
-### Planes y memoria
-Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**: cada fase con su estado, una rama de Git opcional y tareas que va tachando mientras trabaja. Lo que surja para después va al **backlog**; un clic en *Planificar con Claude Code* lo convierte en plan. Tres secciones (En progreso · Backlog · Completado), **guardado fuera del repo** y compartido por MCP con Claude Code, Codex y OpenCode, junto con **Forge Memory**, la memoria del proyecto: decisiones, errores resueltos y convenciones, sin duplicados y ligada al remoto de Git (sigue al repo aunque cambies de carpeta, clon o worktree).
-
-</td>
 <td><img src="docs/screenshots/plans.png" alt="Planes"></td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/approval.png" alt="Autorización de comandos peligrosos"></td>
 <td>
 
-### Comandos peligrosos
-`rm -rf` fuera del proyecto, `git reset --hard`, `git push --force`, `git clean -f`, `docker system prune`, `DROP DATABASE`… piden confirmación en la ventana, también cuando los lanza un agente.
+### Planes y Forge Memory
+Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**, cada una con su rama y tareas que va tachando; lo que surja para después va al **backlog**. **Forge Memory** guarda las decisiones, los errores resueltos y las convenciones. Las dos se comparten por MCP con Claude Code, Codex y OpenCode, y se guardan fuera del repo.
 
 </td>
 </tr>
 <tr>
 <td>
 
-### Panel de Git
-Cambio de rama, preparar / quitar / descartar, commit, pull, push e historial reciente sin salir del proyecto.
+### Ajustes sin editar archivos
+Pestañas, un ⓘ en cada opción y formularios para Guard, agentes, revisión con IA y procesos que se guardan solos (conservando los comentarios de tus archivos de `.forge/`). Varias **cuentas de Claude Code y Codex** a la vez, cada una con su uso del plan.
 
 </td>
-<td><img src="docs/screenshots/git.png" alt="Panel de Git"></td>
+<td><img src="docs/screenshots/settings.png" alt="Ajustes"></td>
 </tr>
 </table>
 
-Además: notificaciones nativas cuando un agente termina, un proceso falla o Guard bloquea (solo con Forge en segundo plano) · aviso de actualizaciones · interfaz en inglés y español.
+Además: paleta `⌘K` para todo · confirmación antes de comandos peligrosos (`rm -rf` fuera del proyecto, `git push --force`, `DROP DATABASE`…), también si los lanza un agente · panel de Git · barra de menús de macOS con todas las acciones · avisos cuando un agente termina o te necesita · actualizaciones automáticas · inglés y español.
+
+## Cómo funciona
+
+### Forge Memory
+Todos los agentes abiertos en Forge leen y escriben la misma memoria del proyecto por MCP. Va ligada al remoto de Git, no guarda duplicados, y Claude Code recibe las decisiones clave y los planes en curso en el primer mensaje de cada conversación.
+
+<img src="docs/diagrams/forge-memory.es.png" alt="Cómo funciona Forge Memory">
+
+### Project Guard
+Lo que pasa entre `git commit` (o el push, o el pull request) y que tu cambio salga de la máquina.
+
+<img src="docs/diagrams/project-guard.es.png" alt="Cómo funciona Project Guard">
 
 ## Instalar
 

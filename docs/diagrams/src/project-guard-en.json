@@ -1,0 +1,249 @@
+{
+ "schema_version": 2,
+ "diagram_type": "workflow",
+ "meta": {
+  "title": "Project Guard",
+  "locale": "en",
+  "quality_profile": "showcase",
+  "output": "project-guard-en/project-guard.en.html",
+  "legend": {
+   "entries": {
+    "frontend": {
+     "label": "Forge UI / CLI"
+    },
+    "backend": {
+     "label": "Guard step"
+    },
+    "security": {
+     "label": "Rule / override"
+    },
+    "messagebus": {
+     "label": "Checks"
+    },
+    "cloud": {
+     "label": "AI model"
+    },
+    "external": {
+     "label": "Git"
+    }
+   }
+  }
+ },
+ "lanes": [
+  {
+   "id": "triggers",
+   "label": "Triggers"
+  },
+  {
+   "id": "guard",
+   "label": "Isolated copy"
+  },
+  {
+   "id": "ai",
+   "label": "Optional AI review"
+  },
+  {
+   "id": "result",
+   "label": "Verdict"
+  }
+ ],
+ "mainPath": [
+  "panel",
+  "candidate",
+  "sandbox",
+  "rules",
+  "checks",
+  "triage",
+  "review",
+  "verdict"
+ ],
+ "nodes": [
+  {
+   "id": "hooks",
+   "lane": "triggers",
+   "col": 0,
+   "type": "external",
+   "label": "git commit / push",
+   "sublabel": "Forge Git hooks",
+   "width": 140
+  },
+  {
+   "id": "panel",
+   "lane": "triggers",
+   "col": 1,
+   "type": "frontend",
+   "label": "Guard panel ⌘G",
+   "sublabel": "forge guard · before a PR",
+   "width": 160
+  },
+  {
+   "id": "candidate",
+   "lane": "guard",
+   "col": 1,
+   "type": "backend",
+   "label": "Candidate change",
+   "sublabel": "staged · branch diff",
+   "width": 150
+  },
+  {
+   "id": "sandbox",
+   "lane": "guard",
+   "col": 2,
+   "type": "backend",
+   "label": "Isolated copy",
+   "sublabel": "working tree untouched",
+   "width": 140
+  },
+  {
+   "id": "rules",
+   "lane": "guard",
+   "col": 3,
+   "type": "security",
+   "label": "Deterministic rules",
+   "sublabel": "size · secrets · .env · files",
+   "width": 150
+  },
+  {
+   "id": "checks",
+   "lane": "guard",
+   "col": 4,
+   "type": "messagebus",
+   "label": "Checks",
+   "sublabel": "lint · types · tests · build",
+   "tag": ".forge/rules.toml",
+   "width": 150
+  },
+  {
+   "id": "triage",
+   "lane": "ai",
+   "col": 4,
+   "type": "cloud",
+   "label": "Risk triage",
+   "sublabel": "Ollama, else Haiku",
+   "width": 150
+  },
+  {
+   "id": "review",
+   "lane": "ai",
+   "col": 5,
+   "type": "cloud",
+   "label": "Code review",
+   "sublabel": "Haiku/Sonnet · risky → Opus",
+   "tag": "monthly budget",
+   "width": 170
+  },
+  {
+   "id": "verdict",
+   "lane": "result",
+   "col": 5,
+   "type": "backend",
+   "label": "Verdict",
+   "sublabel": "Ready · warnings · Blocked",
+   "width": 150,
+   "tag": "report kept in history"
+  },
+  {
+   "id": "allow",
+   "lane": "result",
+   "col": 4,
+   "type": "security",
+   "label": "forge guard allow",
+   "sublabel": "<rule> --reason",
+   "tag": "logged",
+   "width": 150
+  }
+ ],
+ "edges": [
+  {
+   "id": "hooks-candidate",
+   "from": "hooks",
+   "to": "candidate",
+   "variant": "default",
+   "fromSide": "bottom",
+   "toSide": "left"
+  },
+  {
+   "id": "panel-candidate",
+   "from": "panel",
+   "to": "candidate",
+   "variant": "emphasis"
+  },
+  {
+   "id": "candidate-sandbox",
+   "from": "candidate",
+   "to": "sandbox",
+   "label": "copy",
+   "variant": "emphasis"
+  },
+  {
+   "id": "sandbox-rules",
+   "from": "sandbox",
+   "to": "rules",
+   "variant": "emphasis"
+  },
+  {
+   "id": "rules-checks",
+   "from": "rules",
+   "to": "checks",
+   "variant": "emphasis"
+  },
+  {
+   "id": "checks-triage",
+   "from": "checks",
+   "to": "triage",
+   "label": "if enabled",
+   "variant": "dashed"
+  },
+  {
+   "id": "triage-review",
+   "from": "triage",
+   "to": "review",
+   "label": "risk level",
+   "variant": "dashed"
+  },
+  {
+   "id": "review-verdict",
+   "from": "review",
+   "to": "verdict",
+   "variant": "emphasis"
+  },
+  {
+   "id": "verdict-allow",
+   "from": "verdict",
+   "to": "allow",
+   "label": "Blocked",
+   "variant": "security",
+   "role": "error"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "rose",
+   "title": "Deterministic rules",
+   "items": [
+    "Change size: block above max lines, warn above a lower limit; lockfiles and generated files don't count",
+    "Secret detection, .env files blocked",
+    "Forbidden files: *.pem, id_rsa, secrets/**"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "Checks",
+   "items": [
+    "Per step in .forge/rules.toml, editable from Settings",
+    "Lint, types, tests, build + custom checks",
+    "Each blocking or warning-only; identical trees reuse results"
+   ]
+  },
+  {
+   "dot": "violet",
+   "title": "AI review",
+   "items": [
+    "Risk classified by local Ollama, else Haiku",
+    "Haiku or Sonnet reviews, per profile",
+    "Risky changes escalate to Sonnet/Opus for architecture or security",
+    "Monthly budget + per-review limit"
+   ]
+  }
+ ]
+}

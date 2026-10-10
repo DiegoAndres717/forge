@@ -14,7 +14,7 @@ Terminals, processes, agents, **Forge Memory** and a Guard that checks every cha
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Download](#install) · [Features](#features) · [Claude Code mod](#claude-code-mod) · [Shortcuts](#keyboard-shortcuts) · [FAQ](#faq) · [Español](README.es.md)
+[Download](#install) · [Features](#features) · [How it works](#how-it-works) · [Claude Code mod](#claude-code-mod) · [Shortcuts](#keyboard-shortcuts) · [FAQ](#faq) · [Español](README.es.md)
 
 <img src="docs/demo.gif" width="900" alt="Forge demo">
 
@@ -35,11 +35,11 @@ When you work with Claude Code, Codex or OpenCode, your day is scattered across 
 
 <table>
 <tr>
-<td width="50%"><img src="docs/screenshots/workspace.png" alt="Workspace"></td>
+<td width="50%"><img src="docs/screenshots/workspace.png" alt="Terminals"></td>
 <td width="50%">
 
-### Workspaces
-Real terminals, **VS Code–style**: stack several in one panel (**+** or `⌘T`), switch from the side list (`⌘⇧]` / `⌘⇧[`), drag to reorder, and see which hidden ones printed something. Splits you can rotate, keyboard focus, scrollback search (`⌘F`), folder suggestions as you type and history that survives restarts. ⌘-click opens links, even wrapped ones. Managed processes (`dev`, `api`…) with restart, detected ports and health checks. Every action also lives in the **macOS menu bar** with its shortcut.
+### Terminals and processes
+Real terminals, **VS Code–style**: stack several in one panel (`⌘T`), switch from the side list, drag to reorder, and see which hidden ones printed something. Splits, search (`⌘F`), folder suggestions as you type and history that survives restarts. Managed processes (`dev`, `api`…) with restart, detected ports and health checks. Click an agent to jump back to its open terminal or resume its last session.
 
 </td>
 </tr>
@@ -47,50 +47,44 @@ Real terminals, **VS Code–style**: stack several in one panel (**+** or `⌘T`
 <td>
 
 ### Project Guard
-Deterministic rules before **commit / push / PR**: change size, forbidden files, secret detection and your own checks (`npm test`, `cargo clippy`…), run in an isolated copy. Exceptions need a reason and are logged. Create the commit or open the pull request (via `gh`) straight from the panel.
+Deterministic rules before **commit / push / PR**: change size, forbidden files, secret detection and your own checks (`npm test`, `cargo clippy`…), run in an isolated copy, plus an optional AI review by risk. Exceptions need a reason and are logged. Create the commit or open the pull request straight from the panel.
 
 </td>
 <td><img src="docs/screenshots/guard.png" alt="Project Guard"></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/palette.png" alt="Command palette"></td>
-<td>
-
-### Command palette
-`⌘K` reaches everything: open or resume an agent, start/stop processes, switch projects, run Guard, change settings. Search works in English and Spanish.
-
-</td>
-</tr>
-<tr>
-<td>
-
-### Plans & memory
-Tell the AI what you want to build and it saves a **plan in phases** — each phase with its status, an optional Git branch and tasks it ticks off as it works. Ideas for later go to the **backlog**; one click on *Plan with Claude Code* turns one into a plan. Three sections (In progress · Backlog · Completed), **stored outside the repo**, shared over MCP with Claude Code, Codex and OpenCode, together with **Forge Memory**, the project memory: decisions, fixed errors and conventions, without duplicates and tied to the Git remote (it follows the repo across folders, clones and worktrees).
-
-</td>
 <td><img src="docs/screenshots/plans.png" alt="Plans"></td>
-</tr>
-<tr>
-<td><img src="docs/screenshots/approval.png" alt="Dangerous command approval"></td>
 <td>
 
-### Dangerous command approval
-`rm -rf` outside the project, `git reset --hard`, `git push --force`, `git clean -f`, `docker system prune`, `DROP DATABASE`… ask for confirmation in the window — even when an agent runs them.
+### Plans and Forge Memory
+Tell the AI what you want to build and it saves a **plan in phases**, each with its branch and tasks it ticks off as it works; ideas for later go to the **backlog**. **Forge Memory** keeps the decisions, fixed errors and conventions. Both are shared over MCP with Claude Code, Codex and OpenCode, and stored outside the repo.
 
 </td>
 </tr>
 <tr>
 <td>
 
-### Git panel
-Branch switcher, stage / unstage / discard, commit, pull, push and recent history — without leaving the project.
+### Settings without editing files
+Tabs, an ⓘ on every option, and forms for Guard, agents, AI review and processes that save as you type (keeping the comments in your `.forge/` files). Several **Claude Code and Codex accounts** side by side, each with its plan usage.
 
 </td>
-<td><img src="docs/screenshots/git.png" alt="Git panel"></td>
+<td><img src="docs/screenshots/settings.png" alt="Settings"></td>
 </tr>
 </table>
 
-Also: native notifications when an agent finishes, a process fails or Guard blocks (only while Forge is in the background) · update checks · English and Spanish UI.
+Also: `⌘K` command palette for everything · confirmation before dangerous commands (`rm -rf` outside the project, `git push --force`, `DROP DATABASE`…), even from an agent · Git panel · macOS menu bar with every action · notifications when an agent finishes or needs you · automatic updates · English and Spanish.
+
+## How it works
+
+### Forge Memory
+Every agent opened in Forge reads and writes the same project memory over MCP. It's tied to the Git remote, refuses duplicates, and Claude Code gets the key decisions and plans in progress in the first message of every conversation.
+
+<img src="docs/diagrams/forge-memory.en.png" alt="How Forge Memory works">
+
+### Project Guard
+What happens between `git commit` (or push, or a pull request) and your change leaving the machine.
+
+<img src="docs/diagrams/project-guard.en.png" alt="How Project Guard works">
 
 ## Install
 
