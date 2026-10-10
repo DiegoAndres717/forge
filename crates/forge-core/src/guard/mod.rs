@@ -18,12 +18,14 @@ use sha2::{Digest, Sha256};
 
 pub(crate) mod diff;
 mod evaluate;
+mod form;
 mod rules;
 mod run;
 mod secrets;
 
 pub use diff::*;
 pub use evaluate::*;
+pub use form::*;
 pub use rules::*;
 pub use run::*;
 pub use secrets::*;

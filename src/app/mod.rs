@@ -28,6 +28,7 @@ const GUARD_WIDTH: f32 = 440.0;
 mod approvals;
 mod chrome;
 mod git_panel;
+mod guard_form;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
@@ -302,6 +303,8 @@ pub struct App {
     notification_click: Arc<Mutex<Option<PathBuf>>>,
     /// Ventana de Ajustes (⌘,) abierta.
     settings_open: bool,
+    /// Formulario de Guard en Ajustes (se carga al abrirlo y se guarda solo).
+    guard_form: Option<guard_form::GuardForm>,
     /// Notificaciones activadas en Ajustes.
     notifications_enabled: bool,
     /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
@@ -373,6 +376,7 @@ impl App {
             traffic_end: 72.0,
             toolbar_right: 0.0,
             settings_open: false,
+            guard_form: None,
             notifications_enabled: true,
             notifications: false,
             next_update_check: None,

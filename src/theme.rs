@@ -89,6 +89,11 @@ pub fn apply(ctx: &egui::Context) {
             state.expansion = 0.0;
         }
         w.hovered.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x4a, 0x4a, 0x4c));
+        // Casillas, radios y el riel de los deslizadores usan `bg_fill` (los botones,
+        // `weak_bg_fill`): oscuro y con borde para que una casilla vacía se vea.
+        w.inactive.bg_fill = Color32::from_rgb(0x1c, 0x1c, 0x1e);
+        w.inactive.bg_stroke = Stroke::new(1.0, Color32::from_rgb(0x4a, 0x4a, 0x4c));
+        w.hovered.bg_fill = Color32::from_rgb(0x24, 0x24, 0x26);
     });
 }
 
