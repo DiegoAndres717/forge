@@ -1140,3 +1140,39 @@ fn hidden_terminals_show_activity_and_rows_reorder_by_drag() {
         "la tercera pasa a la primera posición"
     );
 }
+
+#[test]
+fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
+    let _serial = serial();
+    let dir = project("agent-click");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    let before = ws(h.state()).panel_count();
+    let root = ws(h.state()).focused();
+    let click = |h: &mut Harness<'_, App>, new: bool| {
+        h.state_mut()
+            .apply(&ctx, UiCmd::AgentClick("fake".into(), new), area);
+        h.run_steps(2);
+    };
+    click(&mut h, false);
+    assert_eq!(ws(h.state()).panel_count(), before + 1, "abre el agente");
+    let agent = ws(h.state()).agent_panels("fake")[0];
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(root), area);
+    assert_eq!(ws(h.state()).focused(), root);
+    click(&mut h, false);
+    assert_eq!(ws(h.state()).panel_count(), before + 1, "no abre otro");
+    assert_eq!(ws(h.state()).focused(), agent, "lleva a su terminal");
+    click(&mut h, true);
+    assert_eq!(
+        ws(h.state()).panel_count(),
+        before + 2,
+        "+ abre una sesión nueva"
+    );
+    assert_eq!(ws(h.state()).agent_panels("fake").len(), 2);
+}

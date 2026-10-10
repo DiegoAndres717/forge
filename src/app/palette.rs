@@ -213,7 +213,13 @@ impl App {
                     icon::ROBOT,
                     tr!("Abrir {p0}", p0 = agent.name),
                     hint,
-                    cmd(UiCmd::OpenAgent(agent.id.clone(), false)),
+                    cmd(UiCmd::AgentClick(agent.id.clone(), false)),
+                );
+                add(
+                    icon::PLUS,
+                    tr!("{p0}: sesión nueva", p0 = agent.name),
+                    "",
+                    cmd(UiCmd::AgentClick(agent.id.clone(), true)),
                 );
                 if agent.resume.is_some() {
                     add(
