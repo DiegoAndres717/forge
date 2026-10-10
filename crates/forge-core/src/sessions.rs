@@ -25,17 +25,114 @@ pub fn resume_command(program: &str, command: &str, id: &str) -> Option<String> 
 /// Última sesión interactiva del agente en `cwd` (las de modo no interactivo no cuentan).
 /// `config`: carpeta de la cuenta; sin ella, la de siempre (o la de su variable de entorno).
 pub fn last_session(program: &str, cwd: &Path, config: Option<&Path>) -> Option<LastSession> {
-    let home = PathBuf::from(std::env::var_os("HOME")?);
-    let dir = |var: &str, default: &str| {
-        config.map(Path::to_path_buf).unwrap_or_else(|| {
-            std::env::var_os(var).map_or_else(|| home.join(default), PathBuf::from)
-        })
-    };
+    let dir = config_dir(program, config)?;
     match program {
-        "claude" => claude(&dir("CLAUDE_CONFIG_DIR", ".claude"), cwd),
-        "codex" => codex(&dir("CODEX_HOME", ".codex"), cwd),
+        "claude" => claude(&dir, cwd),
+        "codex" => codex(&dir, cwd),
         _ => None,
     }
+}
+
+/// Carpeta de configuración del agente: la de la cuenta o, sin ella, la de siempre (o la
+/// de su variable de entorno).
+fn config_dir(program: &str, account: Option<&Path>) -> Option<PathBuf> {
+    if let Some(dir) = account {
+        return Some(dir.to_path_buf());
+    }
+    let (var, default) = match program {
+        "claude" => ("CLAUDE_CONFIG_DIR", ".claude"),
+        "codex" => ("CODEX_HOME", ".codex"),
+        _ => return None,
+    };
+    let home = PathBuf::from(std::env::var_os("HOME")?);
+    Some(std::env::var_os(var).map_or_else(|| home.join(default), PathBuf::from))
+}
+
+/// Pasa la conversación `id` de una cuenta a otra (carpetas `from` → `to`; `None` = la
+/// principal) para reanudarla allí con `resume_command`.
+pub fn copy_session(
+    program: &str,
+    cwd: &Path,
+    id: &str,
+    from: Option<&Path>,
+    to: Option<&Path>,
+) -> Result<(), String> {
+    let missing = || crate::tr!("No encuentro esa conversación.").to_string();
+    let (from, to) = (
+        config_dir(program, from).ok_or_else(missing)?,
+        config_dir(program, to).ok_or_else(missing)?,
+    );
+    let copy = |rel: &Path| -> Result<(), String> {
+        let target = to.join(rel);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::copy(from.join(rel), target)
+            .map(drop)
+            .map_err(|e| e.to_string())
+    };
+    match program {
+        "claude" => {
+            let rel = Path::new("projects")
+                .join(claude_dir_name(cwd))
+                .join(format!("{id}.jsonl"));
+            if !from.join(&rel).is_file() {
+                return Err(missing());
+            }
+            copy(&rel)
+        }
+        "codex" => {
+            // sessions/AAAA/MM/DD/rollout-…-<id>.jsonl, y su nombre en session_index.jsonl.
+            let suffix = format!("{id}.jsonl");
+            let file = subdirs(&from.join("sessions"))
+                .iter()
+                .flat_map(|y| subdirs(y))
+                .flat_map(|m| subdirs(&m))
+                .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+                .map(|e| e.path())
+                .find(|p| p.to_string_lossy().ends_with(&suffix))
+                .ok_or_else(missing)?;
+            let rel = file.strip_prefix(&from).map_err(|e| e.to_string())?;
+            copy(rel)?;
+            let lines: String = std::fs::read_to_string(from.join("session_index.jsonl"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|l| l.contains(&format!("\"{id}\"")))
+                .map(|l| format!("{l}\n"))
+                .collect();
+            if !lines.is_empty() {
+                use std::io::Write;
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(to.join("session_index.jsonl"))
+                    .and_then(|mut f| f.write_all(lines.as_bytes()))
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        }
+        _ => Err(missing()),
+    }
+}
+
+fn subdirs(dir: &Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .map(|r| {
+            r.flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Claude Code guarda las sesiones de cada carpeta en `projects/<ruta con lo no
+/// alfanumérico como '-'>`.
+fn claude_dir_name(cwd: &Path) -> String {
+    cwd.to_string_lossy()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 fn mtime(path: &Path) -> i64 {
@@ -72,18 +169,14 @@ fn one_line(text: &str) -> String {
 
 /// Claude Code: `<config>/projects/<cwd con lo no alfanumérico como '-'>/<id>.jsonl`.
 fn claude(config: &Path, cwd: &Path) -> Option<LastSession> {
-    let name: String = cwd
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect();
-    let mut files: Vec<(i64, PathBuf)> = std::fs::read_dir(config.join("projects").join(name))
-        .ok()?
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
-        .map(|p| (mtime(&p), p))
-        .collect();
+    let mut files: Vec<(i64, PathBuf)> =
+        std::fs::read_dir(config.join("projects").join(claude_dir_name(cwd)))
+            .ok()?
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+            .map(|p| (mtime(&p), p))
+            .collect();
     files.sort_by_key(|f| std::cmp::Reverse(f.0));
     files.into_iter().take(5).find_map(|(when, path)| {
         let text = tail(&path, 256 * 1024);
@@ -229,6 +322,32 @@ mod tests {
             Some("claude --model opus --resume x")
         );
         assert_eq!(resume_command("opencode", "opencode", "x"), None);
+
+        // Pasar la conversación a otra cuenta: la encuentra allí.
+        let other = tmp.join("claude-2");
+        copy_session(
+            "claude",
+            cwd,
+            "old",
+            Some(&tmp.join("claude")),
+            Some(&other),
+        )
+        .unwrap();
+        assert_eq!(claude(&other, cwd).unwrap().topic, "Login con Google");
+        assert!(
+            copy_session(
+                "claude",
+                cwd,
+                "nada",
+                Some(&tmp.join("claude")),
+                Some(&other)
+            )
+            .is_err()
+        );
+        let other = tmp.join("codex-2");
+        copy_session("codex", cwd, "a", Some(&tmp.join("codex")), Some(&other)).unwrap();
+        let s = codex(&other, cwd).unwrap();
+        assert_eq!((s.id.as_str(), s.topic.as_str()), ("a", "Migrar a PG17"));
         let _ = std::fs::remove_dir_all(tmp);
     }
 }

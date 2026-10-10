@@ -14,7 +14,7 @@ use crate::terminal::{Metrics, Terminal};
 use forge_core::accounts::{self, Account};
 use forge_core::agents::AgentSpec;
 use forge_core::project::{LayoutSpec, Project, SavedCommand, SplitSpec, StartPolicy};
-use forge_core::sessions::{LastSession, last_session, resume_command};
+use forge_core::sessions::{LastSession, copy_session, last_session, resume_command};
 
 /// Estado restaurable de un workspace (se guarda como JSON en la fila del proyecto).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -274,6 +274,10 @@ enum HeaderAction {
     Start(String),
     Stop(String),
     Restart(String),
+    /// Seguir la conversación de este agente con otra cuenta (id).
+    Handoff(i64),
+    /// Cerrar el aviso de límite de la cuenta.
+    DismissLimit,
 }
 
 pub struct Workspace {
@@ -298,6 +302,11 @@ pub struct Workspace {
     /// Cuentas de los agentes (todas) y la elegida en este proyecto para cada programa.
     accounts: Vec<Account>,
     chosen: HashMap<String, i64>,
+    /// Terminales de agente cuya cuenta llegó a su límite de uso (muestran el aviso).
+    limited: Vec<PanelId>,
+    /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
+    /// atiende la app (elige la cuenta en el proyecto y llama a `handoff`).
+    pub handoff_request: Option<(PanelId, i64)>,
     /// Último error (p. ej. no se pudo abrir un shell); la app lo muestra y lo limpia.
     pub error: Option<String>,
     /// Dormido: sin terminales ni procesos; guarda el estado para restaurarlo al despertar.
@@ -363,6 +372,8 @@ impl Workspace {
             sessions: (HashMap::new(), None),
             accounts: Vec::new(),
             chosen: HashMap::new(),
+            limited: Vec::new(),
+            handoff_request: None,
             error: None,
             dormant: None,
             seen: Instant::now(),
@@ -503,6 +514,98 @@ impl Workspace {
         self.sticky = Some(Attention::Event(text));
     }
 
+    /// La cuenta de esa terminal llegó a su límite: se ofrece seguir con otra.
+    pub fn limit_reached(&mut self, panel: PanelId) {
+        if self.panels.contains_key(&panel) && !self.limited.contains(&panel) {
+            self.limited.push(panel);
+        }
+    }
+
+    /// Programa del agente de una terminal (`claude`, `codex`…).
+    pub fn panel_program(&self, panel: PanelId) -> Option<String> {
+        let agent = self.panels.get(&panel)?.agent.as_ref()?;
+        let spec = self.project.agents.iter().find(|s| &s.id == agent)?;
+        Some(spec.program().to_string())
+    }
+
+    /// Otras cuentas a las que puede pasar la conversación de una terminal de agente.
+    fn handoff_targets(&self, panel: PanelId) -> Vec<Account> {
+        let Some(p) = self.panels.get(&panel) else {
+            return Vec::new();
+        };
+        let Some(program) = p
+            .agent
+            .as_ref()
+            .and_then(|a| self.project.agents.iter().find(|s| &s.id == a))
+            .map(|s| s.program().to_string())
+        else {
+            return Vec::new();
+        };
+        let current = self.account_for(&program, p.account).map(|a| a.id);
+        self.accounts_of(&program)
+            .into_iter()
+            .filter(|a| Some(a.id) != current)
+            .cloned()
+            .collect()
+    }
+
+    /// Pasa la conversación de la terminal a la cuenta elegida en el proyecto: la copia a
+    /// esa cuenta y la reanuda allí, en el mismo sitio (la terminal anterior se cierra).
+    pub fn handoff(&mut self, ctx: &egui::Context, panel: PanelId) -> Result<(), String> {
+        let Some(p) = self.panels.get(&panel) else {
+            return Ok(());
+        };
+        let Some(spec) = p
+            .agent
+            .as_ref()
+            .and_then(|a| self.project.agents.iter().find(|s| &s.id == a))
+            .cloned()
+        else {
+            return Ok(());
+        };
+        let program = spec.program();
+        let (Some(from), Some(to)) = (
+            self.account_for(program, p.account).cloned(),
+            self.account_for(program, None).cloned(),
+        ) else {
+            return Ok(());
+        };
+        if from.id == to.id {
+            return Ok(());
+        }
+        let root = self.project.root();
+        // ponytail: la conversación de la terminal es la última de esa cuenta en la carpeta;
+        // con dos terminales de la misma cuenta abiertas a la vez se pasaría la más reciente.
+        let session = last_session(program, &root, from.dir.as_deref())
+            .ok_or_else(|| tr!("No encuentro la conversación de esa terminal.").to_string())?;
+        copy_session(
+            program,
+            &root,
+            &session.id,
+            from.dir.as_deref(),
+            to.dir.as_deref(),
+        )?;
+        let command = resume_command(program, &spec.command, &session.id)
+            .unwrap_or_else(|| spec.command.clone());
+        let name = match self.has_accounts(program) {
+            true => format!("{} · {}", spec.name, to.name),
+            false => spec.name.clone(),
+        };
+        let state = PanelState {
+            name: Some(name),
+            cwd: root,
+            command: Some(command),
+            process: None,
+            agent: Some(spec.id.clone()),
+            account: Some(to.id),
+        };
+        if self.add_tab_next_to(ctx, panel, state).is_some() {
+            self.close(panel);
+        }
+        self.sessions.1 = None;
+        Ok(())
+    }
+
     /// Recuerda el aviso actual (se llama cada fotograma).
     pub fn refresh_attention(&mut self) {
         if let Some(a) = self.current_attention() {
@@ -634,6 +737,10 @@ impl Workspace {
             .as_ref()
             .and_then(|s| self.account_for(s.program(), state.account))
             .cloned();
+        if spec.is_some() {
+            // Los avisos del agente dicen de qué terminal vienen (p. ej. el de límite).
+            env.insert("FORGE_PANEL".into(), id.to_string());
+        }
         if let Some(a) = &account {
             env.extend(a.env());
             if self.has_accounts(&a.program) {
@@ -1189,9 +1296,20 @@ impl Workspace {
             agent: None,
             account: None,
         };
-        let (current, id) = (self.focus, self.next_id);
+        self.add_tab_next_to(ctx, self.focus, state);
+    }
+
+    /// Abre `state` como terminal nueva en el hueco de `current`, justo detrás de ella, y la
+    /// pone a la vista.
+    fn add_tab_next_to(
+        &mut self,
+        ctx: &egui::Context,
+        current: PanelId,
+        state: PanelState,
+    ) -> Option<PanelId> {
+        let id = self.next_id;
         if self.panels.is_empty() || !self.spawn_panel(ctx, id, state) {
-            return;
+            return None;
         }
         match self.tabs.iter_mut().find(|g| g.contains(&current)) {
             Some(group) => {
@@ -1204,6 +1322,7 @@ impl Workspace {
             None => self.tabs.push(vec![current, id]),
         }
         self.show_tab(id);
+        Some(id)
     }
 
     /// Pone a la vista la terminal `id` de su grupo (y le da el foco).
@@ -1466,6 +1585,7 @@ impl Workspace {
             self.layout.remove(id);
         }
         self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
+        self.limited.retain(|p| *p != id);
         if self.maximized == Some(id) {
             self.maximized = None;
         }
@@ -1594,6 +1714,15 @@ impl Workspace {
             } else {
                 body
             };
+            // La cuenta llegó a su límite: franja arriba para seguir con otra.
+            let body = if self.limited.contains(&id) {
+                let (banner, rest) = body.split_top_bottom_at_y(body.min.y + 34.0);
+                let actions = self.limit_banner(ui, banner, id);
+                header_actions.extend(actions.into_iter().map(|a| (id, a)));
+                rest
+            } else {
+                body
+            };
             let focused = active && id == self.focus && self.renaming.is_none();
             let terminal_id = egui::Id::new(("terminal", key.as_path(), id));
             let Some(panel) = self.panels.get_mut(&id) else {
@@ -1652,6 +1781,8 @@ impl Workspace {
         for (id, action) in header_actions {
             match action {
                 HeaderAction::Close => self.close(id),
+                HeaderAction::Handoff(account) => self.handoff_request = Some((id, account)),
+                HeaderAction::DismissLimit => self.limited.retain(|p| *p != id),
                 HeaderAction::Maximize => {
                     self.focus = id;
                     self.maximized = if self.maximized.is_some() {
@@ -1902,6 +2033,62 @@ impl Workspace {
 
     /// Cabecera del panel (estilo pestaña de macOS): icono según el tipo, título, detalle
     /// en gris y botones. Doble clic en el título para renombrar.
+    /// Aviso de límite de la cuenta con un botón por cada otra cuenta.
+    fn limit_banner(&self, ui: &mut egui::Ui, rect: Rect, id: PanelId) -> Vec<HeaderAction> {
+        use crate::theme::{self, icon};
+        let mut actions = Vec::new();
+        ui.painter()
+            .rect_filled(rect, 0.0, Color32::from_rgb(0x3a, 0x2a, 0x12));
+        // La ✕ fija a la derecha; el resto, recortado a la franja (paneles estrechos).
+        let close = Rect::from_center_size(
+            egui::pos2(rect.max.x - 18.0, rect.center().y),
+            Vec2::splat(24.0),
+        );
+        let response = ui
+            .interact(close, egui::Id::new(("limit-close", id)), Sense::click())
+            .on_hover_text(tr!("Cerrar aviso"));
+        theme::paint_icon_button(ui, close, icon::X, &response, theme::TEXT_3);
+        if response.clicked() {
+            actions.push(HeaderAction::DismissLimit);
+        }
+        let inner = Rect::from_min_max(
+            rect.min + Vec2::new(10.0, 4.0),
+            egui::pos2(close.min.x - 6.0, rect.max.y - 4.0),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(inner)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.set_clip_rect(inner);
+        child.label(
+            egui::RichText::new(format!(
+                "{}  {}",
+                icon::WARNING,
+                tr!("Esta cuenta llegó a su límite de uso.")
+            ))
+            .color(theme::ORANGE),
+        );
+        let targets = self.handoff_targets(id);
+        if targets.is_empty() {
+            child.label(
+                egui::RichText::new(tr!("Añade otra en Ajustes → Cuentas.")).color(theme::TEXT_3),
+            );
+        }
+        for a in &targets {
+            if child
+                .button(tr!("Seguir con «{p0}»", p0 = a.name))
+                .on_hover_text(tr!(
+                    "Pasa esta conversación a esa cuenta y la continúa allí"
+                ))
+                .clicked()
+            {
+                actions.push(HeaderAction::Handoff(a.id));
+            }
+        }
+        actions
+    }
+
     fn header(&mut self, ui: &mut egui::Ui, id: PanelId, rect: Rect) -> Vec<HeaderAction> {
         use crate::theme::{self, icon};
         let mut actions = Vec::new();
@@ -2006,6 +2193,36 @@ impl Workspace {
             } else if button(icon::PLAY, tr!("Iniciar"), "start") {
                 actions.push(HeaderAction::Start(pid));
             }
+        }
+
+        // Terminal de agente con varias cuentas: seguir la conversación con otra.
+        let targets = self.handoff_targets(id);
+        if !targets.is_empty() {
+            let r = Rect::from_center_size(
+                egui::pos2(right - size / 2.0, rect.center().y),
+                Vec2::splat(size),
+            );
+            right -= size + 2.0;
+            let hint = tr!("Seguir esta conversación con otra cuenta");
+            let response = ui
+                .interact(r, egui::Id::new(("handoff", &key, id)), Sense::click())
+                .on_hover_text(hint);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint));
+            let color = if focused {
+                theme::TEXT_3
+            } else {
+                theme::TEXT_4
+            };
+            theme::paint_icon_button(ui, r, icon::USER_SWITCH, &response, color);
+            egui::Popup::menu(&response).show(|ui| {
+                ui.set_min_width(220.0);
+                for a in &targets {
+                    if ui.button(tr!("Seguir con «{p0}»", p0 = a.name)).clicked() {
+                        actions.push(HeaderAction::Handoff(a.id));
+                    }
+                }
+            });
         }
 
         // Varias terminales y panel estrecho: "2/3 ▾" con la lista (ancho: a la derecha).
@@ -2504,5 +2721,67 @@ mod agent_tests {
             assert!(Instant::now() < deadline, "no se reanudó: {:?}", agent.cwd);
             std::thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// Pasar la conversación a otra cuenta: se copia a su carpeta y se reanuda allí en el
+    /// mismo hueco; la terminal anterior se cierra.
+    #[test]
+    fn handoff_moves_the_conversation_to_the_other_account() {
+        let base = std::env::temp_dir().join(format!("forge-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("proyecto/.forge")).unwrap();
+        let dir = base.join("proyecto").canonicalize().unwrap();
+        // Un "claude" que no hace nada: lo que importa es la cuenta y el comando.
+        std::fs::write(
+            dir.join(".forge/agents.toml"),
+            "[[agents]]\nid = \"claude\"\nname = \"Claude Code\"\ncommand = \"claude --version >/dev/null 2>&1; sleep 30\"\n",
+        )
+        .unwrap();
+        let account = |id: i64, name: &str| Account {
+            id,
+            program: "claude".into(),
+            name: name.into(),
+            dir: Some(base.join(format!("claude-{id}"))),
+        };
+        let accounts = vec![account(1, "Personal"), account(2, "Trabajo")];
+        let chosen = |id: i64| HashMap::from([("claude".to_string(), id)]);
+        // La conversación de la cuenta 1 en esta carpeta.
+        let sessions = base.join("claude-1/projects").join(
+            dir.to_string_lossy()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>(),
+        );
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(
+            sessions.join("abc.jsonl"),
+            "{\"type\":\"user\",\"entrypoint\":\"cli\"}\n",
+        )
+        .unwrap();
+
+        let ctx = egui::Context::default();
+        let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        let mut ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), None);
+        ws.set_accounts(accounts, chosen(1));
+        ws.agent_click(&ctx, "claude", true, area);
+        let old = ws.agent_panels("claude")[0];
+        assert_eq!(ws.panels[&old].account, Some(1));
+        assert_eq!(ws.handoff_targets(old).len(), 1);
+
+        ws.set_accounts(ws.accounts.clone(), chosen(2));
+        ws.handoff(&ctx, old).unwrap();
+        assert!(!ws.panels.contains_key(&old), "la anterior se cierra");
+        let new = ws.agent_panels("claude")[0];
+        let panel = &ws.panels[&new];
+        assert_eq!(panel.account, Some(2));
+        assert_eq!(panel.name.as_deref(), Some("Claude Code · Trabajo"));
+        assert!(
+            base.join("claude-2/projects")
+                .join(sessions.file_name().unwrap())
+                .join("abc.jsonl")
+                .is_file(),
+            "la conversación está en la otra cuenta"
+        );
+        let _ = std::fs::remove_dir_all(base);
     }
 }
