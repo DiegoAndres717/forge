@@ -39,7 +39,7 @@ Cuando trabajas con Claude Code, Codex u OpenCode, el día se reparte entre pest
 <td width="50%">
 
 ### Workspaces
-Terminales reales con divisiones, foco por teclado, búsqueda (`⌘F`) e historial que sobrevive a los reinicios. ⌘-clic abre enlaces. Procesos administrados (`dev`, `api`…) con reinicio, puertos detectados y health checks.
+Terminales reales **al estilo VS Code**: varias en un mismo panel (**+** o `⌘T`), cambias desde la lista lateral (`⌘⇧]` / `⌘⇧[`), las reordenas arrastrando y ves cuáles escribieron algo mientras estaban ocultas. Divisiones que se giran, foco por teclado, búsqueda (`⌘F`), sugerencias de carpetas al escribir e historial que sobrevive a los reinicios. ⌘-clic abre enlaces, aunque estén partidos. Procesos administrados (`dev`, `api`…) con reinicio, puertos detectados y health checks. Todas las acciones están también en la **barra de menús de macOS** con su atajo.
 
 </td>
 </tr>
@@ -148,7 +148,8 @@ Cualquier `claude` que se ejecute en una terminal de Forge (escrito a mano, `cla
 | `⌘O` | Abrir carpeta | `⌘⇧M` / `⌘⇧I` | Memoria / Planes |
 | `⌘1`…`⌘9` | Cambiar de proyecto | `⌘⇧A` | Abrir agente |
 | `⌃Tab` | Proyecto reciente | `⌘F` | Buscar en la terminal |
-| `⌘T` | Nueva terminal | `⌘B` | Mostrar/ocultar barra lateral |
+| `⌘T` | Nueva terminal (en el panel) | `⌘B` | Mostrar/ocultar barra lateral |
+| `⌘⇧]` `⌘⇧[` | Terminal siguiente / anterior | `⌘]` `⌘[` | Panel siguiente / anterior |
 | `⌘D` / `⌘⇧D` | Dividir a la derecha / abajo | `⌘⇧H` | Inicio |
 | `⌘⌥←` `⌘⌥→` | Mover el foco | `⌘,` | Ajustes |
 

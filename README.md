@@ -39,7 +39,7 @@ When you work with Claude Code, Codex or OpenCode, your day is scattered across 
 <td width="50%">
 
 ### Workspaces
-Real terminals with splits, keyboard focus, scrollback search (`⌘F`) and history that survives restarts. ⌘-click opens links. Managed processes (`dev`, `api`…) with restart, detected ports and health checks.
+Real terminals, **VS Code–style**: stack several in one panel (**+** or `⌘T`), switch from the side list (`⌘⇧]` / `⌘⇧[`), drag to reorder, and see which hidden ones printed something. Splits you can rotate, keyboard focus, scrollback search (`⌘F`), folder suggestions as you type and history that survives restarts. ⌘-click opens links, even wrapped ones. Managed processes (`dev`, `api`…) with restart, detected ports and health checks. Every action also lives in the **macOS menu bar** with its shortcut.
 
 </td>
 </tr>
@@ -146,7 +146,8 @@ Any `claude` started inside a Forge terminal — typed by hand, `claude --resume
 | `⌘O` | Open folder | `⌘⇧M` / `⌘⇧I` | Memory / Plans |
 | `⌘1`…`⌘9` | Switch project | `⌘⇧A` | Open agent |
 | `⌃Tab` | Recent project | `⌘F` | Search in terminal |
-| `⌘T` | New terminal | `⌘B` | Toggle sidebar |
+| `⌘T` | New terminal (same panel) | `⌘B` | Toggle sidebar |
+| `⌘⇧]` `⌘⇧[` | Next / previous terminal | `⌘]` `⌘[` | Next / previous panel |
 | `⌘D` / `⌘⇧D` | Split right / down | `⌘⇧H` | Home |
 | `⌘⌥←` `⌘⌥→` | Move focus | `⌘,` | Settings |
 
