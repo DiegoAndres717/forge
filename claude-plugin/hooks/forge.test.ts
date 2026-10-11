@@ -329,12 +329,27 @@ test('the main loop gets one nudge to delegate after several reads in a row', as
     const r = (await read()) as { context?: readonly string[] }
     nudges.push((r.context ?? []).filter(c => c.includes('forge:explorer')).length)
   }
-  expect(nudges).toEqual([0, 0, 0, 1, 0, 0])
+  expect(nudges).toEqual([0, 0, 1, 0, 0, 0])
   // A subagent reading is what it is for: no nudge.
   for (let i = 0; i < 5; i++) {
     const r = (await read('a1')) as { context?: readonly string[] }
     expect((r.context ?? []).length).toBe(0)
   }
+})
+
+test('shell searches count as exploring, other commands reset the streak', async ($, on) => {
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  const bash = async (command: string) => {
+    const r = (await $.tool.call({ tool: 'Bash', command } as never)) as { context?: readonly string[] }
+    return (r.context ?? []).filter(c => c.includes('forge:explorer')).length
+  }
+  expect(await bash('cargo test')).toBe(0)
+  expect(await bash('rg -n "fn main" src')).toBe(0)
+  expect(await bash("sed -n '1,80p' src/main.rs")).toBe(0)
+  expect(await bash('cd crates && grep -rn Store .')).toBe(1)
+  // Building resets the streak: three more searches before the next nudge.
+  expect(await bash('cargo build')).toBe(0)
+  expect(await bash('cat README.md')).toBe(0)
 })
 
 test('the band warns when the context is getting full', async ($, on) => {

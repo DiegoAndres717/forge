@@ -62,12 +62,18 @@ impl Modes {
 /// Lo que se le pide al agente al conectarse. En inglés siempre: es para el agente.
 pub const TESTS_FIRST: &str = "Tests-first mode: for every behavior change or bug fix, first write a test that fails for the right reason and run it to see it fail, then write the smallest code that makes it pass, run it again to see it pass, and only then refactor. Say which test you added and show both runs. Skip it only for changes with nothing to test (docs, config, styling) and say so.";
 
+/// Medido en sesiones reales: buscar y leer código es el 8–13 % de toda la entrada, porque
+/// cada resultado se relee en cada turno. Un subagente lo deja fuera del contexto.
+pub const DELEGATE: &str = "Saving tokens: when understanding something will take more than two searches or file reads (shell ones included: rg, grep, find, cat, sed -n), hand the exploration to a subagent on a cheaper model if your tool has one, and keep only its short answer with paths. Everything you read stays in your context and is re-read on every later turn.";
+
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
 fn instructions(modes: Modes) -> String {
     let mut out = String::from(
         "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress, tick tasks as you finish them and mark the phase done at the end.",
     );
+    out.push_str("\n\n");
+    out.push_str(DELEGATE);
     for (on, text) in [
         (modes.ask_first, ASK_FIRST),
         (modes.tests_first, TESTS_FIRST),
@@ -1008,6 +1014,7 @@ mod tests {
     #[test]
     fn modes_add_their_instructions() {
         let plain = instructions(Modes::default());
+        assert!(plain.contains("subagent on a cheaper model"));
         assert!(!plain.contains("up to three questions") && !plain.contains("Tests-first"));
         let ask = Modes {
             ask_first: true,

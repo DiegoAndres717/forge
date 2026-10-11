@@ -143,7 +143,7 @@ forge help
 
 Any `claude` started inside a Forge terminal — typed by hand, `claude --resume`, `claude -c` or opened from the sidebar — loads Forge's mod automatically. Nothing is installed into your Claude config and nothing is added to your repo; outside Forge, Claude behaves as usual.
 
-- **Cheaper subagents** — `forge:explorer` (Haiku) searches and reads code, `forge:reviewer` (Sonnet) runs tests and reviews, `forge:architect` (Opus) takes the hard problems. The main model delegates and keeps its context and cache.
+- **Cheaper subagents** — `forge:explorer` (Haiku) searches and reads code, `forge:reviewer` (Sonnet) runs tests and reviews, `forge:architect` (Opus) takes the hard problems. The main model delegates and keeps its context and cache: after three searches or reads in a row (shell `rg`/`grep`/`cat` included) Forge reminds it to hand the rest to the explorer. Other agents get the same advice over MCP.
 - **Live status band** above the prompt — Guard status, plans in progress and backlog, the model working right now (● opus / ↳ explorer: … (haiku)), session tokens (new vs. cached) and your plan usage bars (5h and weekly).
 - **Usage per model** — every turn, subagents included, is recorded; see it in Settings.
 - **Starts with your project in mind** — every conversation (and every one after compaction or `/clear`) begins with the project's key decisions, conventions, Guard rules and plans in progress.
@@ -236,6 +236,7 @@ Open an [issue](https://github.com/DiegoAndres717/forge/issues) with what you di
 cargo test --workspace                                  # unit, integration and UI end-to-end
 cargo clippy --workspace --all-targets -- -D warnings
 FORGE_PREVIEW_DIR=/tmp/forge cargo test --release --bin forge ui_preview -- --ignored   # screenshots
+scripts/measure-exploration.py --since 2026-10-01      # share of Claude Code's input spent exploring code
 ```
 
 ```text
