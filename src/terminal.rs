@@ -22,6 +22,91 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
+/// Primer argumento de `forge` que lo convierte en el trampolín de una terminal.
+pub const DISCLAIM: &str = "--disclaim";
+
+/// macOS pide los permisos (Fotos, Música, Documentos…) a nombre del «responsable» del
+/// proceso, y un hijo de Forge lo hereda: sin esto, lo que haga `codex` o `zsh` en una
+/// terminal sale como «Forge quiere acceder…» y el permiso se le da a todo Forge. Cada
+/// terminal arranca como `forge --disclaim <programa> <argv0> [args…]`, que lo deja
+/// responsable de sí mismo (ver `disclaim_exec`).
+fn disclaimed(cmd: CommandBuilder) -> CommandBuilder {
+    // En los tests el ejecutable no es `forge`: sin trampolín.
+    let Some(exe) = std::env::current_exe().ok().filter(|_| !cfg!(test)) else {
+        return cmd;
+    };
+    let mut argv: Vec<std::ffi::OsString> = vec![DISCLAIM.into()];
+    if cmd.is_default_prog() {
+        // Shell de login, como lo abre portable-pty: argv0 «-zsh».
+        let shell = cmd.get_shell();
+        let name = Path::new(&shell)
+            .file_name()
+            .map_or_else(|| shell.clone(), |n| n.to_string_lossy().into_owned());
+        argv.extend([shell.into(), format!("-{name}").into()]);
+    } else {
+        let args = cmd.get_argv();
+        argv.extend(args.first().cloned());
+        argv.extend(args.iter().cloned());
+    }
+    let mut out = CommandBuilder::new(exe);
+    out.args(argv);
+    out
+}
+
+/// `forge --disclaim <programa> <argv0> [args…]`: se convierte en el programa (mismo
+/// proceso: pid, terminal de control y descriptores) con `posix_spawn` + SETEXEC,
+/// renunciando a la responsabilidad. Solo vuelve si no pudo: sale con 127.
+pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let cstr = |a: &std::ffi::OsString| CString::new(a.as_bytes()).unwrap_or_default();
+    let Some(program) = args.first().map(cstr) else {
+        std::process::exit(127);
+    };
+    let argv: Vec<CString> = args[1..].iter().map(cstr).collect();
+    let mut ptrs: Vec<*mut libc::c_char> = argv.iter().map(|a| a.as_ptr().cast_mut()).collect();
+    ptrs.push(std::ptr::null_mut());
+    // SAFETY: atributos inicializados aquí; los punteros viven hasta el exec.
+    let err = unsafe {
+        let mut attr: libc::posix_spawnattr_t = std::ptr::null_mut();
+        libc::posix_spawnattr_init(&mut attr);
+        // Señales como las espera un shell: Rust ignora SIGPIPE y eso se heredaría.
+        let mut all: libc::sigset_t = std::mem::zeroed();
+        let mut none: libc::sigset_t = std::mem::zeroed();
+        libc::sigfillset(&mut all);
+        libc::sigemptyset(&mut none);
+        libc::posix_spawnattr_setsigdefault(&mut attr, &all);
+        libc::posix_spawnattr_setsigmask(&mut attr, &none);
+        let flags =
+            libc::POSIX_SPAWN_SETEXEC | libc::POSIX_SPAWN_SETSIGDEF | libc::POSIX_SPAWN_SETSIGMASK;
+        libc::posix_spawnattr_setflags(&mut attr, flags as libc::c_short);
+        // API privada de libSystem (la usan LLDB y Qt Creator); si faltara, se abre igual.
+        let sym = libc::dlsym(
+            libc::RTLD_DEFAULT,
+            c"responsibility_spawnattrs_setdisclaim".as_ptr(),
+        );
+        if !sym.is_null() {
+            let disclaim: extern "C" fn(*mut libc::posix_spawnattr_t, libc::c_int) -> libc::c_int =
+                std::mem::transmute(sym);
+            disclaim(&mut attr, 1);
+        }
+        libc::posix_spawnp(
+            std::ptr::null_mut(),
+            program.as_ptr(),
+            std::ptr::null(),
+            &attr,
+            ptrs.as_ptr(),
+            *libc::_NSGetEnviron(),
+        )
+    };
+    eprintln!(
+        "forge: {}: {}",
+        program.to_string_lossy(),
+        std::io::Error::from_raw_os_error(err)
+    );
+    std::process::exit(127)
+}
+
 /// Eventos del terminal que la UI debe atender en su hilo.
 enum UiEvent {
     Title(String),
@@ -165,9 +250,10 @@ impl Terminal {
         ctx: &egui::Context,
         cwd: &Path,
         env: &HashMap<String, String>,
-        mut cmd: CommandBuilder,
+        cmd: CommandBuilder,
         input: Option<&str>,
     ) -> SpawnResult {
+        let mut cmd = disclaimed(cmd);
         let size = Size { cols: 80, rows: 24 };
         let pair = native_pty_system().openpty(pty_size(size))?;
 

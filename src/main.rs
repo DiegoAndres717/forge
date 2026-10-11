@@ -187,6 +187,11 @@ fn main() -> eframe::Result {
     {
         forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
     }
+    // Trampolín de cada terminal: se convierte en su shell (antes de cargar nada).
+    let raw: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    if raw.first().is_some_and(|a| a == terminal::DISCLAIM) {
+        terminal::disclaim_exec(&raw[1..]);
+    }
     // Idioma: el guardado por el usuario; si no, inglés.
     forge_core::i18n::init_from_store();
     // `forge [carpeta]` abre (o activa) ese proyecto.
