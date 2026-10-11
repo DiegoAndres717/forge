@@ -47,6 +47,32 @@ test('the delegation policy is added to the system prompt', async ($, on) => {
   expect(result.sections.map(s => s.id)).toContain('forge-team')
 })
 
+test('the band brands Forge with its symbol and gradient colors', async ($, on) => {
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  const text = JSON.stringify(await drawn.drawn())
+  expect(text).toContain('◆ ')
+  expect(text).toContain('"error"')
+  expect(text).toContain('"warning"')
+  expect(text).toContain('"success"')
+})
+
+test('a Forge session writes one compact project header', async ($, on) => {
+  mock.env(on, { FORGE_PROJECT: '/work/forge' })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'feat/mod-brand\n', stderr: '' } } as never))
+  let header = ''
+  on('ui.log', async ($, e, next) => {
+    header = e.text
+    return next(e)
+  })
+  await $.session.start({ cwd: '/work/forge', surface: 'terminal', isInteractive: true })
+  expect(header).toBe('◆ Forge · forge · feat/mod-brand')
+})
+
 test('the band shows new and cached tokens by model', async ($, on) => {
   on('turn.complete', ($, e) => ({ text: e.answer })) // the engine's side of the event
   // Two finished turns: the main loop on Opus and a subagent on Haiku.
