@@ -348,6 +348,19 @@ fn ui_preview() {
     }
     settle(&mut harness);
     save(&mut harness, &out, "6-paleta-guard");
+    if let Some(p) = harness.state_mut().palette.as_mut() {
+        p.query = "editor".into();
+    }
+    settle(&mut harness);
+    save(&mut harness, &out, "6b-paleta-editor");
+    harness.state_mut().palette = None;
+    settle(&mut harness);
+    // Clic derecho en el proyecto: abrirlo en el editor instalado.
+    harness.get_by_label("Acme Store").click_secondary();
+    settle(&mut harness);
+    save(&mut harness, &out, "19-abrir-en-editor");
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
     harness.state_mut().palette = None;
 
     // Diálogo de comando peligroso.

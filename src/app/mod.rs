@@ -27,6 +27,7 @@ const GUARD_WIDTH: f32 = 440.0;
 
 mod approvals;
 mod chrome;
+mod editors;
 mod git_panel;
 mod guard_form;
 mod guard_panel;
@@ -78,6 +79,8 @@ pub enum Action {
     Switch(usize),
     OpenFolder,
     CloseProject,
+    /// Abre el proyecto activo en el editor preferido (⌘⇧E).
+    OpenInEditor,
     ToggleSidebar,
     ToggleGuard,
     OpenDefaultAgent,
@@ -118,6 +121,7 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
         (Key::D, false, false) => Action::Ws(WsAction::Split(Dir::Row)),
         (Key::T, false, false) => Action::Ws(WsAction::NewTerminal),
         (Key::W, true, false) => Action::CloseProject,
+        (Key::E, true, false) => Action::OpenInEditor,
         (Key::W, false, false) => Action::Ws(WsAction::Close),
         (Key::Enter, false, false) => Action::Ws(WsAction::ToggleMaximize),
         // ⌘⌥flechas (como iTerm): ⌥flechas sola mueve por palabras en el shell.
@@ -176,6 +180,8 @@ enum UiCmd {
     /// Duerme el proyecto: cierra sus terminales y procesos y conserva el layout.
     Sleep(usize),
     OpenFolder,
+    /// Abre un proyecto en un editor (bundle id; `None` = el preferido).
+    OpenInEditor(usize, Option<&'static str>),
     Open(PathBuf),
     Forget(PathBuf),
     RunCommand(SavedCommand),
@@ -626,6 +632,11 @@ impl App {
                     cmds.push(UiCmd::Close(i));
                 }
             }
+            Action::OpenInEditor => {
+                if let Some(i) = self.active {
+                    cmds.push(UiCmd::OpenInEditor(i, None));
+                }
+            }
             Action::ToggleSidebar => self.sidebar = !self.sidebar,
             Action::ToggleGuard => cmds.push(UiCmd::ToggleGuard),
             Action::OpenDefaultAgent => cmds.push(UiCmd::OpenDefaultAgent),
@@ -663,6 +674,24 @@ impl App {
             UiCmd::CheckUpdates => self.check_updates(ctx, true),
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
+            UiCmd::OpenInEditor(i, bundle) => {
+                let Some(ws) = self.workspaces.get(i) else {
+                    return;
+                };
+                let editors = editors::installed();
+                let bundle =
+                    bundle.or(editors::preferred(self.store.as_ref(), editors).map(|e| e.1));
+                let Some(bundle) = bundle else {
+                    self.error = Some(
+                        tr!("No hay ningún editor instalado (VS Code, Cursor, Antigravity, Zed…)")
+                            .into(),
+                    );
+                    return;
+                };
+                if let Err(e) = editors::open(self.store.as_ref(), bundle, &ws.project.root()) {
+                    self.error = Some(e);
+                }
+            }
             UiCmd::OpenSettings => self.settings_open = true,
             UiCmd::OpenSettingsTab(tab) => {
                 settings::show_tab(ctx, tab);

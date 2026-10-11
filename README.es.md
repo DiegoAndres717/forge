@@ -178,6 +178,7 @@ Escribe lo que necesita el comando justo después: `/forge-remember cobramos con
 | `⌘⇧]` `⌘⇧[` | Terminal siguiente / anterior | `⌘]` `⌘[` | Panel siguiente / anterior |
 | `⌘D` / `⌘⇧D` | Dividir a la derecha / abajo | `⌘⇧H` | Inicio |
 | `⌘⌥←` `⌘⌥→` | Mover el foco | `⌘,` | Ajustes |
+| `⌘⇧E` | Abrir el proyecto en tu editor (VS Code, Cursor, Antigravity, Zed…; también con clic derecho en el proyecto) | | |
 
 ## Configuración
 
