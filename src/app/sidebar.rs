@@ -424,6 +424,22 @@ impl App {
                         cmds.push(UiCmd::OpenAgent(agent.id.clone(), true));
                     }
                 }
+                // Seguir la última conversación de este agente en otro (con un resumen).
+                if session.is_some() {
+                    for to in ws.agent_handoff_targets(&agent.id) {
+                        if ui
+                            .button(tr!(
+                                "{p0}  Seguir la conversación en {p1}",
+                                p0 = icon::ARROW_SQUARE_OUT,
+                                p1 = to.name
+                            ))
+                            .on_hover_text(tr!("Abre {p0} con un resumen de la última conversación (lo hecho, lo pendiente y los archivos tocados)", p0 = to.name))
+                            .clicked()
+                        {
+                            cmds.push(UiCmd::AgentHandoff(agent.id.clone(), to.id.clone()));
+                        }
+                    }
+                }
                 if forge_core::accounts::supported(agent.program()) {
                     ui.separator();
                     let current = ws.account_for(agent.program(), None).map(|a| a.id);

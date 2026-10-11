@@ -286,6 +286,8 @@ enum HeaderAction {
     Handoff(i64),
     /// Cerrar el aviso de límite de la cuenta.
     DismissLimit,
+    /// Seguir la conversación de esta terminal en otro agente (id del agente).
+    AgentHandoff(String),
 }
 
 pub struct Workspace {
@@ -318,6 +320,10 @@ pub struct Workspace {
     /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
     /// atiende la app (elige la cuenta en el proyecto y llama a `handoff`).
     pub handoff_request: Option<(PanelId, i64)>,
+    /// Seguir la conversación de un agente en otro: (agente de origen, agente de destino).
+    pub agent_handoff_request: Option<(String, String)>,
+    /// Programas de agente instalados (los pone la app cada fotograma).
+    pub installed: Vec<String>,
     /// Último error (p. ej. no se pudo abrir un shell); la app lo muestra y lo limpia.
     pub error: Option<String>,
     /// Dormido: sin terminales ni procesos; guarda el estado para restaurarlo al despertar.
@@ -388,6 +394,8 @@ impl Workspace {
             launch: HashMap::new(),
             limited: Vec::new(),
             handoff_request: None,
+            agent_handoff_request: None,
+            installed: Vec::new(),
             error: None,
             dormant: None,
             seen: Instant::now(),
@@ -541,6 +549,53 @@ impl Workspace {
         let agent = self.panels.get(&panel)?.agent.as_ref()?;
         let spec = self.project.agents.iter().find(|s| &s.id == agent)?;
         Some(spec.program().to_string())
+    }
+
+    /// Agentes a los que se puede pasar la conversación de `from`: los otros activos e
+    /// instalados que pueden empezar con un mensaje.
+    pub fn agent_handoff_targets(&self, from: &str) -> Vec<AgentSpec> {
+        self.project
+            .agents
+            .iter()
+            .filter(|a| a.enabled && a.id != from)
+            .filter(|a| self.installed.iter().any(|p| p == a.program()))
+            .filter(|a| a.with_prompt(&a.command, "x").is_some())
+            .cloned()
+            .collect()
+    }
+
+    /// Abre `to` con un resumen de la última conversación de `from` en el proyecto como
+    /// primer mensaje (lo hecho, lo pendiente, los archivos tocados…).
+    pub fn handoff_agent(
+        &mut self,
+        ctx: &egui::Context,
+        from: &str,
+        to: &str,
+        area: Rect,
+    ) -> Result<(), String> {
+        let find = |id: &str| self.project.agents.iter().find(|a| a.id == id).cloned();
+        let (Some(from), Some(to)) = (find(from), find(to)) else {
+            return Ok(());
+        };
+        let dir = self
+            .account_for(from.program(), None)
+            .and_then(|a| a.dir.clone());
+        let brief = forge_core::sessions::handoff_brief(
+            from.program(),
+            &self.project.root(),
+            dir.as_deref(),
+        )
+        .ok_or_else(|| {
+            tr!(
+                "No hay ninguna conversación de {name} en este proyecto.",
+                name = from.name
+            )
+        })?;
+        let command = to
+            .with_prompt(&to.command, &brief)
+            .ok_or_else(|| tr!("{name} no admite empezar con un mensaje.", name = to.name))?;
+        self.open_agent_with(ctx, &to, command, area);
+        Ok(())
     }
 
     /// Otras cuentas a las que puede pasar la conversación de una terminal de agente.
@@ -1811,6 +1866,11 @@ impl Workspace {
             match action {
                 HeaderAction::Close => self.close(id),
                 HeaderAction::Handoff(account) => self.handoff_request = Some((id, account)),
+                HeaderAction::AgentHandoff(to) => {
+                    if let Some(from) = self.panels.get(&id).and_then(|p| p.agent.clone()) {
+                        self.agent_handoff_request = Some((from, to));
+                    }
+                }
                 HeaderAction::DismissLimit => self.limited.retain(|p| *p != id),
                 HeaderAction::Maximize => {
                     self.focus = id;
@@ -2099,10 +2159,26 @@ impl Workspace {
             .color(theme::ORANGE),
         );
         let targets = self.handoff_targets(id);
-        if targets.is_empty() {
+        // Otros agentes (p. ej. Codex), con un resumen de esta conversación.
+        let agents = self
+            .panels
+            .get(&id)
+            .and_then(|p| p.agent.clone())
+            .map(|from| self.agent_handoff_targets(&from))
+            .unwrap_or_default();
+        if targets.is_empty() && agents.is_empty() {
             child.label(
                 egui::RichText::new(tr!("Añade otra en Ajustes → Cuentas.")).color(theme::TEXT_3),
             );
+        }
+        for a in &agents {
+            if child
+                .button(tr!("Seguir en {p0}", p0 = a.name))
+                .on_hover_text(tr!("Abre {p0} con un resumen de esta conversación (lo hecho, lo pendiente y los archivos tocados)", p0 = a.name))
+                .clicked()
+            {
+                actions.push(HeaderAction::AgentHandoff(a.id.clone()));
+            }
         }
         for a in &targets {
             if child
@@ -2826,5 +2902,59 @@ mod agent_tests {
         ws.set_ask_first(true);
         assert!(args(&ws).contains(&"--ask-first".to_string()));
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Seguir en otro agente: abre el destino (con su resumen como primer mensaje) y, si
+    /// no hay conversación de la que partir, lo dice en vez de abrir nada.
+    #[test]
+    fn handoff_to_another_agent_opens_it_with_a_brief() {
+        let base = std::env::temp_dir().join(format!("forge-agent-handoff-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("proyecto/.forge")).unwrap();
+        let dir = base.join("proyecto").canonicalize().unwrap();
+        std::fs::write(
+            dir.join(".forge/agents.toml"),
+            "[[agents]]\nid = \"claude\"\ncommand = \"claude --version >/dev/null 2>&1; sleep 30\"\n\n[[agents]]\nid = \"fake\"\nname = \"Otro\"\ncommand = \"sleep 30\"\n",
+        )
+        .unwrap();
+        let ctx = egui::Context::default();
+        let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+        let mut ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), None);
+        // La cuenta de Claude en una carpeta propia, con una conversación en el proyecto.
+        let account = Account {
+            id: 1,
+            program: "claude".into(),
+            name: "Trabajo".into(),
+            dir: Some(base.join("claude-1")),
+        };
+        ws.set_accounts(vec![account], HashMap::from([("claude".to_string(), 1)]));
+        ws.installed = vec!["claude".into(), "sleep".into()];
+        assert_eq!(
+            ws.agent_handoff_targets("claude")
+                .iter()
+                .map(|a| a.id.as_str())
+                .collect::<Vec<_>>(),
+            ["fake"]
+        );
+        assert!(
+            ws.handoff_agent(&ctx, "claude", "fake", area).is_err(),
+            "sin conversación"
+        );
+        assert!(ws.agent_panels("fake").is_empty());
+        let sessions = base.join("claude-1/projects").join(
+            dir.to_string_lossy()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>(),
+        );
+        std::fs::create_dir_all(&sessions).unwrap();
+        std::fs::write(
+            sessions.join("s.jsonl"),
+            "{\"type\":\"user\",\"entrypoint\":\"cli\",\"message\":{\"content\":\"Haz los recibos\"}}\n",
+        )
+        .unwrap();
+        ws.handoff_agent(&ctx, "claude", "fake", area).unwrap();
+        assert_eq!(ws.agent_panels("fake").len(), 1, "se abre el otro agente");
+        let _ = std::fs::remove_dir_all(base);
     }
 }

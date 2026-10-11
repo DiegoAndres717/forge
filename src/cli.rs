@@ -233,6 +233,20 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
+        // Resumen para seguir en otro agente la última conversación de uno (por defecto Claude).
+        (Some("handoff"), from) => {
+            let program = from.unwrap_or("claude");
+            match forge_core::sessions::handoff_brief(program, &project, None) {
+                Some(brief) => {
+                    println!("{brief}");
+                    Ok(0)
+                }
+                None => Err(tr!(
+                    "no hay ninguna conversación de {p0} en este proyecto",
+                    p0 = program
+                )),
+            }
+        }
         // Contexto del proyecto para el primer mensaje de cada conversación (mod de Claude).
         (Some("context"), _) => open_store().map(|store| {
             let text = forge_core::mcp::project_context(&project, &store);

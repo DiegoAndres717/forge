@@ -240,6 +240,8 @@ enum UiCmd {
     AccountLogin(String, i64),
     /// Sigue la conversación de una terminal de agente con otra cuenta: (terminal, cuenta).
     Handoff(crate::layout::PanelId, i64),
+    /// Sigue en otro agente la última conversación de uno: (origen, destino).
+    AgentHandoff(String, String),
     OpenDefaultAgent,
     DetectAgents,
     GuardRun,
@@ -767,6 +769,13 @@ impl App {
                     if let Err(e) = self.workspaces[i].handoff(ctx, panel) {
                         self.error = Some(e);
                     }
+                }
+            }
+            UiCmd::AgentHandoff(from, to) => {
+                if let Some(i) = self.active
+                    && let Err(e) = self.workspaces[i].handoff_agent(ctx, &from, &to, area)
+                {
+                    self.error = Some(e);
                 }
             }
             UiCmd::AccountLogin(program, id) => {
@@ -1325,7 +1334,18 @@ impl eframe::App for App {
                     self.mru.retain(|p| p != &path);
                     self.mru.insert(0, path);
                 }
+                let installed: Vec<String> = self
+                    .agents
+                    .lock()
+                    .map(|d| {
+                        d.iter()
+                            .filter(|(_, v)| v.path.is_some())
+                            .map(|(k, _)| k.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 let ws = &mut self.workspaces[i];
+                ws.installed = installed;
                 ws.ui(
                     ui,
                     area,
@@ -1338,6 +1358,9 @@ impl eframe::App for App {
                 }
                 if let Some((panel, account)) = ws.handoff_request.take() {
                     cmds.push(UiCmd::Handoff(panel, account));
+                }
+                if let Some((from, to)) = ws.agent_handoff_request.take() {
+                    cmds.push(UiCmd::AgentHandoff(from, to));
                 }
                 if ws.is_empty() && !ws.is_dormant() {
                     cmds.push(UiCmd::Close(i));
