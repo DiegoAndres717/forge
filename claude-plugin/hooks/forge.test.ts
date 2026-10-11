@@ -99,6 +99,19 @@ test('ask first adds its instruction only when it is on', async ($, on) => {
   const ids = (await compose()).sections.map(s => s.id)
   expect(ids).toContain('forge-ask-first')
   expect(ids).toContain('forge-team')
+  expect(ids).not.toContain('forge-tests-first')
+})
+
+test('tests first adds its instruction only when it is on', async ($, on) => {
+  on('prompt.compose', () => ({ sections: [] }))
+  mock.env(on, { FORGE_TESTS_FIRST: '1' })
+  const result = await $.prompt.compose({
+    model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: ['terminal'],
+    tools: [], outputStyle: null, traits: [],
+  })
+  const section = result.sections.find(s => s.id === 'forge-tests-first')
+  expect(section?.text).toContain('fails for the right reason')
+  expect(result.sections.map(s => s.id)).not.toContain('forge-ask-first')
 })
 
 test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {

@@ -394,8 +394,8 @@ pub struct Workspace {
     /// Último aviso visto: se mantiene hasta entrar al proyecto (sin parpadeos si el
     /// agente redibuja su pantalla mientras espera).
     sticky: Option<Attention>,
-    /// Los agentes nuevos de este workspace preguntan antes de planificar.
-    ask_first: bool,
+    /// Modos de Ajustes para los agentes nuevos («Primero pregunta», «Primero el test»).
+    modes: forge_core::mcp::Modes,
 }
 
 impl Workspace {
@@ -456,7 +456,7 @@ impl Workspace {
             history_saved: HashMap::new(),
             notified: Vec::new(),
             sticky: None,
-            ask_first: false,
+            modes: Default::default(),
         }
     }
 
@@ -814,9 +814,9 @@ impl Workspace {
         self.project = project;
     }
 
-    /// Aplica el ajuste global a las terminales de agente que se abran después.
-    pub fn set_ask_first(&mut self, ask_first: bool) {
-        self.ask_first = ask_first;
+    /// Aplica los modos a las terminales de agente que se abran después.
+    pub fn set_modes(&mut self, modes: forge_core::mcp::Modes) {
+        self.modes = modes;
     }
 
     fn insert(&mut self, id: PanelId, panel: Panel) {
@@ -855,8 +855,11 @@ impl Workspace {
             "FORGE_PROJECT".into(),
             self.project.path.to_string_lossy().into_owned(),
         );
-        if self.ask_first {
+        if self.modes.ask_first {
             env.insert("FORGE_ASK_FIRST".into(), "1".into());
+        }
+        if self.modes.tests_first {
+            env.insert("FORGE_TESTS_FIRST".into(), "1".into());
         }
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
@@ -956,7 +959,7 @@ impl Workspace {
                         self.project.path.to_string_lossy().into_owned(),
                     ]
                     .into_iter()
-                    .chain(self.ask_first.then(|| "--ask-first".to_string()))
+                    .chain(self.modes.args())
                     .collect(),
                 })
             }
@@ -2941,17 +2944,21 @@ mod agent_tests {
         let _ = std::fs::remove_dir_all(base);
     }
 
-    /// «Primero pregunta» llega al servidor MCP como argumento: algunos agentes (Codex)
-    /// no le pasan el entorno de la terminal.
+    /// Los modos llegan al servidor MCP como argumentos: algunos agentes (Codex) no le
+    /// pasan el entorno de la terminal.
     #[test]
-    fn ask_first_reaches_the_mcp_server_as_an_argument() {
+    fn modes_reach_the_mcp_server_as_arguments() {
         let dir = std::env::temp_dir().join(format!("forge-askfirst-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut ws = Workspace::new(Project::load(&dir).unwrap());
         let args = |ws: &Workspace| ws.mcp_server().unwrap().args;
         assert!(!args(&ws).contains(&"--ask-first".to_string()));
-        ws.set_ask_first(true);
+        ws.set_modes(forge_core::mcp::Modes {
+            ask_first: true,
+            tests_first: true,
+        });
         assert!(args(&ws).contains(&"--ask-first".to_string()));
+        assert!(args(&ws).contains(&"--tests-first".to_string()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

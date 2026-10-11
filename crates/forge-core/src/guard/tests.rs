@@ -132,6 +132,57 @@ mod unit {
     }
 
     #[test]
+    fn untested_code_warns_only_when_asked() {
+        let file = |path: &str| FileChange {
+            path: path.into(),
+            added: 3,
+            deleted: 0,
+            binary: false,
+            removed: false,
+        };
+        let level = |toml_text: &str, files: &[&str], lines: &[&str]| {
+            let diff = Diff {
+                files: files.iter().map(|p| file(p)).collect(),
+                added_lines: lines
+                    .iter()
+                    .map(|l| (files[0].to_string(), 1, l.to_string()))
+                    .collect(),
+                ..Default::default()
+            };
+            evaluate(&rules(toml_text), Stage::Commit, &diff)
+                .into_iter()
+                .find(|i| i.id == "untested")
+                .map(|i| i.level)
+        };
+        let on = "[quality]\nwarn_untested_code = true\n";
+        // Apagado (por defecto): ni aparece.
+        assert_eq!(level("", &["src/a.rs"], &[]), None);
+        assert_eq!(level(on, &["src/a.rs"], &[]), Some(Level::Warn));
+        // Con un archivo de tests, o un test nuevo en el mismo archivo (Rust), pasa.
+        assert_eq!(
+            level(on, &["src/cart.ts", "src/cart.test.ts"], &[]),
+            Some(Level::Pass)
+        );
+        assert_eq!(
+            level(on, &["src/pay.go", "src/pay_test.go"], &[]),
+            Some(Level::Pass)
+        );
+        assert_eq!(
+            level(on, &["src/a.rs"], &["    #[test]"]),
+            Some(Level::Pass)
+        );
+        assert_eq!(
+            level(on, &["src/a.py", "tests/test_a.py"], &[]),
+            Some(Level::Pass)
+        );
+        // Solo documentación o configuración: no pide tests.
+        assert_eq!(
+            level(on, &["README.md", "Cargo.toml"], &[]),
+            Some(Level::Pass)
+        );
+    }
+
+    #[test]
     fn template_round_trips() {
         for (file, content, expected) in [
             ("Cargo.toml", "[package]\nname = \"x\"\n", 4),

@@ -460,10 +460,22 @@ impl App {
             .collect()
     }
 
-    /// Reparte a cada proyecto sus cuentas y el modelo y esfuerzo de sus agentes.
+    /// Modos de trabajo de un proyecto: «Primero pregunta» (general) y «Primero el test»
+    /// (general o del proyecto).
+    fn modes(&self, project: &Path) -> forge_core::mcp::Modes {
+        forge_core::mcp::Modes {
+            ask_first: self.settings.ask_first,
+            tests_first: self.store.as_ref().is_some_and(|s| s.tests_first(project)),
+        }
+    }
+
+    /// Reparte a cada proyecto sus cuentas, el modelo y esfuerzo de sus agentes y sus
+    /// modos de trabajo.
     fn sync_accounts(&mut self) {
         for i in 0..self.workspaces.len() {
             let path = self.workspaces[i].project.path.clone();
+            let modes = self.modes(&path);
+            self.workspaces[i].set_modes(modes);
             let (accounts, chosen) = self.account_state(&path);
             let launch = self.launch_state(&path);
             self.workspaces[i].set_accounts(accounts, chosen);
@@ -505,7 +517,7 @@ impl App {
         let name = project.name();
         self.db(|s| s.touch(&path, &name));
         let mut ws = Workspace::asleep(project, saved);
-        ws.set_ask_first(self.settings.ask_first);
+        ws.set_modes(self.modes(&path));
         let (accounts, chosen) = self.account_state(&path);
         ws.set_accounts(accounts, chosen);
         ws.set_launch(self.launch_state(&path));

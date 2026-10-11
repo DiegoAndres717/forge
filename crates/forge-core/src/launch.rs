@@ -67,6 +67,18 @@ impl Store {
         self.set_setting(&key(program, what, project.as_deref()), value.trim())
     }
 
+    /// Modo «Primero el test» en el proyecto: el suyo («on»/«off») si lo tiene, si no
+    /// el general.
+    pub fn tests_first(&self, project: &Path) -> bool {
+        let own = self.launch_pref("forge", "tests_first", Some(project));
+        let value = if own.is_empty() {
+            self.launch_pref("forge", "tests_first", None)
+        } else {
+            own
+        };
+        value == "on"
+    }
+
     /// Lo que se usa al abrir el agente en el proyecto: lo del proyecto si lo hay, si no
     /// lo general. (modelo, esfuerzo).
     pub fn launch_for(&self, program: &str, project: &Path) -> (String, String) {
@@ -85,6 +97,21 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tests_first_project_overrides_general() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = (Path::new("/p/a"), Path::new("/p/b"));
+        assert!(!store.tests_first(a));
+        store
+            .set_launch_pref("forge", "tests_first", None, "on")
+            .unwrap();
+        store
+            .set_launch_pref("forge", "tests_first", Some(a), "off")
+            .unwrap();
+        assert!(!store.tests_first(a), "el proyecto manda");
+        assert!(store.tests_first(b), "otro proyecto: lo general");
+    }
 
     #[test]
     fn project_overrides_general_and_legacy_model_still_counts() {

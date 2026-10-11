@@ -22,6 +22,8 @@ pub struct Quality {
     pub max_files_changed: usize,
     pub block_secrets: bool,
     pub block_env_files: bool,
+    /// Avisa si el cambio toca código sin tocar ningún test (modo «Primero el test»).
+    pub warn_untested_code: bool,
     /// Archivos que nunca deben entrar al repositorio.
     pub forbidden_files: Vec<String>,
     pub lines: LineRules,
@@ -35,6 +37,7 @@ impl Default for Quality {
             max_files_changed: 50,
             block_secrets: true,
             block_env_files: true,
+            warn_untested_code: false,
             forbidden_files: [
                 "*.pem",
                 "*.key",
@@ -260,7 +263,8 @@ pub(crate) fn template(checks: &[(&str, &str, String)]) -> String {
     let mut out = String::from(
         "# Project Guard: controles antes de commit, push y pull request.\n\n\
          [quality]\nmax_changed_lines = 4000\nwarning_changed_lines = 2000\nmax_files_changed = 50\n\
-         block_secrets = true\nblock_env_files = true\n\n\
+         block_secrets = true\nblock_env_files = true\n\
+         # Avisa si cambia código sin tocar ningún test.\nwarn_untested_code = false\n\n\
          [quality.lines]\n# Archivos que no cuentan para el límite de líneas.\n\
          exclude = [\"package-lock.json\", \"pnpm-lock.yaml\", \"yarn.lock\", \"Cargo.lock\", \"*.generated.ts\", \"drizzle/meta/**\", \"coverage/**\", \"dist/**\"]\n\n",
     );

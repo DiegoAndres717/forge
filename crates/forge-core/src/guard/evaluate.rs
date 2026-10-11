@@ -201,6 +201,68 @@ pub fn counted_files(rules: &Rules, files: &[FileChange]) -> Vec<FileChange> {
         .collect()
 }
 
+/// Extensiones de código (lo demás, documentación, configuración o datos, no pide tests).
+const CODE: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "go", "rb", "java", "kt", "swift", "cs",
+    "php", "c", "cc", "cpp", "h", "hpp", "m", "dart", "ex", "exs", "scala", "vue", "svelte",
+];
+
+/// Un archivo de tests por su ruta: `tests/`, `__tests__/`, `*.test.*`, `*_test.go`, `test_*.py`…
+fn is_test_file(path: &str) -> bool {
+    let p = path.to_lowercase();
+    let name = p.rsplit('/').next().unwrap_or(&p);
+    ["test/", "tests/", "__tests__/", "spec/", "e2e/"]
+        .iter()
+        .any(|d| p.starts_with(d) || p.contains(&format!("/{d}")))
+        || [".test.", ".spec.", "_test.", "_spec."]
+            .iter()
+            .any(|m| name.contains(m))
+        || name.starts_with("test_")
+}
+
+/// Una línea añadida que declara un test dentro de un archivo de código (Rust, Go, JS…).
+fn declares_test(line: &str) -> bool {
+    let l = line.trim_start();
+    l.starts_with("#[test]")
+        || l.starts_with("#[tokio::test")
+        || l.starts_with("#[cfg(test)]")
+        || l.starts_with("func Test")
+        || l.starts_with("def test_")
+        || ["it(", "test(", "describe("]
+            .iter()
+            .any(|t| l.starts_with(t))
+}
+
+/// Código cambiado sin ningún test: aviso, nunca bloqueo.
+fn untested(diff: &Diff) -> Item {
+    let code: Vec<&str> = diff
+        .files
+        .iter()
+        .filter(|f| !f.removed && !f.binary && !is_test_file(&f.path))
+        .filter(|f| {
+            f.path
+                .rsplit_once('.')
+                .is_some_and(|(_, ext)| CODE.contains(&ext.to_lowercase().as_str()))
+        })
+        .map(|f| f.path.as_str())
+        .collect();
+    let tested = diff.files.iter().any(|f| is_test_file(&f.path))
+        || diff.added_lines.iter().any(|(_, _, l)| declares_test(l));
+    if code.is_empty() || tested {
+        return item("untested", Level::Pass, tr!("Código con sus tests"), vec![]);
+    }
+    item(
+        "untested",
+        Level::Warn,
+        tr!("Cambia código sin tocar ningún test"),
+        code.iter()
+            .take(5)
+            .map(|p| p.to_string())
+            .chain([tr!("Escribe primero un test que falle y luego el código.").to_string()])
+            .collect(),
+    )
+}
+
 /// Controles deterministas sobre el diff (sin ejecutar nada).
 pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     let q = &rules.quality;
@@ -274,6 +336,10 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
         ),
         vec![],
     ));
+
+    if q.warn_untested_code {
+        items.push(untested(diff));
+    }
 
     // Archivos prohibidos (borrarlos sí está permitido).
     let forbidden: Vec<String> = diff
