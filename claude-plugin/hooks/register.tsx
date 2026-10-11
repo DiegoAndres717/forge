@@ -37,7 +37,13 @@ const CONTEXT_WARN = 70
 /** Searching and reading tools: after this many in a row the main loop is nudged to
  * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */
 const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
-const EXPLORE_NUDGE_AT = 4
+// Measured on real sessions: most exploring goes through the shell (rg, grep, sed -n,
+// cat…), not Read, so those commands count too.
+const EXPLORE_SHELL = /^\s*(?:cd\s+\S+\s*&&\s*)?(?:rg|grep|egrep|find|fd|ls|tree|cat|head|tail|sed\s+-n|wc|awk)\b/
+const EXPLORE_NUDGE_AT = 3
+const explores = (e: { tool: string }) =>
+  EXPLORE_TOOLS.has(e.tool) ||
+  (e.tool === 'Bash' && 'command' in e && typeof e.command === 'string' && EXPLORE_SHELL.test(e.command))
 let exploring = 0
 
 /** Models always listed in the band, in this order (others are added when used). */
@@ -109,8 +115,10 @@ const TESTS_FIRST = 'Tests-first mode: for every behavior change or bug fix, fir
 const DELEGATION = `Forge team (subagents on cheaper models). Use them to save tokens
 and keep your context clean:
 - forge:explorer (fast model): any "where is…", "what does … do", finding files,
-  symbols or call sites, or reading and summarizing several files. Delegate instead of
-  reading many files yourself; you get back a short answer with paths.
+  symbols or call sites, or reading and summarizing several files. Start with it
+  whenever understanding something will take more than two searches or reads, shell
+  ones included (rg, grep, find, cat, sed -n): its results stay out of your context,
+  which every later turn re-reads. You get back a short answer with paths.
 - forge:researcher (fast model): anything outside the code through the connected tools
   or the web, such as "did X reply?", "what's the status of this ticket?", "find the
   thread about…". It searches and reads; you get back a short summary with links.
@@ -335,7 +343,7 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId || 'deny' in result) return result
-    if (!EXPLORE_TOOLS.has(e.tool)) {
+    if (!explores(e)) {
       exploring = 0
       return result
     }
