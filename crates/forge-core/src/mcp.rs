@@ -28,6 +28,86 @@ fn instructions(ask_first: bool) -> String {
     }
 }
 
+/// Los comandos de Forge como prompts MCP: el mismo nombre en todos los agentes
+/// (`/forge-plans` en Gemini o Qwen, `/mcp__forge__forge-plans` en Claude Code…).
+fn prompts() -> Value {
+    let arg = |name: &str, description: &str, required: bool| json!({"name": name, "description": description, "required": required});
+    json!([
+        {"name": "forge-plans", "description": tr!("Forge: los planes y el backlog del proyecto y en qué va cada uno")},
+        {"name": "forge-plan", "description": tr!("Forge: convierte una idea en un plan por fases (pregunta lo imprescindible antes)"),
+         "arguments": [arg("idea", tr!("Lo que quieres construir"), true)]},
+        {"name": "forge-memory", "description": tr!("Forge: busca en Forge Memory (sin texto, lo más reciente)"),
+         "arguments": [arg("query", tr!("Palabras a buscar"), false)]},
+        {"name": "forge-remember", "description": tr!("Forge: guarda algo en Forge Memory"),
+         "arguments": [arg("text", tr!("Lo que hay que recordar"), true)]},
+        {"name": "forge-guard", "description": tr!("Forge: pasa Project Guard y explica el resultado"),
+         "arguments": [arg("stage", tr!("commit, push o pr (por defecto commit)"), false)]},
+    ])
+}
+
+/// Codex no muestra los prompts MCP: los mismos comandos van como skills suyas
+/// (`$forge-plans`…), que usan las herramientas de este servidor. (nombre, SKILL.md)
+pub fn codex_skills() -> Vec<(String, String)> {
+    let body = |name: &str| match name {
+        "forge-plans" => tr!(
+            "Usa plans_list del servidor MCP `forge` y resume en pocas líneas en qué va cada plan y qué toca ahora."
+        ),
+        "forge-plan" => tr!(
+            "Convierte en un plan la idea que el usuario escribió junto al comando: hazle solo las preguntas imprescindibles y, con sus respuestas, crea el plan por fases con plan_add del servidor MCP `forge` (cada fase con su rama y sus tareas) antes de escribir código."
+        ),
+        "forge-memory" => tr!(
+            "Busca en Forge Memory con memory_search del servidor MCP `forge` lo que el usuario escribió junto al comando (sin texto, usa memory_list para lo más reciente). Muéstralo resumido; para el detalle de alguna, usa memory_get."
+        ),
+        "forge-remember" => tr!(
+            "Guarda en Forge Memory lo que el usuario escribió junto al comando con memory_save del servidor MCP `forge`, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update)."
+        ),
+        _ => tr!(
+            "Ejecuta `forge guard commit` en la carpeta del proyecto (o `push` / `pr` si el usuario lo escribió junto al comando) y explica el resultado: qué pasó, qué bloquea y cómo arreglarlo."
+        ),
+    };
+    prompts()
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|p| {
+            let name = p["name"].as_str()?;
+            // La descripción como cadena JSON: también es YAML válido.
+            let skill = format!(
+                "---\nname: {name}\ndescription: {}\n---\n\n{}\n",
+                p["description"],
+                body(name)
+            );
+            Some((name.to_string(), skill))
+        })
+        .collect()
+}
+
+/// Escribe las skills en `<codex>/skills/forge-*` (las de Forge; nada más se toca).
+pub fn install_codex_skills(codex: &Path) -> Result<(), String> {
+    for (name, skill) in codex_skills() {
+        let dir = codex.join("skills").join(name);
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("SKILL.md"), skill).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+pub fn remove_codex_skills(codex: &Path) -> Result<(), String> {
+    for (name, _) in codex_skills() {
+        let dir = codex.join("skills").join(name);
+        if dir.exists() {
+            std::fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub fn codex_skills_installed(codex: &Path) -> bool {
+    codex_skills()
+        .iter()
+        .all(|(name, _)| codex.join("skills").join(name).join("SKILL.md").exists())
+}
+
 fn tools() -> Value {
     let kinds: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
     json!([
@@ -206,13 +286,19 @@ impl<'a> Server<'a> {
                 let version = params["protocolVersion"].as_str().unwrap_or(PROTOCOL);
                 Ok(json!({
                     "protocolVersion": version,
-                    "capabilities": {"tools": {}},
+                    "capabilities": {"tools": {}, "prompts": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
                     "instructions": instructions(self.ask_first)
                 }))
             }
             "ping" => Ok(json!({})),
             "tools/list" => Ok(json!({"tools": tools()})),
+            // Los comandos /forge-… para todos los agentes que muestran los prompts MCP.
+            "prompts/list" => Ok(json!({"prompts": prompts()})),
+            "prompts/get" => self.prompt(
+                params["name"].as_str().unwrap_or_default(),
+                &params["arguments"],
+            ),
             "tools/call" => Ok(self.call(
                 params["name"].as_str().unwrap_or_default(),
                 &params["arguments"],
@@ -225,6 +311,83 @@ impl<'a> Server<'a> {
             Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
             Err(error) => json!({"jsonrpc": "2.0", "id": id, "error": error}),
         })
+    }
+
+    /// El mensaje de un comando: con los datos ya dentro cuando se puede (planes,
+    /// memoria), para que el agente no tenga que pedirlos.
+    fn prompt(&self, name: &str, args: &Value) -> Result<Value, Value> {
+        let arg = |k: &str| args[k].as_str().unwrap_or_default().trim().to_string();
+        let text = match name {
+            "forge-plans" => {
+                let plans = self
+                    .store
+                    .list_ideas(Some(self.project), false)
+                    .map_err(|e| json!({"code": -32603, "message": e}))?;
+                let listing = if plans.is_empty() {
+                    tr!("No hay planes ni ideas en el backlog.").to_string()
+                } else {
+                    plans
+                        .iter()
+                        .map(ideas::render)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                };
+                tr!(
+                    "Planes del proyecto en Forge:\n{p0}\n\nResúmeme en pocas líneas en qué va cada plan y qué toca ahora.",
+                    p0 = listing
+                )
+            }
+            "forge-plan" => tr!(
+                "Quiero hacer esto: {p0}\n\nHazme solo las preguntas imprescindibles y, con mis respuestas, crea el plan por fases con plan_add (cada fase con su rama y sus tareas) antes de escribir código.",
+                p0 = arg("idea")
+            ),
+            "forge-memory" => {
+                let query = arg("query");
+                let found = self
+                    .store
+                    .search_memories(self.project, &query, None, 10)
+                    .map_err(|e| json!({"code": -32603, "message": e}))?;
+                let listing = if found.is_empty() {
+                    tr!("No hay memorias que coincidan.").to_string()
+                } else {
+                    found
+                        .iter()
+                        .map(memory::render_search)
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                };
+                tr!(
+                    "Forge Memory ({p0}):\n{p1}\n\nMuéstramelo resumido; si necesitas el detalle de alguna, usa memory_get.",
+                    p0 = if query.is_empty() {
+                        tr!("lo más reciente").to_string()
+                    } else {
+                        query
+                    },
+                    p1 = listing
+                )
+            }
+            "forge-remember" => tr!(
+                "Guarda esto en Forge Memory con memory_save, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update): {p0}",
+                p0 = arg("text")
+            ),
+            "forge-guard" => {
+                let stage = match arg("stage").as_str() {
+                    "push" => "push",
+                    "pr" => "pr",
+                    _ => "commit",
+                };
+                tr!(
+                    "Ejecuta `forge guard {stage}` en la carpeta del proyecto y explícame el resultado: qué pasó, qué bloquea y cómo arreglarlo.",
+                    stage = stage
+                )
+            }
+            _ => {
+                return Err(
+                    json!({"code": -32602, "message": tr!("comando desconocido: {name}", name = name)}),
+                );
+            }
+        };
+        Ok(json!({"messages": [{"role": "user", "content": {"type": "text", "text": text}}]}))
     }
 
     fn call(&self, tool: &str, args: &Value) -> Value {
@@ -698,6 +861,89 @@ mod tests {
                 .unwrap()
                 .contains("Pagos con Wompi")
         );
+    }
+
+    #[test]
+    fn forge_commands_as_mcp_prompts() {
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/x");
+        store
+            .add_memory(project, "decision", "Pagos con Wompi", "Por PSE.", "", "u")
+            .unwrap();
+        store
+            .add_idea(Some(project), "Exportar a CSV", "", "u")
+            .unwrap();
+        let mut server = Server::new(project, &store);
+        let init = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "clientInfo": {"name": "gemini"}}}))
+            .unwrap();
+        assert!(init["result"]["capabilities"]["prompts"].is_object());
+        let list = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "prompts/list"}))
+            .unwrap();
+        let names: Vec<&str> = list["result"]["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|p| p["name"].as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "forge-plans",
+                "forge-plan",
+                "forge-memory",
+                "forge-remember",
+                "forge-guard"
+            ]
+        );
+        let get = |server: &mut Server, name: &str, args: Value| {
+            let r = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": {"name": name, "arguments": args}}))
+                .unwrap();
+            r["result"]["messages"][0]["content"]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        };
+        assert!(get(&mut server, "forge-plans", json!({})).contains("Exportar a CSV"));
+        assert!(
+            get(&mut server, "forge-memory", json!({"query": "wompi"})).contains("Pagos con Wompi")
+        );
+        assert!(
+            get(
+                &mut server,
+                "forge-remember",
+                json!({"text": "usar Resend"})
+            )
+            .contains("usar Resend")
+        );
+        assert!(
+            get(&mut server, "forge-guard", json!({"stage": "push"})).contains("forge guard push")
+        );
+        assert!(get(&mut server, "forge-plan", json!({"idea": "recibos"})).contains("plan_add"));
+        let bad = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 4, "method": "prompts/get", "params": {"name": "nada"}}))
+            .unwrap();
+        assert!(bad["error"].is_object());
+    }
+
+    #[test]
+    fn codex_skills_install_and_remove() {
+        let dir = std::env::temp_dir().join(format!("forge-codex-skills-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("skills/mine")).unwrap();
+        assert!(!codex_skills_installed(&dir));
+        install_codex_skills(&dir).unwrap();
+        assert!(codex_skills_installed(&dir));
+        let skill = std::fs::read_to_string(dir.join("skills/forge-plans/SKILL.md")).unwrap();
+        assert!(skill.starts_with("---\nname: forge-plans\ndescription: \"Forge: "));
+        assert!(skill.contains("plans_list"));
+        remove_codex_skills(&dir).unwrap();
+        assert!(!dir.join("skills/forge-plans").exists());
+        // Las skills del usuario no se tocan.
+        assert!(dir.join("skills/mine").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

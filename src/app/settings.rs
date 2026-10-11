@@ -286,6 +286,10 @@ impl App {
         if installed("codex") {
             theme::section(ui, "Codex");
             theme::card(ui, |ui| self.launch_ui(ui, "codex"));
+            if let Some(home) = std::env::var_os("HOME") {
+                let codex = std::path::PathBuf::from(home).join(".codex");
+                theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
+            }
         }
         theme::section(ui, tr!("Cómo trabajan"));
         let mut ask = self.settings.ask_first;
@@ -311,6 +315,32 @@ impl App {
             }
         }
         self.accounts_ui(ui, cmds);
+    }
+
+    /// Los comandos de Forge en Codex (`$forge-plans`…): skills en ~/.codex/skills,
+    /// solo si el usuario lo pide (es su carpeta; las demás cuentas la comparten).
+    fn codex_skills_ui(&mut self, ui: &mut egui::Ui, codex: &std::path::Path) {
+        let installed = forge_core::mcp::codex_skills_installed(codex);
+        let mut result = None;
+        row(
+            ui,
+            tr!("Comandos de Forge"),
+            tr!(
+                "Codex no muestra los comandos /forge: con esto se escriben como skills en ~/.codex/skills y se usan con $forge-plans, $forge-plan, $forge-memory, $forge-remember y $forge-guard. Quitarlos borra solo esas carpetas."
+            ),
+            |ui| {
+                if installed {
+                    if ui.button(tr!("Quitar de Codex")).clicked() {
+                        result = Some(forge_core::mcp::remove_codex_skills(codex));
+                    }
+                } else if ui.button(tr!("Añadir a Codex")).clicked() {
+                    result = Some(forge_core::mcp::install_codex_skills(codex));
+                }
+            },
+        );
+        if let Some(Err(e)) = result {
+            self.error = Some(e);
+        }
     }
 
     /// A dónde van los tokens (Claude Code abierto desde Forge, 30 días).

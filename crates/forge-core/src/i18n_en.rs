@@ -2237,4 +2237,80 @@ pub const EN: &[(&str, &str)] = &[
         "Abre {p0} con un resumen de la última conversación (lo hecho, lo pendiente y los archivos tocados)",
         "Opens {p0} with a summary of the last conversation (what was done, what is left and the files touched)",
     ),
+    (
+        "Forge: los planes y el backlog del proyecto y en qué va cada uno",
+        "Forge: the project's plans and backlog and where each one stands",
+    ),
+    (
+        "Forge: convierte una idea en un plan por fases (pregunta lo imprescindible antes)",
+        "Forge: turn an idea into a phased plan (asks only what's essential first)",
+    ),
+    ("Lo que quieres construir", "What you want to build"),
+    (
+        "Forge: busca en Forge Memory (sin texto, lo más reciente)",
+        "Forge: search Forge Memory (no text: the most recent)",
+    ),
+    ("Palabras a buscar", "Words to search for"),
+    (
+        "Forge: guarda algo en Forge Memory",
+        "Forge: save something to Forge Memory",
+    ),
+    ("Lo que hay que recordar", "What to remember"),
+    (
+        "Forge: pasa Project Guard y explica el resultado",
+        "Forge: run Project Guard and explain the result",
+    ),
+    (
+        "commit, push o pr (por defecto commit)",
+        "commit, push or pr (commit by default)",
+    ),
+    (
+        "Planes del proyecto en Forge:\n{p0}\n\nResúmeme en pocas líneas en qué va cada plan y qué toca ahora.",
+        "The project's plans in Forge:\n{p0}\n\nSummarize in a few lines where each plan stands and what comes next.",
+    ),
+    (
+        "Quiero hacer esto: {p0}\n\nHazme solo las preguntas imprescindibles y, con mis respuestas, crea el plan por fases con plan_add (cada fase con su rama y sus tareas) antes de escribir código.",
+        "I want to do this: {p0}\n\nAsk me only the essential questions and, with my answers, create the phased plan with plan_add (each phase with its branch and tasks) before writing code.",
+    ),
+    (
+        "Forge Memory ({p0}):\n{p1}\n\nMuéstramelo resumido; si necesitas el detalle de alguna, usa memory_get.",
+        "Forge Memory ({p0}):\n{p1}\n\nShow it to me summarized; if you need the details of one, use memory_get.",
+    ),
+    ("lo más reciente", "most recent"),
+    (
+        "Guarda esto en Forge Memory con memory_save, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update): {p0}",
+        "Save this to Forge Memory with memory_save, choosing the type and a clear title (if a similar one exists, update it with memory_update): {p0}",
+    ),
+    (
+        "Ejecuta `forge guard {stage}` en la carpeta del proyecto y explícame el resultado: qué pasó, qué bloquea y cómo arreglarlo.",
+        "Run `forge guard {stage}` in the project folder and explain the result to me: what happened, what blocks and how to fix it.",
+    ),
+    ("comando desconocido: {name}", "unknown command: {name}"),
+    (
+        "Usa plans_list del servidor MCP `forge` y resume en pocas líneas en qué va cada plan y qué toca ahora.",
+        "Use plans_list from the `forge` MCP server and summarize in a few lines where each plan stands and what comes next.",
+    ),
+    (
+        "Convierte en un plan la idea que el usuario escribió junto al comando: hazle solo las preguntas imprescindibles y, con sus respuestas, crea el plan por fases con plan_add del servidor MCP `forge` (cada fase con su rama y sus tareas) antes de escribir código.",
+        "Turn the idea the user wrote with the command into a plan: ask only the essential questions and, with the answers, create the phased plan with plan_add from the `forge` MCP server (each phase with its branch and tasks) before writing code.",
+    ),
+    (
+        "Busca en Forge Memory con memory_search del servidor MCP `forge` lo que el usuario escribió junto al comando (sin texto, usa memory_list para lo más reciente). Muéstralo resumido; para el detalle de alguna, usa memory_get.",
+        "Search Forge Memory with memory_search from the `forge` MCP server for what the user wrote with the command (no text: use memory_list for the most recent). Show it summarized; for the details of one, use memory_get.",
+    ),
+    (
+        "Guarda en Forge Memory lo que el usuario escribió junto al comando con memory_save del servidor MCP `forge`, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update).",
+        "Save what the user wrote with the command to Forge Memory with memory_save from the `forge` MCP server, choosing the type and a clear title (if a similar one exists, update it with memory_update).",
+    ),
+    (
+        "Ejecuta `forge guard commit` en la carpeta del proyecto (o `push` / `pr` si el usuario lo escribió junto al comando) y explica el resultado: qué pasó, qué bloquea y cómo arreglarlo.",
+        "Run `forge guard commit` in the project folder (or `push` / `pr` if the user wrote it with the command) and explain the result: what happened, what blocks and how to fix it.",
+    ),
+    ("Comandos de Forge", "Forge commands"),
+    (
+        "Codex no muestra los comandos /forge: con esto se escriben como skills en ~/.codex/skills y se usan con $forge-plans, $forge-plan, $forge-memory, $forge-remember y $forge-guard. Quitarlos borra solo esas carpetas.",
+        "Codex doesn't show the /forge commands: this writes them as skills in ~/.codex/skills, used with $forge-plans, $forge-plan, $forge-memory, $forge-remember and $forge-guard. Removing them deletes only those folders.",
+    ),
+    ("Quitar de Codex", "Remove from Codex"),
+    ("Añadir a Codex", "Add to Codex"),
 ];
