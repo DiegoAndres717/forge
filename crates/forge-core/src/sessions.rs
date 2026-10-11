@@ -83,15 +83,7 @@ pub fn copy_session(
         }
         "codex" => {
             // sessions/AAAA/MM/DD/rollout-…-<id>.jsonl, y su nombre en session_index.jsonl.
-            let suffix = format!("{id}.jsonl");
-            let file = subdirs(&from.join("sessions"))
-                .iter()
-                .flat_map(|y| subdirs(y))
-                .flat_map(|m| subdirs(&m))
-                .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
-                .map(|e| e.path())
-                .find(|p| p.to_string_lossy().ends_with(&suffix))
-                .ok_or_else(missing)?;
+            let file = codex_file(&from, id).ok_or_else(missing)?;
             let rel = file.strip_prefix(&from).map_err(|e| e.to_string())?;
             copy(rel)?;
             let lines: String = std::fs::read_to_string(from.join("session_index.jsonl"))
@@ -159,6 +151,257 @@ pub fn codex_limits(account: Option<&Path>) -> Option<crate::accounts::AccountLi
         })
         .collect::<Vec<_>>();
     (!windows.is_empty()).then_some(crate::accounts::AccountLimits { at, windows })
+}
+
+/// El archivo de una sesión de Codex por su id (`sessions/AAAA/MM/DD/rollout-…-<id>.jsonl`).
+fn codex_file(home: &Path, id: &str) -> Option<PathBuf> {
+    let suffix = format!("{id}.jsonl");
+    subdirs(&home.join("sessions"))
+        .iter()
+        .flat_map(|y| subdirs(y))
+        .flat_map(|m| subdirs(&m))
+        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
+        .map(|e| e.path())
+        .find(|p| p.to_string_lossy().ends_with(&suffix))
+}
+
+/// Lo que se saca de una sesión para pasársela a otro agente.
+#[derive(Debug, Default, PartialEq)]
+struct Digest {
+    topic: String,
+    /// Los mensajes del usuario, en orden.
+    asks: Vec<String>,
+    last_answer: String,
+    /// Archivos que el agente editó, sin repetir, en el orden en que los tocó.
+    files: Vec<String>,
+    last_error: String,
+}
+
+fn clip(text: &str, max: usize) -> String {
+    let text = text.trim();
+    match text.char_indices().nth(max) {
+        Some((i, _)) => format!("{}…", &text[..i]),
+        None => text.to_string(),
+    }
+}
+
+/// Lo que el usuario escribió de verdad: sin las etiquetas que añade el agente (comandos,
+/// recordatorios, avisos de tareas, contexto del entorno) ni las líneas automáticas de las
+/// imágenes; lo pegado se queda, sin las etiquetas que lo envuelven. Vacío si no queda nada.
+fn user_text(text: &str) -> String {
+    const SYSTEM: [&str; 9] = [
+        "<command-",
+        "<local-command",
+        "<system-reminder",
+        "<user-prompt-submit-hook",
+        "<task-notification",
+        "<environment_context",
+        "<user_instructions",
+        "<bash-",
+        "# AGENTS.md",
+    ];
+    let t = text.trim();
+    if SYSTEM.iter().any(|tag| t.starts_with(tag)) {
+        return String::new();
+    }
+    t.lines()
+        .filter(|l| !l.trim_start().starts_with("[Image"))
+        .filter(|l| {
+            let l = l.trim();
+            !(l.starts_with("<pasted_content") || l.starts_with("</pasted_content"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
+fn digest_claude(lines: impl Iterator<Item = serde_json::Value>) -> Digest {
+    let mut d = Digest::default();
+    for e in lines {
+        if e["type"] == "ai-title" {
+            d.topic = e["aiTitle"].as_str().unwrap_or_default().to_string();
+            continue;
+        }
+        let content = &e["message"]["content"];
+        match e["type"].as_str() {
+            Some("user") => {
+                if let Some(text) = content.as_str().map(user_text)
+                    && !text.is_empty()
+                {
+                    d.asks.push(text);
+                }
+                for item in content.as_array().into_iter().flatten() {
+                    match item["type"].as_str() {
+                        Some("text") => {
+                            let text = user_text(item["text"].as_str().unwrap_or_default());
+                            if !text.is_empty() {
+                                d.asks.push(text);
+                            }
+                        }
+                        Some("tool_result") if item["is_error"] == true => {
+                            let text = item["content"]
+                                .as_str()
+                                .map(str::to_string)
+                                .or_else(|| item["content"][0]["text"].as_str().map(str::to_string))
+                                .unwrap_or_default();
+                            d.last_error = text;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            Some("assistant") => {
+                for item in content.as_array().into_iter().flatten() {
+                    match item["type"].as_str() {
+                        Some("text") => {
+                            d.last_answer = item["text"].as_str().unwrap_or_default().to_string()
+                        }
+                        Some("tool_use")
+                            if matches!(
+                                item["name"].as_str(),
+                                Some("Edit" | "Write" | "MultiEdit" | "NotebookEdit")
+                            ) =>
+                        {
+                            let input = &item["input"];
+                            if let Some(f) = input["file_path"]
+                                .as_str()
+                                .or(input["notebook_path"].as_str())
+                                && !d.files.iter().any(|x| x == f)
+                            {
+                                d.files.push(f.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    d
+}
+
+fn digest_codex(lines: impl Iterator<Item = serde_json::Value>) -> Digest {
+    let mut d = Digest::default();
+    for e in lines {
+        let p = &e["payload"];
+        if e["type"] != "response_item" {
+            continue;
+        }
+        match p["type"].as_str() {
+            Some("message") => {
+                let text: String = p["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|c| c["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let asked = user_text(&text);
+                match p["role"].as_str() {
+                    Some("user") if !asked.is_empty() => d.asks.push(asked),
+                    Some("assistant") if !text.trim().is_empty() => d.last_answer = text,
+                    _ => {}
+                }
+            }
+            Some("function_call" | "custom_tool_call") => {
+                let args = p["arguments"]
+                    .as_str()
+                    .or(p["input"].as_str())
+                    .unwrap_or_default();
+                for line in args.split(['\n', '"']) {
+                    for prefix in ["*** Update File: ", "*** Add File: ", "*** Delete File: "] {
+                        if let Some(f) = line.trim().strip_prefix(prefix)
+                            && !d.files.iter().any(|x| x == f.trim())
+                        {
+                            d.files.push(f.trim().to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    d
+}
+
+/// Resumen para seguir en otro agente la última conversación de `program` en `cwd`
+/// (`config`: la carpeta de su cuenta). Corto a propósito (~3 KB): el otro agente lee
+/// los planes y Forge Memory por MCP para el resto. `None` si no hay sesión.
+pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option<String> {
+    let session = last_session(program, cwd, config)?;
+    let dir = config_dir(program, config)?;
+    let file = match program {
+        "claude" => dir
+            .join("projects")
+            .join(claude_dir_name(cwd))
+            .join(format!("{}.jsonl", session.id)),
+        "codex" => codex_file(&dir, &session.id)?,
+        _ => return None,
+    };
+    // El principio (el objetivo) y lo último; una sesión puede pesar decenas de MB.
+    let head = {
+        let mut buf = vec![0; 256 * 1024];
+        let n = std::fs::File::open(&file).ok()?.read(&mut buf).ok()?;
+        String::from_utf8_lossy(&buf[..n]).into_owned()
+    };
+    let recent = tail(&file, 1024 * 1024);
+    let digest = |text: &str| match program {
+        "claude" => digest_claude(json_lines(text)),
+        _ => digest_codex(json_lines(text)),
+    };
+    let start = digest(&head);
+    let end = digest(&recent);
+    let name = match program {
+        "claude" => "Claude Code",
+        _ => "Codex",
+    };
+    let mut out = vec![crate::tr!(
+        "Sigo una conversación que empezó en {name}. Resumen del traspaso:",
+        name = name
+    )];
+    let topic = if end.topic.is_empty() {
+        session.topic.clone()
+    } else {
+        end.topic.clone()
+    };
+    if !topic.is_empty() {
+        out.push(crate::tr!("Tema: {p0}", p0 = topic));
+    }
+    if let Some(goal) = start.asks.first() {
+        out.push(crate::tr!(
+            "Objetivo inicial: {p0}",
+            p0 = clip(&one_line(goal), 400)
+        ));
+    }
+    let recent_asks: Vec<&String> = end.asks.iter().rev().take(3).collect();
+    if !recent_asks.is_empty() {
+        out.push(crate::tr!("Últimas peticiones:").into());
+        for ask in recent_asks.into_iter().rev() {
+            out.push(format!("- {}", clip(&one_line(ask), 300)));
+        }
+    }
+    if !end.last_answer.is_empty() {
+        out.push(crate::tr!(
+            "Última respuesta de {name}: {p0}",
+            name = name,
+            p0 = clip(&end.last_answer, 800)
+        ));
+    }
+    let files: Vec<&String> = end.files.iter().rev().take(15).collect();
+    if !files.is_empty() {
+        let list: Vec<&str> = files.into_iter().rev().map(String::as_str).collect();
+        out.push(crate::tr!("Archivos tocados: {p0}", p0 = list.join(", ")));
+    }
+    if !end.last_error.is_empty() {
+        out.push(crate::tr!(
+            "Último error: {p0}",
+            p0 = clip(&one_line(&end.last_error), 300)
+        ));
+    }
+    out.push(crate::tr!("Antes de seguir, revisa los planes en curso (plans_list) y Forge Memory (memory_search), y pregúntame si algo no está claro.").into());
+    Some(out.join("\n"))
 }
 
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
@@ -368,6 +611,38 @@ mod tests {
             Some("claude --model opus --resume x")
         );
         assert_eq!(resume_command("opencode", "opencode", "x"), None);
+
+        // Resumen de traspaso de una sesión de Claude.
+        std::fs::write(
+            dir.join("brief.jsonl"),
+            [
+                r#"{"type":"user","entrypoint":"cli","message":{"content":"Quiero recibos por email tras el pago"}}"#,
+                r#"{"type":"user","message":{"content":"<command-name>/clear</command-name>"}}"#,
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write","input":{"file_path":"src/receipt.ts","content":"x"}},{"type":"text","text":"Listo el modelo de recibo."}]}}"#,
+                r#"{"type":"user","message":{"content":[{"type":"tool_result","is_error":true,"content":"tsc: Type error in receipt.ts"}]}}"#,
+                r#"{"type":"user","message":{"content":[{"type":"text","text":"ahora el envío con Resend\n[Image: original 100x100]"}]}}"#,
+                r#"{"type":"ai-title","aiTitle":"Recibos por email"}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        let brief = handoff_brief("claude", cwd, Some(&tmp.join("claude"))).unwrap();
+        for part in [
+            "Claude Code",
+            "Recibos por email",
+            "Quiero recibos por email",
+            "ahora el envío con Resend",
+            "Listo el modelo de recibo",
+            "src/receipt.ts",
+            "Type error",
+            "plans_list",
+        ] {
+            assert!(brief.contains(part), "falta «{part}» en:\n{brief}");
+        }
+        assert!(
+            !brief.contains("/clear"),
+            "las etiquetas de sistema no son peticiones"
+        );
 
         // Pasar la conversación a otra cuenta: la encuentra allí.
         let other = tmp.join("claude-2");

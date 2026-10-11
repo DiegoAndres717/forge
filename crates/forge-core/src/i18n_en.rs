@@ -2195,4 +2195,46 @@ pub const EN: &[(&str, &str)] = &[
         "Se aplica a los agentes que abras a partir de ahora.",
         "Applies to the agents you open from now on.",
     ),
+    (
+        "Sigo una conversación que empezó en {name}. Resumen del traspaso:",
+        "I'm continuing a conversation that started in {name}. Handoff summary:",
+    ),
+    ("Tema: {p0}", "Topic: {p0}"),
+    ("Objetivo inicial: {p0}", "Original goal: {p0}"),
+    ("Últimas peticiones:", "Latest requests:"),
+    (
+        "Última respuesta de {name}: {p0}",
+        "Last answer from {name}: {p0}",
+    ),
+    ("Archivos tocados: {p0}", "Files touched: {p0}"),
+    ("Último error: {p0}", "Last error: {p0}"),
+    (
+        "Antes de seguir, revisa los planes en curso (plans_list) y Forge Memory (memory_search), y pregúntame si algo no está claro.",
+        "Before going on, check the plans in progress (plans_list) and Forge Memory (memory_search), and ask me if anything is unclear.",
+    ),
+    (
+        "no hay ninguna conversación de {p0} en este proyecto",
+        "there is no {p0} conversation in this project",
+    ),
+    (
+        "No hay ninguna conversación de {name} en este proyecto.",
+        "There is no {name} conversation in this project.",
+    ),
+    (
+        "{name} no admite empezar con un mensaje.",
+        "{name} can't start with a message.",
+    ),
+    ("Seguir en {p0}", "Continue in {p0}"),
+    (
+        "Abre {p0} con un resumen de esta conversación (lo hecho, lo pendiente y los archivos tocados)",
+        "Opens {p0} with a summary of this conversation (what was done, what is left and the files touched)",
+    ),
+    (
+        "{p0}  Seguir la conversación en {p1}",
+        "{p0}  Continue the conversation in {p1}",
+    ),
+    (
+        "Abre {p0} con un resumen de la última conversación (lo hecho, lo pendiente y los archivos tocados)",
+        "Opens {p0} with a summary of the last conversation (what was done, what is left and the files touched)",
+    ),
 ];
