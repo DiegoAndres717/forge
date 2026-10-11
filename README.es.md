@@ -152,6 +152,20 @@ Cualquier `claude` que se ejecute en una terminal de Forge (escrito a mano, `cla
 - **Varias cuentas**: cuentas de Claude Code y Codex a la vez sin cerrar sesión (Ajustes → Cuentas). Cada una tiene su login e historial y comparte tus ajustes, `CLAUDE.md` y skills; eliges cuál usar en cada proyecto desde el clic derecho del agente. Puedes pasar una conversación a otra cuenta y seguir donde ibas, o a otro agente (Claude Code ↔ Codex…) con un resumen corto de lo hecho y lo pendiente; Forge te lo ofrece también cuando una cuenta llega a su límite.
 - **Comandos sin tokens**: `/forge-plans`, `/forge-guard`, `/forge-remember`, `/forge-memory`, `/forge-effort` (escribe `/forge` para verlos).
 
+
+## Comandos de Forge en todos los agentes
+
+Los mismos comandos sirven en todos los agentes abiertos desde Forge (los da su servidor MCP):
+
+| Agente | Cómo se llaman |
+|---|---|
+| Claude Code | `/forge-plans`, `/forge-memory`, `/forge-remember`, `/forge-guard` (mod, sin tokens) y `/mcp__forge__forge-plan` para planear una idea |
+| OpenCode | `/forge:forge-plans`, `/forge:forge-memory`… |
+| Gemini CLI, Qwen Code | `/forge-plans`, `/forge-memory`… (prompts MCP) |
+| Codex | `$forge-plans`, `$forge-memory`… — Codex no lista los prompts MCP: actívalos en Ajustes → Agentes → Codex → **Añadir a Codex** (escribe skills en `~/.codex/skills`; **Quitar de Codex** borra solo esas) |
+
+Escribe lo que necesita el comando justo después: `/forge-remember cobramos con Wompi`, `$forge-memory pagos`.
+
 ## Atajos de teclado
 
 | Atajo | Acción | Atajo | Acción |
