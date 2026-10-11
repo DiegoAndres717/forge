@@ -46,38 +46,45 @@ fn prompts() -> Value {
 }
 
 /// Codex no muestra los prompts MCP: los mismos comandos van como skills suyas
-/// (`$forge-plans`…), que usan las herramientas de este servidor. (nombre, SKILL.md)
+/// (`$forge-plans`…), que usan las herramientas de este servidor. En inglés siempre:
+/// son instrucciones para el agente, no texto de la interfaz. (nombre, SKILL.md)
 pub fn codex_skills() -> Vec<(String, String)> {
-    let body = |name: &str| match name {
-        "forge-plans" => tr!(
-            "Usa plans_list del servidor MCP `forge` y resume en pocas líneas en qué va cada plan y qué toca ahora."
+    const SKILLS: [(&str, &str, &str); 5] = [
+        (
+            "forge-plans",
+            "Forge: the project's plans and backlog and where each one stands",
+            "Use plans_list from the `forge` MCP server and summarize in a few lines where each plan stands and what comes next.",
         ),
-        "forge-plan" => tr!(
-            "Convierte en un plan la idea que el usuario escribió junto al comando: hazle solo las preguntas imprescindibles y, con sus respuestas, crea el plan por fases con plan_add del servidor MCP `forge` (cada fase con su rama y sus tareas) antes de escribir código."
+        (
+            "forge-plan",
+            "Forge: turn an idea into a phased plan (asks only what's essential first)",
+            "Turn the idea the user wrote with the command into a plan: ask only the essential questions and, with the answers, create the phased plan with plan_add from the `forge` MCP server (each phase with its branch and tasks) before writing code.",
         ),
-        "forge-memory" => tr!(
-            "Busca en Forge Memory con memory_search del servidor MCP `forge` lo que el usuario escribió junto al comando (sin texto, usa memory_list para lo más reciente). Muéstralo resumido; para el detalle de alguna, usa memory_get."
+        (
+            "forge-memory",
+            "Forge: search Forge Memory (no text: the most recent)",
+            "Search Forge Memory with memory_search from the `forge` MCP server for what the user wrote with the command (no text: use memory_list for the most recent). Show it summarized; for the details of one, use memory_get.",
         ),
-        "forge-remember" => tr!(
-            "Guarda en Forge Memory lo que el usuario escribió junto al comando con memory_save del servidor MCP `forge`, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update)."
+        (
+            "forge-remember",
+            "Forge: save something to Forge Memory",
+            "Save what the user wrote with the command to Forge Memory with memory_save from the `forge` MCP server, choosing the type and a clear title (if a similar one exists, update it with memory_update).",
         ),
-        _ => tr!(
-            "Ejecuta `forge guard commit` en la carpeta del proyecto (o `push` / `pr` si el usuario lo escribió junto al comando) y explica el resultado: qué pasó, qué bloquea y cómo arreglarlo."
+        (
+            "forge-guard",
+            "Forge: run Project Guard and explain the result",
+            "Run `forge guard commit` in the project folder (or `push` / `pr` if the user wrote it with the command) and explain the result: what happened, what blocks and how to fix it.",
         ),
-    };
-    prompts()
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|p| {
-            let name = p["name"].as_str()?;
+    ];
+    SKILLS
+        .iter()
+        .map(|(name, description, body)| {
             // La descripción como cadena JSON: también es YAML válido.
             let skill = format!(
-                "---\nname: {name}\ndescription: {}\n---\n\n{}\n",
-                p["description"],
-                body(name)
+                "---\nname: {name}\ndescription: {}\n---\n\n{body}\n",
+                json!(description)
             );
-            Some((name.to_string(), skill))
+            (name.to_string(), skill)
         })
         .collect()
 }

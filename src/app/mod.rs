@@ -317,8 +317,8 @@ pub struct App {
     agents_form: Option<project_forms::AgentsForm>,
     routing_form: Option<project_forms::RoutingSettings>,
     processes_form: Option<project_forms::ProcessesForm>,
-    /// Notificaciones activadas en Ajustes.
-    notifications_enabled: bool,
+    /// Cómo avisa cada tipo de aviso (Ajustes → Avisos).
+    alerts: notify::Alerts,
     /// Ancho de los botones de la derecha de la barra superior (fotograma anterior).
     toolbar_right: f32,
     /// Dónde acaban los semáforos de macOS (x); ahí empiezan los botones de la ventana.
@@ -349,8 +349,7 @@ impl App {
         if app.db(|s| s.setting("welcomed")).flatten().is_none() {
             app.welcome = Some(0);
         }
-        app.notifications_enabled =
-            app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
+        app.alerts = notify::Alerts::load(app.store.as_ref());
         app
     }
 
@@ -387,7 +386,7 @@ impl App {
             agents_form: None,
             routing_form: None,
             processes_form: None,
-            notifications_enabled: true,
+            alerts: notify::Alerts::default(),
             notifications: false,
             next_update_check: None,
             menu: None,

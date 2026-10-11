@@ -638,7 +638,7 @@ fn clickable_controls_show_the_pointing_hand() {
     let mut h = app(project("cursor"));
     h.key_press_modifiers(CMD, Key::Comma);
     h.run_steps(3);
-    for label in ["Avisarme", "Español"] {
+    for label in ["Buscar actualizaciones", "Español"] {
         h.get_by_label_contains(label).hover();
         h.run_steps(2);
         assert_eq!(

@@ -9,6 +9,7 @@ pub(super) enum SettingsTab {
     #[default]
     General,
     Agents,
+    Alerts,
     Usage,
     Project,
 }
@@ -18,6 +19,7 @@ impl SettingsTab {
         let (glyph, name) = match self {
             Self::General => (icon::GEAR, tr!("General")),
             Self::Agents => (icon::ROBOT, tr!("Agentes")),
+            Self::Alerts => (icon::BELL, tr!("Avisos")),
             Self::Usage => (icon::CHART_BAR, tr!("Uso")),
             Self::Project => (icon::FOLDER, tr!("Este proyecto")),
         };
@@ -131,6 +133,7 @@ impl App {
                 let mut tabs = vec![
                     SettingsTab::General,
                     SettingsTab::Agents,
+                    SettingsTab::Alerts,
                     SettingsTab::Usage,
                 ];
                 if self.active.is_some() {
@@ -168,6 +171,7 @@ impl App {
                         match tab {
                             SettingsTab::General => changed |= self.general_tab(ui, cmds),
                             SettingsTab::Agents => self.agents_tab(ui, cmds),
+                            SettingsTab::Alerts => self.alerts_tab(ui),
                             SettingsTab::Usage => self.usage_tab(ui),
                             SettingsTab::Project => self.project_tab(ui, cmds),
                         }
@@ -217,20 +221,6 @@ impl App {
                             }
                         }
                     });
-                },
-            );
-            row(
-                ui,
-                tr!("Notificaciones"),
-                tr!(
-                    "Avisos de macOS cuando Forge está en segundo plano: un agente termina o te necesita, un proceso falla o Guard bloquea un cambio."
-                ),
-                |ui| {
-                    let mut on = self.notifications_enabled;
-                    if ui.checkbox(&mut on, tr!("Avisarme")).changed() {
-                        self.notifications_enabled = on;
-                        self.db(|s| s.set_setting("notifications", if on { "on" } else { "off" }));
-                    }
                 },
             );
         });
@@ -340,6 +330,102 @@ impl App {
         );
         if let Some(Err(e)) = result {
             self.error = Some(e);
+        }
+    }
+
+    /// Avisos: no molestar, volumen y, por tipo, notificación, sonido y si avisa también
+    /// con Forge al frente. Se guarda al cambiar.
+    fn alerts_tab(&mut self, ui: &mut egui::Ui) {
+        use super::notify::{alert_text, play, sounds};
+        use crate::workspace::Alert;
+        let mut alerts = self.alerts.clone();
+        theme::section(ui, tr!("General"));
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("No molestar"),
+                tr!(
+                    "Sin notificaciones ni sonidos. Los puntos de la barra lateral siguen avisando."
+                ),
+                |ui| {
+                    ui.checkbox(&mut alerts.quiet, tr!("Silenciar todos los avisos"));
+                },
+            );
+            row(
+                ui,
+                tr!("Volumen"),
+                tr!("Volumen de los sonidos de Forge, aparte del volumen del Mac."),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        let slider = ui.add(
+                            egui::Slider::new(&mut alerts.volume, 0.0..=1.0).show_value(false),
+                        );
+                        // Al soltar, se oye cómo queda.
+                        if slider.drag_stopped() {
+                            play(&alerts.get(Alert::Done).sound, alerts.volume);
+                        }
+                        ui.label(format!("{:.0} %", alerts.volume * 100.0));
+                    });
+                },
+            );
+        });
+        theme::section(ui, tr!("Cada aviso"));
+        theme::card(ui, |ui| {
+            for alert in Alert::ALL {
+                let (name, help) = alert_text(alert);
+                let mut prefs = alerts.get(alert);
+                row(ui, name, help, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.checkbox(&mut prefs.notify, tr!("Notificación"));
+                        let shown = if prefs.sound.is_empty() {
+                            tr!("Sin sonido").to_string()
+                        } else {
+                            prefs.sound.clone()
+                        };
+                        egui::ComboBox::from_id_salt(("alert-sound", alert as u8))
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut prefs.sound,
+                                    String::new(),
+                                    tr!("Sin sonido"),
+                                );
+                                for s in sounds() {
+                                    if ui
+                                        .selectable_value(&mut prefs.sound, s.clone(), s)
+                                        .clicked()
+                                    {
+                                        play(s, alerts.volume);
+                                    }
+                                }
+                            });
+                        let can_play = !prefs.sound.is_empty();
+                        if ui
+                            .add_enabled(can_play, egui::Button::new(icon::PLAY))
+                            .on_hover_text(tr!("Escuchar"))
+                            .clicked()
+                        {
+                            play(&prefs.sound, alerts.volume);
+                        }
+                        ui.checkbox(&mut prefs.foreground, tr!("También con Forge al frente"));
+                    });
+                });
+                if prefs != alerts.get(alert) {
+                    alerts.kinds.insert(alert, prefs);
+                }
+            }
+        });
+        hint(
+            ui,
+            tr!(
+                "Las notificaciones de macOS se pueden ajustar también en Ajustes del Sistema → Notificaciones → Forge."
+            ),
+        );
+        if alerts != self.alerts {
+            if let Err(e) = alerts.save(self.store.as_ref()) {
+                self.error = Some(e);
+            }
+            self.alerts = alerts;
         }
     }
 
