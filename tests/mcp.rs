@@ -58,6 +58,7 @@ fn mcp_server_shares_memory_between_clients() {
         names,
         [
             "memory_search",
+            "memory_get",
             "memory_save",
             "memory_update",
             "memory_list",
@@ -80,9 +81,19 @@ fn mcp_server_shares_memory_between_clients() {
         .as_str()
         .unwrap()
         .to_string();
+    // La búsqueda es breve (título y fragmento); quién la guardó y cuándo, con memory_get.
     assert!(
-        text.contains("Vacunación por lotes") && text.contains("claude-code"),
+        text.contains("Vacunación por lotes") && !text.contains("claude-code"),
         "{text}"
+    );
+    let detail = request(json!({"jsonrpc": "2.0", "id": 41, "method": "tools/call", "params": {"name": "memory_get", "arguments": {"id": 1}}})).unwrap();
+    let detail = detail["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        detail.contains("Se registran por lote") && detail.contains("claude-code"),
+        "{detail}"
     );
 
     let context = request(json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "project_context", "arguments": {}}})).unwrap();
