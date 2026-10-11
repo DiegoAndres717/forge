@@ -81,6 +81,7 @@ pub struct RulesForm {
     pub max_files_changed: usize,
     pub block_secrets: bool,
     pub block_env_files: bool,
+    pub warn_untested_code: bool,
     pub forbidden_files: Vec<String>,
     /// Commit, push y pull request (el orden de `Stage::ALL`).
     pub stages: [StageForm; 3],
@@ -115,6 +116,7 @@ impl RulesForm {
             max_files_changed: q.max_files_changed,
             block_secrets: q.block_secrets,
             block_env_files: q.block_env_files,
+            warn_untested_code: q.warn_untested_code,
             forbidden_files: q.forbidden_files.clone(),
             stages: Stage::ALL.map(|s| StageForm::from(rules.stage(s))),
             checks: rules
@@ -172,6 +174,7 @@ impl RulesForm {
         q["max_files_changed"] = value(self.max_files_changed as i64);
         q["block_secrets"] = value(self.block_secrets);
         q["block_env_files"] = value(self.block_env_files);
+        q["warn_untested_code"] = value(self.warn_untested_code);
         q["forbidden_files"] = value(list(&self.forbidden_files));
         for (key, s) in ["commit", "push", "pull_request"].iter().zip(&self.stages) {
             let t = &mut doc[key];

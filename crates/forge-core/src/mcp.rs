@@ -12,20 +12,72 @@ use crate::store::Store;
 
 const PROTOCOL: &str = "2025-06-18";
 
-fn instructions(ask_first: bool) -> String {
-    let base = tr!(
-        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar."
-    );
-    if ask_first {
-        format!(
-            "{base}\n\n{}",
-            tr!(
-                "Modo «Primero pregunta»: ante una petición grande, haz hasta tres preguntas para aclarar lo imprescindible antes de crear el plan. Cuando el usuario responda, crea el plan con plan_add antes de escribir código."
-            )
-        )
-    } else {
-        base.into()
+/// Modos de trabajo de Ajustes que cambian lo que se le pide al agente.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Modes {
+    /// «Primero pregunta»: `--ask-first` o `FORGE_ASK_FIRST=1`.
+    pub ask_first: bool,
+    /// «Primero el test»: `--tests-first` o `FORGE_TESTS_FIRST=1`.
+    pub tests_first: bool,
+}
+
+impl Modes {
+    /// Los del entorno de la terminal (los agentes que lanzan el servidor con él).
+    pub fn from_env() -> Self {
+        let on = |k: &str| std::env::var(k).as_deref() == Ok("1");
+        Self {
+            ask_first: on("FORGE_ASK_FIRST"),
+            tests_first: on("FORGE_TESTS_FIRST"),
+        }
     }
+
+    /// Los de los argumentos de `forge mcp` (Codex lanza sus servidores sin ese entorno).
+    pub fn from_args(args: &[String]) -> Self {
+        let has = |flag: &str| args.iter().any(|a| a == flag);
+        Self {
+            ask_first: has("--ask-first"),
+            tests_first: has("--tests-first"),
+        }
+    }
+
+    pub fn args(self) -> Vec<String> {
+        [
+            self.ask_first.then_some("--ask-first"),
+            self.tests_first.then_some("--tests-first"),
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::from)
+        .collect()
+    }
+
+    fn or(self, other: Modes) -> Modes {
+        Modes {
+            ask_first: self.ask_first || other.ask_first,
+            tests_first: self.tests_first || other.tests_first,
+        }
+    }
+}
+
+/// Lo que se le pide al agente al conectarse. En inglés siempre: es para el agente.
+pub const TESTS_FIRST: &str = "Tests-first mode: for every behavior change or bug fix, first write a test that fails for the right reason and run it to see it fail, then write the smallest code that makes it pass, run it again to see it pass, and only then refactor. Say which test you added and show both runs. Skip it only for changes with nothing to test (docs, config, styling) and say so.";
+
+pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
+
+fn instructions(modes: Modes) -> String {
+    let mut out = String::from(
+        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress, tick tasks as you finish them and mark the phase done at the end.",
+    );
+    for (on, text) in [
+        (modes.ask_first, ASK_FIRST),
+        (modes.tests_first, TESTS_FIRST),
+    ] {
+        if on {
+            out.push_str("\n\n");
+            out.push_str(text);
+        }
+    }
+    out
 }
 
 /// Los comandos de Forge como prompts MCP: el mismo nombre en todos los agentes
@@ -266,8 +318,8 @@ pub struct Server<'a> {
     store: &'a Store,
     /// Cliente conectado (clientInfo.name): queda como autor de lo que guarde.
     client: String,
-    /// Modo «Primero pregunta» (Ajustes): `forge mcp --ask-first` o `FORGE_ASK_FIRST=1`.
-    pub ask_first: bool,
+    /// Modos de Ajustes («Primero pregunta», «Primero el test»).
+    pub modes: Modes,
 }
 
 impl<'a> Server<'a> {
@@ -276,7 +328,7 @@ impl<'a> Server<'a> {
             project,
             store,
             client: "agente".into(),
-            ask_first: std::env::var("FORGE_ASK_FIRST").as_deref() == Ok("1"),
+            modes: Modes::from_env(),
         }
     }
 
@@ -295,7 +347,7 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}, "prompts": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": instructions(self.ask_first)
+                    "instructions": instructions(self.modes)
                 }))
             }
             "ping" => Ok(json!({})),
@@ -748,11 +800,11 @@ pub fn project_context(project: &Path, store: &Store) -> String {
 }
 
 /// Bucle del servidor: un mensaje JSON por línea en stdin, respuestas por stdout.
-/// `ask_first`: el modo «Primero pregunta» llega como argumento porque algunos agentes
-/// (Codex) lanzan sus servidores MCP sin el entorno de la terminal.
-pub fn serve(project: &Path, store: &Store, ask_first: bool) -> std::io::Result<()> {
+/// `modes` también llegan como argumentos porque algunos agentes (Codex) lanzan sus
+/// servidores MCP sin el entorno de la terminal.
+pub fn serve(project: &Path, store: &Store, modes: Modes) -> std::io::Result<()> {
     let mut server = Server::new(project, store);
-    server.ask_first |= ask_first;
+    server.modes = server.modes.or(modes);
     let stdout = std::io::stdout();
     for line in std::io::stdin().lock().lines() {
         let line = line?;
@@ -954,8 +1006,24 @@ mod tests {
     }
 
     #[test]
-    fn ask_first_adds_the_planning_instruction() {
-        assert!(instructions(true).contains("hasta tres preguntas"));
-        assert!(!instructions(false).contains("hasta tres preguntas"));
+    fn modes_add_their_instructions() {
+        let plain = instructions(Modes::default());
+        assert!(!plain.contains("up to three questions") && !plain.contains("Tests-first"));
+        let ask = Modes {
+            ask_first: true,
+            ..Modes::default()
+        };
+        assert!(instructions(ask).contains("up to three questions"));
+        let tests = Modes {
+            tests_first: true,
+            ..Modes::default()
+        };
+        assert!(instructions(tests).contains("Tests-first mode"));
+        let args = vec!["--project".into(), "x".into(), "--tests-first".into()];
+        assert_eq!(Modes::from_args(&args), tests);
+        assert_eq!(Modes::from_args(&tests.args()), tests);
+        // El mod de Claude Code dice lo mismo que el servidor.
+        let module = include_str!("../../../claude-plugin/hooks/register.tsx");
+        assert!(module.contains(TESTS_FIRST));
     }
 }

@@ -269,18 +269,7 @@ impl App {
     fn agents_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
         let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
         let installed = |p: &str| detected.get(p).is_some_and(|d| d.path.is_some());
-        if installed("claude") {
-            theme::section(ui, "Claude Code");
-            theme::card(ui, |ui| self.launch_ui(ui, "claude"));
-        }
-        if installed("codex") {
-            theme::section(ui, "Codex");
-            theme::card(ui, |ui| self.launch_ui(ui, "codex"));
-            if let Some(home) = std::env::var_os("HOME") {
-                let codex = std::path::PathBuf::from(home).join(".codex");
-                theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
-            }
-        }
+        // Primero lo que vale para todos los agentes.
         theme::section(ui, tr!("Cómo trabajan"));
         let mut ask = self.settings.ask_first;
         theme::card(ui, |ui| {
@@ -294,17 +283,82 @@ impl App {
                     ui.checkbox(&mut ask, tr!("Aclarar antes de planificar"));
                 },
             );
+            self.tests_first_ui(ui);
         });
         if ask != self.settings.ask_first {
             self.settings.ask_first = ask;
-            for workspace in &mut self.workspaces {
-                workspace.set_ask_first(ask);
-            }
+            self.sync_accounts();
             if let Err(e) = crate::save_settings(&self.settings) {
                 self.error = Some(e);
             }
         }
+        if installed("claude") {
+            theme::section(ui, "Claude Code");
+            theme::card(ui, |ui| self.launch_ui(ui, "claude"));
+        }
+        if installed("codex") {
+            theme::section(ui, "Codex");
+            theme::card(ui, |ui| self.launch_ui(ui, "codex"));
+            if let Some(home) = std::env::var_os("HOME") {
+                let codex = std::path::PathBuf::from(home).join(".codex");
+                theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
+            }
+        }
         self.accounts_ui(ui, cmds);
+    }
+
+    /// «Primero el test»: general y, con un proyecto abierto, lo de ese proyecto.
+    fn tests_first_ui(&mut self, ui: &mut egui::Ui) {
+        let project = self.active.map(|i| self.workspaces[i].project.path.clone());
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let general = store.launch_pref("forge", "tests_first", None) == "on";
+        let own = project
+            .as_deref()
+            .map(|p| store.launch_pref("forge", "tests_first", Some(p)));
+        let mut set: Option<(Option<&std::path::Path>, &str)> = None;
+        row(
+            ui,
+            tr!("Primero el test"),
+            tr!(
+                "Para cada cambio de comportamiento o arreglo, el agente escribe primero un test que falla, luego el código mínimo que lo hace pasar y te enseña las dos ejecuciones. Vale para todos los agentes y se aplica a los que abras a partir de ahora. En Project Guard puedes además avisar si un cambio toca código sin tests."
+            ),
+            |ui| {
+                let mut on = general;
+                if ui
+                    .checkbox(&mut on, tr!("Test que falla antes del código (TDD)"))
+                    .changed()
+                {
+                    set = Some((None, if on { "on" } else { "off" }));
+                }
+                if let (Some(p), Some(own)) = (project.as_deref(), own.as_deref()) {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(RichText::new(tr!("En este proyecto")).color(theme::TEXT_3));
+                        let label = |v: &str| match v {
+                            "on" => tr!("Siempre"),
+                            "off" => tr!("Nunca"),
+                            _ => tr!("Como en general"),
+                        };
+                        egui::ComboBox::from_id_salt("tests-first-project")
+                            .selected_text(label(own))
+                            .show_ui(ui, |ui| {
+                                for v in ["", "on", "off"] {
+                                    if ui.selectable_label(own == v, label(v)).clicked() {
+                                        set = Some((Some(p), v));
+                                    }
+                                }
+                            });
+                    });
+                }
+            },
+        );
+        if let Some((scope, value)) = set {
+            if let Err(e) = store.set_launch_pref("forge", "tests_first", scope, value) {
+                self.error = Some(e);
+            }
+            self.sync_accounts();
+        }
     }
 
     /// Los comandos de Forge en Codex (`$forge-plans`…): skills en ~/.codex/skills,

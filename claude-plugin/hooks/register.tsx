@@ -103,6 +103,9 @@ resisted the obvious fixes.
 - Reply with a concrete recommendation and a short step-by-step plan.
 - Do not modify files.`
 
+// Same text as the MCP server's tests-first instruction (crates/forge-core/src/mcp.rs).
+const TESTS_FIRST = 'Tests-first mode: for every behavior change or bug fix, first write a test that fails for the right reason and run it to see it fail, then write the smallest code that makes it pass, run it again to see it pass, and only then refactor. Say which test you added and show both runs. Skip it only for changes with nothing to test (docs, config, styling) and say so.'
+
 const DELEGATION = `Forge team (subagents on cheaper models). Use them to save tokens
 and keep your context clean:
 - forge:explorer (fast model): any "where is…", "what does … do", finding files,
@@ -277,6 +280,9 @@ export const register: Register = on => {
     // Never lose the delegation policy because the variable can't be read.
     if (await $.env.get('FORGE_ASK_FIRST').catch(() => undefined) === '1') {
       sections.push({ id: 'forge-ask-first', text: 'Before planning a large request, ask up to three questions to clarify what is essential. Once answered, create the plan with plan_add before writing code.', scope: 'session' as const })
+    }
+    if (await $.env.get('FORGE_TESTS_FIRST').catch(() => undefined) === '1') {
+      sections.push({ id: 'forge-tests-first', text: TESTS_FIRST, scope: 'session' as const })
     }
     return { sections }
   })

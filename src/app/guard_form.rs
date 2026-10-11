@@ -282,6 +282,14 @@ impl App {
                 tr!("archivos como máximo"),
                 tr!("Cuántos archivos puede tocar un cambio."),
             );
+            changed |= check(
+                ui,
+                &mut g.form.warn_untested_code,
+                tr!("Avisar si cambia código sin tests"),
+                tr!(
+                    "Si el cambio toca código y ningún test (archivos de test o funciones de test nuevas), Guard avisa pero deja seguir. Útil con el modo «Primero el test»."
+                ),
+            );
 
             heading(
                 ui,

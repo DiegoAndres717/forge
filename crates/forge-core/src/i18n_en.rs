@@ -1280,14 +1280,6 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Incluir los completados", "Include completed ones"),
     (
-        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
-        "Forge Memory: the shared project memory. Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the detail with memory_get. Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
-    ),
-    (
-        "Modo «Primero pregunta»: ante una petición grande, haz hasta tres preguntas para aclarar lo imprescindible antes de crear el plan. Cuando el usuario responda, crea el plan con plan_add antes de escribir código.",
-        "Ask first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user responds, create the plan with plan_add before writing code.",
-    ),
-    (
         "La IA creó el plan #{id}: {title}",
         "The AI created plan #{id}: {title}",
     ),
@@ -2352,4 +2344,32 @@ pub const EN: &[(&str, &str)] = &[
         "Las notificaciones de macOS se pueden ajustar también en Ajustes del Sistema → Notificaciones → Forge.",
         "macOS notifications can also be adjusted in System Settings → Notifications → Forge.",
     ),
+    (
+        "Avisar si cambia código sin tests",
+        "Warn when code changes without tests",
+    ),
+    (
+        "Si el cambio toca código y ningún test (archivos de test o funciones de test nuevas), Guard avisa pero deja seguir. Útil con el modo «Primero el test».",
+        "If the change touches code but no test (test files or new test functions), Guard warns but lets it through. Useful with Tests-first mode.",
+    ),
+    ("Código con sus tests", "Code comes with its tests"),
+    (
+        "Cambia código sin tocar ningún test",
+        "Code changes without touching any test",
+    ),
+    (
+        "Escribe primero un test que falle y luego el código.",
+        "Write a failing test first, then the code.",
+    ),
+    ("Primero el test", "Tests first"),
+    (
+        "Para cada cambio de comportamiento o arreglo, el agente escribe primero un test que falla, luego el código mínimo que lo hace pasar y te enseña las dos ejecuciones. Vale para todos los agentes y se aplica a los que abras a partir de ahora. En Project Guard puedes además avisar si un cambio toca código sin tests.",
+        "For every behavior change or fix, the agent first writes a failing test, then the smallest code that makes it pass, and shows you both runs. Applies to every agent you open from now on. In Project Guard you can also warn when a change touches code without tests.",
+    ),
+    (
+        "Test que falla antes del código (TDD)",
+        "Failing test before the code (TDD)",
+    ),
+    ("Siempre", "Always"),
+    ("Nunca", "Never"),
 ];

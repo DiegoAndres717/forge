@@ -227,7 +227,7 @@ pub fn run(args: &[String]) -> i32 {
         ),
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
         (Some("mcp"), _) => open_store().and_then(|store| {
-            forge_core::mcp::serve(&project, &store, args.iter().any(|a| a == "--ask-first"))
+            forge_core::mcp::serve(&project, &store, forge_core::mcp::Modes::from_args(args))
                 .map(|_| 0)
                 .map_err(|e| e.to_string())
         }),

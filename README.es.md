@@ -57,7 +57,7 @@ Reglas deterministas antes de **commit / push / PR**: tamaño del cambio, archiv
 <td>
 
 ### Planes y Forge Memory
-Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**, cada una con su rama y tareas que va tachando; lo que surja para después va al **backlog**. **Forge Memory** guarda las decisiones, los errores resueltos y las convenciones. Las dos se comparten por MCP con Claude Code, Codex y OpenCode, y se guardan fuera del repo.
+Cuéntale a la IA lo que quieres hacer y guarda un **plan por fases**, cada una con su rama y tareas que va tachando; lo que surja para después va al **backlog**. **Forge Memory** guarda las decisiones, los errores resueltos y las convenciones. Las dos se comparten por MCP con Claude Code, Codex y OpenCode, y se guardan fuera del repo. Dos modos opcionales para todos los agentes (Ajustes → Agentes): **Primero pregunta** (unas preguntas antes de planificar) y **Primero el test** (un test que falla antes del código, en todos los proyectos o en uno; Guard puede además avisar si cambia código sin tests).
 
 </td>
 </tr>
