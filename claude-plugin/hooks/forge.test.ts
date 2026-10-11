@@ -67,7 +67,29 @@ test('no memory context for slash commands, short replies or no matches', async 
     const result = await $.prompt.submit({ text } as never)
     expect(result.context ?? []).toEqual([])
   }
-  expect(asked.length).toBe(1) // only the real question was looked up
+  // Only the real question was looked up in memory.
+  expect(asked.filter(argv => argv.includes('search')).length).toBe(1)
+})
+
+test('the plan anchor goes last, again only when it changes or every few messages', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  let anchor = 'Working on plan #9 phase 2 "Context" (next: anchor).'
+  on('process.run', ($, e) => {
+    const stdout = e.argv.includes('anchor') ? anchor : '#4 [Decision] Keep the cache'
+    return { value: { exitCode: 0, stdout, stderr: '' } } as never
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  const send = async (text: string) => ((await $.prompt.submit({ text } as never)).context ?? []) as readonly string[]
+  const first = await send('What about the cache?')
+  expect(first.at(-1)).toBe(`Forge: ${anchor}`)
+  expect(first[0]).toContain('Keep the cache')
+  // Same anchor: not repeated on the next messages (each copy stays in the context).
+  expect((await send('ok')).some(c => c.startsWith('Forge: Working'))).toBe(false)
+  anchor = 'Working on plan #9 phase 2 "Context" (next: tests).'
+  expect((await send('ok')).at(-1)).toBe(`Forge: ${anchor}`)
+  let repeats = 0
+  for (let i = 0; i < 8; i++) if ((await send('ok')).length > 0) repeats += 1
+  expect(repeats).toBe(1)
 })
 
 test('a compaction updates the single last-session note', async ($, on) => {

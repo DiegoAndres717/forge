@@ -147,6 +147,7 @@ Any `claude` started inside a Forge terminal — typed by hand, `claude --resume
 - **Live status band** above the prompt — Guard status, plans in progress and backlog, the model working right now (● opus / ↳ explorer: … (haiku)), session tokens (new vs. cached) and your plan usage bars (5h and weekly).
 - **Usage per model** — every turn, subagents included, is recorded; see it in Settings.
 - **Starts with your project in mind** — every conversation (and every one after compaction or `/clear`) begins with the project's key decisions, conventions, Guard rules and plans in progress.
+- **Keeps the goal in sight** — long contexts lose what's in the middle, so the phase you're on and its next tasks go at the end of your message (when it changes, and every few messages), the band warns at 60 % of the context, and **Start clean** in the agent's menu opens a fresh session that begins with a summary of the last one.
 - **Several accounts** — Claude Code and Codex accounts side by side without signing out (Settings → Accounts): each has its own login and history and shares your settings, `CLAUDE.md` and skills; pick one per project from the agent's right-click menu. Move a conversation to another account and carry on where you were, or to another agent (Claude Code ↔ Codex…) with a short summary of what was done and what is left — also offered when an account hits its usage limit.
 - **Zero-token commands** — `/forge-plans`, `/forge-guard`, `/forge-remember`, `/forge-memory`, `/forge-effort` (type `/forge` to list them).
 

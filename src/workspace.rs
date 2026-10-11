@@ -3059,6 +3059,10 @@ mod agent_tests {
         .unwrap();
         ws.handoff_agent(&ctx, "claude", "fake", area).unwrap();
         assert_eq!(ws.agent_panels("fake").len(), 1, "se abre el otro agente");
+        // Empezar limpio: el mismo agente, en una sesión nueva con el resumen.
+        let before = ws.agent_panels("claude").len();
+        ws.handoff_agent(&ctx, "claude", "claude", area).unwrap();
+        assert_eq!(ws.agent_panels("claude").len(), before + 1);
         let _ = std::fs::remove_dir_all(base);
     }
 }

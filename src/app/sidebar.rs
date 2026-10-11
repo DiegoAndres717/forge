@@ -425,6 +425,20 @@ impl App {
                         cmds.push(UiCmd::OpenAgent(agent.id.clone(), true));
                     }
                 }
+                // Contra «lost in the middle»: una sesión nueva y corta del mismo agente
+                // que empieza con el resumen de la anterior, en vez de arrastrar una larga.
+                if session.is_some()
+                    && agent.with_prompt(&agent.command, "x").is_some()
+                    && ui
+                        .add_enabled(
+                            installed,
+                            egui::Button::new(tr!("{p0}  Empezar limpio", p0 = icon::SPARKLE)),
+                        )
+                        .on_hover_text(tr!("Abre una sesión nueva de {p0} que empieza con un resumen de la última (lo hecho, lo pendiente y los archivos tocados). Con conversaciones largas el agente se pierde en lo del medio; así arranca con poco contexto y lo importante delante.", p0 = agent.name))
+                        .clicked()
+                {
+                    cmds.push(UiCmd::AgentHandoff(agent.id.clone(), agent.id.clone()));
+                }
                 // Seguir la última conversación de este agente en otro (con un resumen).
                 if session.is_some() {
                     for to in ws.agent_handoff_targets(&agent.id) {
