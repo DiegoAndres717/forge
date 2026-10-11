@@ -1476,6 +1476,9 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.save();
+        for ws in &self.workspaces {
+            ws.save_session_notes();
+        }
     }
 }
 

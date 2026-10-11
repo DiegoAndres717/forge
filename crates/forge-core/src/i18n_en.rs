@@ -2372,4 +2372,5 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Siempre", "Always"),
     ("Nunca", "Never"),
+    ("Última sesión de {name}:", "Last session in {name}:"),
 ];

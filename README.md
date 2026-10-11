@@ -57,7 +57,7 @@ Deterministic rules before **commit / push / PR**: change size, forbidden files,
 <td>
 
 ### Plans and Forge Memory
-Tell the AI what you want to build and it saves a **plan in phases**, each with its branch and tasks it ticks off as it works; ideas for later go to the **backlog**. **Forge Memory** keeps the decisions, fixed errors and conventions. Both are shared over MCP with Claude Code, Codex and OpenCode, and stored outside the repo. Two optional modes for every agent (Settings → Agents): **Ask first** (a few questions before planning) and **Tests first** (a failing test before the code, for all projects or per project; Guard can also warn when code changes without tests).
+Tell the AI what you want to build and it saves a **plan in phases**, each with its branch and tasks it ticks off as it works; ideas for later go to the **backlog**. **Forge Memory** keeps the decisions, fixed errors and conventions, and fills itself: when you close an agent (Claude Code or Codex) its last conversation is saved as the project's "last session" note. Both are shared over MCP with Claude Code, Codex and OpenCode, and stored outside the repo. Two optional modes for every agent (Settings → Agents): **Ask first** (a few questions before planning) and **Tests first** (a failing test before the code, for all projects or per project; Guard can also warn when code changes without tests).
 
 </td>
 </tr>
