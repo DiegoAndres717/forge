@@ -3,6 +3,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use eframe::egui;
 use forge_core::store::Store;
 
 /// Editores conocidos: (nombre, bundle id). Launch Services los encuentra estén donde
@@ -48,6 +49,68 @@ pub(super) fn installed() -> &'static [Editor] {
             })
             .collect()
     })
+}
+
+/// Icono de la app tal como lo muestra macOS (64 px), como textura; se hace una vez.
+pub(super) fn icon(ctx: &egui::Context, bundle: &str) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new(("editor-icon", bundle));
+    if let Some(texture) = ctx.memory_mut(|m| m.data.get_temp::<Option<egui::TextureHandle>>(id)) {
+        return texture;
+    }
+    let texture =
+        render_icon(bundle).map(|image| ctx.load_texture(bundle, image, Default::default()));
+    ctx.memory_mut(|m| m.data.insert_temp(id, texture.clone()));
+    texture
+}
+
+fn render_icon(bundle: &str) -> Option<egui::ColorImage> {
+    use objc2::AnyThread;
+    use objc2_app_kit::{NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSWorkspace};
+    use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
+    const SIZE: usize = 64;
+    let workspace = NSWorkspace::sharedWorkspace();
+    let url = workspace.URLForApplicationWithBundleIdentifier(&NSString::from_str(bundle))?;
+    let path = url.path()?;
+    let image = workspace.iconForFile(&path);
+    // SAFETY: lienzo RGBA propio de SIZE×SIZE; se lee después de dibujar y soltar el contexto.
+    unsafe {
+        let rep = NSBitmapImageRep::initWithBitmapDataPlanes_pixelsWide_pixelsHigh_bitsPerSample_samplesPerPixel_hasAlpha_isPlanar_colorSpaceName_bytesPerRow_bitsPerPixel(
+            NSBitmapImageRep::alloc(),
+            std::ptr::null_mut(),
+            SIZE as isize,
+            SIZE as isize,
+            8,
+            4,
+            true,
+            false,
+            NSDeviceRGBColorSpace,
+            0,
+            0,
+        )?;
+        let context = NSGraphicsContext::graphicsContextWithBitmapImageRep(&rep)?;
+        NSGraphicsContext::saveGraphicsState_class();
+        NSGraphicsContext::setCurrentContext(Some(&context));
+        image.drawInRect(NSRect::new(
+            NSPoint::new(0.0, 0.0),
+            NSSize::new(SIZE as f64, SIZE as f64),
+        ));
+        context.flushGraphics();
+        NSGraphicsContext::restoreGraphicsState_class();
+        let (data, stride) = (rep.bitmapData(), rep.bytesPerRow() as usize);
+        if data.is_null() {
+            return None;
+        }
+        let rows = std::slice::from_raw_parts(data, stride * SIZE);
+        let rgba: Vec<u8> = rows
+            .chunks(stride)
+            .flat_map(|row| &row[..SIZE * 4])
+            .copied()
+            .collect();
+        Some(egui::ColorImage::from_rgba_premultiplied(
+            [SIZE, SIZE],
+            &rgba,
+        ))
+    }
 }
 
 /// El preferido (el último usado) si sigue instalado; si no, el primero.

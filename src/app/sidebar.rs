@@ -683,16 +683,24 @@ fn editor_menu(ui: &mut egui::Ui, i: usize, store: Option<&Store>, cmds: &mut Ve
     let Some((name, bundle)) = super::editors::preferred(store, editors) else {
         return;
     };
-    if ui
-        .button(tr!("{p0}  Abrir en {name}", p0 = icon::CODE, name = name))
-        .clicked()
-    {
+    // Cada editor con su icono de macOS (o el genérico si no se pudo leer).
+    let button = |ui: &mut egui::Ui, bundle: &str, text: String| match super::editors::icon(
+        ui.ctx(),
+        bundle,
+    ) {
+        Some(t) => ui.add(egui::Button::image_and_text(
+            egui::Image::new((t.id(), Vec2::splat(16.0))),
+            text,
+        )),
+        None => ui.button(format!("{}  {text}", icon::CODE)),
+    };
+    if button(ui, bundle, tr!("Abrir en {name}", name = name)).clicked() {
         cmds.push(UiCmd::OpenInEditor(i, Some(bundle)));
     }
     if editors.len() > 1 {
         ui.menu_button(tr!("{p0}  Abrir con", p0 = icon::CODE), |ui| {
             for &(name, bundle) in editors {
-                if ui.button(name).clicked() {
+                if button(ui, bundle, name.to_string()).clicked() {
                     cmds.push(UiCmd::OpenInEditor(i, Some(bundle)));
                 }
             }
