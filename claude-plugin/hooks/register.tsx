@@ -115,7 +115,10 @@ const alias = (model: string) =>
 const short = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`
 
-/** Cabecera breve al abrir una sesión desde Forge. */
+/** Forge's orange (the app icon), a little lighter letter by letter. */
+const BRAND = ['#ff6a00', '#ff7f0a', '#ff9f0a', '#ffb340', '#ffc66b']
+
+/** One short header line when the session was opened from Forge: project and branch. */
 async function sessionHeader($: EngineInterface, cwd: string) {
   const project = await $.env.get('FORGE_PROJECT')
   if (!project) return
@@ -177,7 +180,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'forge-plans', description: "Forge: this project's plans and backlog", argumentHint: '[add <text> | show <id>]' })
     await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
     await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to Forge Memory', argumentHint: '<text>' })
-    await sessionHeader($, e.cwd)
+    void sessionHeader($, e.cwd) // `git` may be slow: never hold up the session start
     void refreshBand($)
     void $.session
       .usage()
@@ -318,8 +321,10 @@ export const register: Register = on => {
     const sep = <Text dimColor> · </Text>
     return (
       <Text>
-        <Text color="claude" bold>◆ </Text>
-        <Text color="error" bold>F</Text><Text color="warning" bold>o</Text><Text color="success" bold>rge</Text>
+        <Text color={BRAND[0]} bold>◆ </Text>
+        {[...'Forge'].map((letter, i) => (
+          <Text key={`brand-${i}`} color={BRAND[i]} bold>{letter}</Text>
+        ))}
         {account ? <Text color="claude">{` · ${account}`}</Text> : null}
         {status ? sep : null}
         {status ? <Text dimColor>Guard </Text> : null}
