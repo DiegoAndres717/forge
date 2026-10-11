@@ -29,6 +29,15 @@ fn tools() -> Value {
             }
         },
         {
+            "name": "memory_get",
+            "description": tr!("Lee el detalle de una memoria de Forge por id, después de encontrarla con memory_search."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {"id": {"type": "integer"}},
+                "required": ["id"]
+            }
+        },
+        {
             "name": "memory_save",
             "description": tr!("Guarda algo que convenga recordar en el proyecto: una decisión y su porqué, un error resuelto y su causa, un comando útil, una convención. Para cosas por hacer usa los planes (plan_add)."),
             "inputSchema": {
@@ -213,7 +222,17 @@ impl<'a> Server<'a> {
                     kind,
                     limit,
                 )
-                .map(|found| listing(&found, tr!("No hay memorias que coincidan."))),
+                .map(|found| search_listing(&found, tr!("No hay memorias que coincidan."))),
+            "memory_get" => match args["id"].as_i64() {
+                Some(id) => self
+                    .store
+                    .get_memory(self.project, id)
+                    .map(|found| match found {
+                        Some(memory) => memory::render(&memory),
+                        None => tr!("No existe la memoria #{id}.", id = id),
+                    }),
+                None => Err(tr!("falta `id`").into()),
+            },
             "memory_list" => self
                 .store
                 .list_memories(self.project, kind, limit)
@@ -426,6 +445,17 @@ fn listing(found: &[memory::Memory], empty: &str) -> String {
         .join("\n\n")
 }
 
+fn search_listing(found: &[memory::Memory], empty: &str) -> String {
+    if found.is_empty() {
+        return empty.into();
+    }
+    found
+        .iter()
+        .map(memory::render_search)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 /// Resumen del proyecto para dar contexto a un agente.
 pub fn project_context(project: &Path, store: &Store) -> String {
     let mut out = Vec::new();
@@ -573,7 +603,7 @@ mod tests {
         let list = server
             .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 10);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 11);
 
         let call = |server: &mut Server, id: i64, name: &str, args: Value| {
             server.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()
@@ -616,8 +646,17 @@ mod tests {
         let found = call(&mut server, 4, "memory_search", json!({"query": "nequi"}));
         let text = found["result"]["content"][0]["text"].as_str().unwrap();
         assert!(
-            text.contains("Pagos con Wompi") && text.contains("claude-code"),
+            text.contains("Pagos con Wompi")
+                && text.contains("Nequi")
+                && !text.contains("claude-code"),
             "{text}"
+        );
+        let detail = call(&mut server, 41, "memory_get", json!({"id": 1}));
+        assert!(
+            detail["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("claude-code")
         );
         let bad = call(
             &mut server,

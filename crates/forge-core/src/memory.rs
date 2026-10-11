@@ -3,7 +3,7 @@
 use crate::tr;
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::store::{Store, now};
@@ -225,6 +225,30 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    /// Una memoria por id, siempre dentro del proyecto actual.
+    pub fn get_memory(&self, project: &Path, id: i64) -> Result<Option<Memory>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, title, body, tags, source, created_at FROM memories
+                 WHERE id = ?1 AND project = ?2",
+                params![id, self.project_key(project)],
+                |r| {
+                    Ok(Memory {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        title: r.get(2)?,
+                        body: r.get(3)?,
+                        tags: r.get(4)?,
+                        source: r.get(5)?,
+                        created_at: r.get(6)?,
+                        snippet: None,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())
+    }
+
     /// Memoria existente que trata de lo mismo que `title` (para no guardar duplicados).
     // ponytail: recorre las 500 más recientes; usar FTS si un proyecto llega a miles.
     pub fn similar_memory(&self, project: &Path, title: &str) -> Result<Option<Memory>, String> {
@@ -314,6 +338,23 @@ pub fn render(m: &Memory) -> String {
     )
 }
 
+/// Resultado breve de búsqueda: el detalle se obtiene con `memory_get`.
+pub fn render_search(m: &Memory) -> String {
+    let snippet = m.snippet.as_deref().unwrap_or(&m.body);
+    tr!(
+        "#{p0} [{p1}] {p2}\n{p3}",
+        p0 = m.id,
+        p1 = kind_label(&m.kind),
+        p2 = m.title,
+        p3 = snippet
+    )
+}
+
+/// Referencia mínima para inyectar en el contexto de un agente.
+pub fn render_title(m: &Memory) -> String {
+    format!("#{} [{}] {}", m.id, kind_label(&m.kind), m.title)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,6 +430,9 @@ mod tests {
                 .search_memories(p, "\"; DROP TABLE memories; --", None, 10)
                 .is_ok()
         );
+        let memory = store.get_memory(p, hits[0].id).unwrap().unwrap();
+        assert_eq!(memory.title, "Vacunación en lotes");
+        assert!(store.get_memory(other, memory.id).unwrap().is_none());
 
         assert_eq!(store.list_memories(p, None, 10).unwrap().len(), 3);
         assert_eq!(store.count_memories(p).unwrap(), 3);

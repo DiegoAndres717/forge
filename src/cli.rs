@@ -1026,6 +1026,7 @@ fn memory_cli(
 ) -> Result<i32, String> {
     let store = open_store()?;
     let kind = flag(args, "--kind");
+    let brief = args.iter().any(|arg| arg == "--brief");
     let found = match action {
         "search" => store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?,
         "list" => store.list_memories(project, kind.as_deref(), 30)?,
@@ -1061,8 +1062,13 @@ fn memory_cli(
     if found.is_empty() {
         out.line(tr!("Sin resultados."));
     }
-    for m in found {
-        out.line(&forge_core::memory::render(&m));
+    for m in found.into_iter().take(if brief { 4 } else { usize::MAX }) {
+        let text = if brief {
+            forge_core::memory::render_title(&m)
+        } else {
+            forge_core::memory::render(&m)
+        };
+        out.line(&text);
         out.line("");
     }
     Ok(0)

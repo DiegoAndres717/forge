@@ -225,6 +225,21 @@ export const register: Register = on => {
     return { ...result, blocks: [...result.blocks, block] }
   })
 
+  // Una búsqueda local por mensaje añade solo referencias: el modelo pide el detalle si lo necesita.
+  on('prompt.submit', async ($, e, next) => {
+    const out = await forge($, ['memory', 'search', '--brief', e.text])
+    const memories = out && out.exitCode === 0 ? out.stdout.trim() : ''
+    return next(memories ? { ...e, context: [...(e.context ?? []), `Relevant Forge Memory:\n${memories}`] } : e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    const messages = 'messages' in result ? result.messages : undefined
+    const summary = messages?.find(message => message.role === 'assistant')?.text.trim()
+    if (summary) void forge($, ['memory', 'add', 'note', 'Resumen de compactación', summary])
+    return result
+  })
+
   // The delegation policy, added to the main session's system prompt.
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)

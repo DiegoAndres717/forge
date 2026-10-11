@@ -47,6 +47,14 @@ test('the delegation policy is added to the system prompt', async ($, on) => {
   expect(result.sections.map(s => s.id)).toContain('forge-team')
 })
 
+test('each prompt receives only matching memory references', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '#4 [Decision] Keep the cache\n', stderr: '' } } as never))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  const result = await $.prompt.submit({ text: 'What about the cache?' } as never)
+  expect(result.context?.[0]).toContain('#4 [Decision] Keep the cache')
+})
+
 test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {
   // The band only draws when it has something to show: a plan usage window.
   on('session.measure', ($, e) => ({ changed: e.changed }))

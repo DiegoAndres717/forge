@@ -801,6 +801,10 @@ pub const EN: &[(&str, &str)] = &[
         "Searches Forge Memory, the project memory (decisions, architecture, fixed errors, commands, conventions). Use it before deciding something or when you hit an error that may already have been solved.",
     ),
     (
+        "Lee el detalle de una memoria de Forge por id, después de encontrarla con memory_search.",
+        "Reads a Forge memory's details by id, after finding it with memory_search.",
+    ),
+    (
         "Palabras a buscar (sin tildes también vale)",
         "Words to search for",
     ),
@@ -908,6 +912,7 @@ pub const EN: &[(&str, &str)] = &[
         "#{p0} [{p1}] {p2}\n{p3}\n(guardada por {p4}, {p5}{tags})",
         "#{p0} [{p1}] {p2}\n{p3}\n(saved by {p4}, {p5}{tags})",
     ),
+    ("#{p0} [{p1}] {p2}\n{p3}", "#{p0} [{p1}] {p2}\n{p3}"),
     (
         "estás en `{branch}`: crea una rama para el PR (git switch -c mi-cambio)",
         "you are on `{branch}`: create a branch for the PR (git switch -c my-change)",
