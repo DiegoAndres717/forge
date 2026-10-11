@@ -15,7 +15,7 @@ export type Used = { fresh: number; cache: number }
 export type ModelTokens = Record<string, Used>
 
 /** Who is working right now: the main loop (`main`) and each running subagent by id. */
-export type Active = Record<string, { model: string; task: string }>
+export type Active = Record<string, { model: string; task: string; effort?: string }>
 
 /** A plan usage window (`five_hour`, `seven_day`) as Claude Code reports it. */
 export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
@@ -29,6 +29,10 @@ declare module 'claude-code' {
       active: Active
       /** Subagent id → "explorer: find the login" (from its spawn). */
       tasks: Record<string, string>
+      /** How full the context window is, in percent (null until measured). */
+      context: number | null
+      /** Effort set for this session with /forge-effort ('' = the session's own). */
+      effort: string
     }
   }
 }

@@ -277,46 +277,16 @@ impl App {
 
     /// Modelo de Claude y cuentas de los agentes.
     fn agents_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
-        theme::section(ui, "Claude Code");
-        theme::card(ui, |ui| {
-            row(
-                ui,
-                tr!("Modelo"),
-                tr!(
-                    "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas."
-                ),
-                |ui| {
-                    let current = crate::claude_plugin::CLAUDE_MODEL
-                        .lock()
-                        .map(|m| m.clone())
-                        .unwrap_or_default();
-                    let name = |v: &str| {
-                        crate::claude_plugin::MODELS
-                            .iter()
-                            .find(|(id, _)| *id == v)
-                            .map_or(v.to_string(), |(_, l)| forge_core::i18n::t(l).to_string())
-                    };
-                    egui::ComboBox::from_id_salt("claude-model")
-                        .selected_text(name(&current))
-                        .width(ui.available_width().min(320.0))
-                        .show_ui(ui, |ui| {
-                            for (id, label) in crate::claude_plugin::MODELS {
-                                if ui
-                                    .selectable_label(current == id, forge_core::i18n::t(label))
-                                    .on_hover_text(model_info(id))
-                                    .clicked()
-                                {
-                                    if let Ok(mut m) = crate::claude_plugin::CLAUDE_MODEL.lock() {
-                                        *m = id.to_string();
-                                    }
-                                    self.db(|s| s.set_setting("claude_model", id));
-                                }
-                            }
-                        });
-                    hint(ui, model_info(&current));
-                },
-            );
-        });
+        let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
+        let installed = |p: &str| detected.get(p).is_some_and(|d| d.path.is_some());
+        if installed("claude") {
+            theme::section(ui, "Claude Code");
+            theme::card(ui, |ui| self.launch_ui(ui, "claude"));
+        }
+        if installed("codex") {
+            theme::section(ui, "Codex");
+            theme::card(ui, |ui| self.launch_ui(ui, "codex"));
+        }
         theme::section(ui, tr!("Cómo trabajan"));
         let mut ask = self.settings.ask_first;
         theme::card(ui, |ui| {
@@ -812,4 +782,191 @@ fn codex_limits_cached(
     let limits = forge_core::sessions::codex_limits(a.dir.as_deref());
     ui.data_mut(|d| d.insert_temp::<Cached>(id, (now, limits.clone())));
     limits
+}
+
+/// Qué hace cada nivel de esfuerzo.
+fn effort_info(level: &str) -> &'static str {
+    match level {
+        "" => tr!("El que tenga el agente en su propia configuración. Forge no lo cambia."),
+        "low" => tr!("Piensa poco: rápido y barato, para tareas sencillas."),
+        "medium" => tr!("Equilibrio entre rapidez y cuidado."),
+        "high" => tr!("Piensa más: para cambios que tocan varias piezas."),
+        "xhigh" => tr!("Para problemas difíciles. Más lento y gasta más."),
+        "max" => tr!("Lo máximo: el más lento y caro. Solo para lo más difícil."),
+        _ => "",
+    }
+}
+
+fn effort_label(level: &str) -> &'static str {
+    match level {
+        "" => tr!("Tu configuración"),
+        "low" => tr!("Bajo"),
+        "medium" => tr!("Medio"),
+        "high" => tr!("Alto"),
+        "xhigh" => tr!("Muy alto"),
+        "max" => tr!("Máximo"),
+        _ => "",
+    }
+}
+
+impl App {
+    /// Modelo y esfuerzo de un agente: en general y, si hay un proyecto abierto, solo para
+    /// él. Se aplican a los agentes que se abran después.
+    fn launch_ui(&mut self, ui: &mut egui::Ui, program: &str) {
+        let project = self.active.map(|i| self.workspaces[i].project.path.clone());
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        // Lo que significa «Tu configuración» en Codex: lo de su config.toml.
+        let codex = (program == "codex")
+            .then(|| {
+                std::env::var_os("HOME").map(|h| {
+                    forge_core::launch::codex_defaults(&std::path::PathBuf::from(h).join(".codex"))
+                })
+            })
+            .flatten()
+            .unwrap_or_default();
+        let mine = |what: &str| -> String {
+            match (program, what) {
+                ("codex", "model") if !codex.0.is_empty() => {
+                    tr!("Tu configuración ({p0})", p0 = codex.0)
+                }
+                ("codex", "effort") if !codex.1.is_empty() => {
+                    tr!("Tu configuración ({p0})", p0 = effort_label(&codex.1))
+                }
+                _ => tr!("Tu configuración").to_string(),
+            }
+        };
+        let mut changes: Vec<(&str, Option<std::path::PathBuf>, String)> = Vec::new();
+        let scopes: Vec<(Option<std::path::PathBuf>, &str)> =
+            std::iter::once((None, tr!("En general")))
+                .chain(project.clone().map(|p| (Some(p), tr!("En este proyecto"))))
+                .collect();
+        for (scope, scope_label) in &scopes {
+            let model = store.launch_pref(program, "model", scope.as_deref());
+            let effort = store.launch_pref(program, "effort", scope.as_deref());
+            let inherit = tr!("Como en general");
+            let empty = if scope.is_some() {
+                inherit.to_string()
+            } else {
+                mine("model")
+            };
+            let empty_effort = if scope.is_some() {
+                inherit.to_string()
+            } else {
+                mine("effort")
+            };
+            let salt = (program, scope.is_some());
+            row(
+                ui,
+                &format!("{} · {scope_label}", tr!("Modelo")),
+                if program == "claude" {
+                    tr!(
+                        "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas. «En este proyecto» manda sobre «En general»."
+                    )
+                } else {
+                    tr!(
+                        "Con qué modelo se abre Codex desde Forge. Escribe el nombre tal como lo pide Codex (p. ej. gpt-5). «En este proyecto» manda sobre «En general»."
+                    )
+                },
+                |ui| {
+                    if program == "claude" {
+                        let name = |v: &str| {
+                            if v.is_empty() {
+                                empty.clone()
+                            } else {
+                                crate::claude_plugin::MODELS
+                                    .iter()
+                                    .find(|(id, _)| *id == v)
+                                    .map_or(v.to_string(), |(_, l)| {
+                                        forge_core::i18n::t(l).to_string()
+                                    })
+                            }
+                        };
+                        egui::ComboBox::from_id_salt(("model", salt))
+                            .selected_text(name(&model))
+                            .width(ui.available_width().min(320.0))
+                            .show_ui(ui, |ui| {
+                                for (id, _) in crate::claude_plugin::MODELS {
+                                    if ui
+                                        .selectable_label(model == id, name(id))
+                                        .on_hover_text(model_info(id))
+                                        .clicked()
+                                    {
+                                        changes.push(("model", scope.clone(), id.to_string()));
+                                    }
+                                }
+                            });
+                        if !model.is_empty() || scope.is_none() {
+                            hint(ui, model_info(&model));
+                        }
+                    } else {
+                        let id = egui::Id::new(("codex-model", scope.is_some()));
+                        let mut text = ui
+                            .data(|d| d.get_temp::<String>(id))
+                            .unwrap_or_else(|| model.clone());
+                        let edit = ui.add(
+                            egui::TextEdit::singleline(&mut text)
+                                .hint_text(empty.clone())
+                                .desired_width(ui.available_width().min(320.0)),
+                        );
+                        if edit.changed() {
+                            ui.data_mut(|d| d.insert_temp(id, text.clone()));
+                        }
+                        if edit.lost_focus() {
+                            if text.trim() != model {
+                                changes.push(("model", scope.clone(), text.trim().to_string()));
+                            }
+                            ui.data_mut(|d| d.remove::<String>(id));
+                        }
+                    }
+                },
+            );
+            row(
+                ui,
+                &format!("{} · {scope_label}", tr!("Esfuerzo")),
+                tr!(
+                    "Cuánto piensa el agente antes de responder. Más esfuerzo: mejores respuestas en lo difícil, pero más lento y más gasto de tu plan. En Claude Code puedes cambiarlo en la sesión con /forge-effort."
+                ),
+                |ui| {
+                    let name = |v: &str| {
+                        if v.is_empty() {
+                            empty_effort.clone()
+                        } else {
+                            effort_label(v).to_string()
+                        }
+                    };
+                    egui::ComboBox::from_id_salt(("effort", salt))
+                        .selected_text(name(&effort))
+                        .width(ui.available_width().min(320.0))
+                        .show_ui(ui, |ui| {
+                            for level in std::iter::once("")
+                                .chain(forge_core::launch::efforts(program).iter().copied())
+                            {
+                                if ui
+                                    .selectable_label(effort == level, name(level))
+                                    .on_hover_text(effort_info(level))
+                                    .clicked()
+                                {
+                                    changes.push(("effort", scope.clone(), level.to_string()));
+                                }
+                            }
+                        });
+                    if !effort.is_empty() {
+                        hint(ui, effort_info(&effort));
+                    }
+                },
+            );
+        }
+        hint(
+            ui,
+            tr!("Se aplica a los agentes que abras a partir de ahora."),
+        );
+        if !changes.is_empty() {
+            for (what, scope, value) in changes {
+                self.db(|s| s.set_launch_pref(program, what, scope.as_deref(), &value));
+            }
+            self.sync_accounts();
+        }
+    }
 }

@@ -12,6 +12,7 @@ pub mod hooks;
 pub mod i18n;
 mod i18n_en;
 pub mod ideas;
+pub mod launch;
 pub mod mcp;
 pub mod memory;
 pub mod pr;

@@ -2146,4 +2146,53 @@ pub const EN: &[(&str, &str)] = &[
         "Ante una petición grande, el agente hace hasta tres preguntas para aclarar lo imprescindible y luego crea el plan por fases antes de escribir código. Vale para todos los agentes y se aplica a los que abras a partir de ahora.",
         "For a large request, the agent asks up to three questions to clarify what is essential, then creates the phased plan before writing code. Works for every agent and applies to the ones you open from now on.",
     ),
+    (
+        "El que tenga el agente en su propia configuración. Forge no lo cambia.",
+        "Whatever the agent has in its own settings. Forge doesn't change it.",
+    ),
+    (
+        "Piensa poco: rápido y barato, para tareas sencillas.",
+        "Thinks little: fast and cheap, for simple tasks.",
+    ),
+    (
+        "Equilibrio entre rapidez y cuidado.",
+        "A balance between speed and care.",
+    ),
+    (
+        "Piensa más: para cambios que tocan varias piezas.",
+        "Thinks more: for changes that touch several parts.",
+    ),
+    (
+        "Para problemas difíciles. Más lento y gasta más.",
+        "For hard problems. Slower and costs more.",
+    ),
+    (
+        "Lo máximo: el más lento y caro. Solo para lo más difícil.",
+        "The most: slowest and priciest. Only for the hardest things.",
+    ),
+    ("Bajo", "Low"),
+    ("Medio", "Medium"),
+    ("Alto", "High"),
+    ("Muy alto", "Very high"),
+    ("Máximo", "Max"),
+    ("Tu configuración ({p0})", "Your settings ({p0})"),
+    ("En general", "In general"),
+    ("Como en general", "Same as in general"),
+    (
+        "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas. «En este proyecto» manda sobre «En general».",
+        "Which model Claude Code opens with from Forge (sidebar, ⌘⇧A, ⌘K). A claude typed by hand in the terminal uses whatever you type. \"In this project\" wins over \"In general\".",
+    ),
+    (
+        "Con qué modelo se abre Codex desde Forge. Escribe el nombre tal como lo pide Codex (p. ej. gpt-5). «En este proyecto» manda sobre «En general».",
+        "Which model Codex opens with from Forge. Type the name as Codex expects it (e.g. gpt-5). \"In this project\" wins over \"In general\".",
+    ),
+    ("Esfuerzo", "Effort"),
+    (
+        "Cuánto piensa el agente antes de responder. Más esfuerzo: mejores respuestas en lo difícil, pero más lento y más gasto de tu plan. En Claude Code puedes cambiarlo en la sesión con /forge-effort.",
+        "How much the agent thinks before answering. More effort: better answers on hard things, but slower and more of your plan. In Claude Code you can change it in the session with /forge-effort.",
+    ),
+    (
+        "Se aplica a los agentes que abras a partir de ahora.",
+        "Applies to the agents you open from now on.",
+    ),
 ];

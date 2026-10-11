@@ -23,6 +23,22 @@ const limitsReported = new Set<string>()
 const limits = atom({ plugin: 'forge', key: 'limits' } as const, [] as Limit[])
 const active = atom({ plugin: 'forge', key: 'active' } as const, {} as Active)
 const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<string, string>)
+const context = atom({ plugin: 'forge', key: 'context' } as const, null as number | null)
+const effort = atom({ plugin: 'forge', key: 'effort' } as const, '')
+
+/** Effort levels Claude Code takes, from least to most. */
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
+type Effort = (typeof EFFORTS)[number]
+const isEffort = (v: string): v is Effort => (EFFORTS as readonly string[]).includes(v)
+
+/** Context fuller than this: the band suggests /compact before it gets expensive. */
+const CONTEXT_WARN = 70
+
+/** Searching and reading tools: after this many in a row the main loop is nudged to
+ * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */
+const EXPLORE_TOOLS = new Set(['Read', 'Grep', 'Glob'])
+const EXPLORE_NUDGE_AT = 4
+let exploring = 0
 
 /** Models always listed in the band, in this order (others are added when used). */
 const MODELS = ['opus', 'sonnet', 'haiku']
@@ -165,13 +181,13 @@ async function run($: EngineInterface, args: string[]) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const agents = [
-      { name: 'explorer', model: 'haiku', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
+      { name: 'explorer', model: 'haiku', effort: 'low', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
         description: 'Fast, cheap code explorer: where things are, what code does, finding files, symbols and call sites, reading and summarizing several files. Returns a short answer with paths.' },
-      { name: 'researcher', model: 'haiku', prompt: RESEARCHER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
+      { name: 'researcher', model: 'haiku', effort: 'low', prompt: RESEARCHER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
         description: 'Fast, cheap researcher for anything outside the code: Slack, Linear, ClickUp, email, calendar, Drive, docs and the web through the connected tools. Returns a short summary with links. Read-only.' },
-      { name: 'reviewer', model: 'sonnet', prompt: REVIEWER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
+      { name: 'reviewer', model: 'sonnet', effort: 'medium', prompt: REVIEWER, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
         description: 'Runs tests, type checks and builds and explains failures; reviews a finished change. Does not edit files.' },
-      { name: 'architect', model: 'opus', prompt: ARCHITECT, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
+      { name: 'architect', model: 'opus', effort: 'high', prompt: ARCHITECT, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
         description: 'Strongest model, for hard design decisions, risky migrations, security-sensitive code and stubborn bugs. Returns a recommendation and a plan.' },
     ]
     for (const agent of agents) {
@@ -180,6 +196,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'forge-plans', description: "Forge: this project's plans and backlog", argumentHint: '[add <text> | show <id>]' })
     await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
     await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to Forge Memory', argumentHint: '<text>' })
+    await $.command.register({ name: 'forge-effort', description: 'Forge: how hard Claude thinks in this session', argumentHint: '[low | medium | high | xhigh | max | auto]' })
     await $.command.register({ name: 'forge-memory', description: 'Forge: search project memory without a model call', argumentHint: '<text>' })
     void sessionHeader($, e.cwd) // `git` may be slow: never hold up the session start
     void refreshBand($)
@@ -195,6 +212,10 @@ export const register: Register = on => {
 
   // Plan usage windows: pushed after each turn and when a window moves a point.
   on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('context') && typeof e.context?.percent === 'number') {
+      const percent = Math.round(e.context.percent)
+      await update($, context, () => percent)
+    }
     if (e.changed.includes('rateLimits')) {
       await update($, limits, () => e.rateLimits)
       // Forge keeps each account's latest windows, to show them all in Settings.
@@ -230,6 +251,7 @@ export const register: Register = on => {
   // the detail with memory_get when it needs it. Slash commands and one-word replies
   // carry nothing to look up; it never waits more than 2 s.
   on('prompt.submit', async ($, e, next) => {
+    exploring = 0
     const text = e.text.trim()
     if (text.startsWith('/') || text.length < 12) return next(e)
     const out = await forge($, ['memory', 'search', '--brief', text], undefined, 2_000)
@@ -280,15 +302,46 @@ export const register: Register = on => {
   on('turn.step', async function* ($, e, next) {
     const key = e.agentId ?? 'main'
     const model = alias(e.model)
+    // /forge-effort changes the main loop's effort (only on a model that takes one).
+    let step = e
+    try {
+      const chosen = key === 'main' ? await read($, effort) : ''
+      if (chosen && isEffort(chosen) && e.effort !== undefined) step = { ...e, effort: chosen }
+    } catch {
+      // Without the store the step goes as it came.
+    }
+    const level = typeof step.effort === 'string' ? step.effort : undefined
     try {
       const names = await read($, tasks)
       await update($, active, all =>
-        all[key]?.model === model ? all : { ...all, [key]: { model, task: key === 'main' ? '' : names[key] ?? 'subagent' } },
+        all[key]?.model === model && all[key]?.effort === level
+          ? all
+          : { ...all, [key]: { model, effort: level, task: key === 'main' ? '' : names[key] ?? 'subagent' } },
       )
     } catch {
       // Only the band depends on this: never hold up the request.
     }
-    return yield* next(e)
+    return yield* next(step)
+  })
+
+  // The main loop searching and reading file after file itself: one reminder (that only
+  // the model reads) to hand the rest to forge:explorer. Counted per message of yours.
+  on('tool.call', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId || 'deny' in result) return result
+    if (!EXPLORE_TOOLS.has(e.tool)) {
+      exploring = 0
+      return result
+    }
+    exploring += 1
+    if (exploring !== EXPLORE_NUDGE_AT) return result
+    return {
+      ...result,
+      context: [
+        ...(result.context ?? []),
+        'Forge: you have searched or read several files yourself in a row. Delegate the rest of this exploration to forge:explorer (cheaper, and it keeps your context clean); keep doing the editing yourself.',
+      ],
+    }
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -331,6 +384,8 @@ export const register: Register = on => {
     const used = Object.entries(spent)
     const busy = (model: string) => working.some(([, w]) => w.model === model)
     const subagents = working.filter(([key]) => key !== 'main')
+    const main = working.find(([key]) => key === 'main')?.[1]
+    const ctx = await read($, context)
     const now = Date.now()
     const windows = await read($, limits)
     // The Forge account this session runs with (only set when there are several).
@@ -341,7 +396,8 @@ export const register: Register = on => {
       const percent = Math.max(0, Math.min(100, Math.round(w.percentUsed)))
       return [{ label, percent, reset: resetsIn(w.resetsAt, now) }]
     })
-    if (e.props.hasSurvey || (status === null && used.length === 0 && working.length === 0 && plan.length === 0))
+    const full = ctx !== null && ctx >= CONTEXT_WARN
+    if (e.props.hasSurvey || (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full))
       return next(e)
     const { Text } = $.ui.resolve(e)
     // One line of text with colored spans: it reads left to right and, when narrow,
@@ -373,6 +429,8 @@ export const register: Register = on => {
               <Text dimColor> · </Text>
               {atWork ? <Text color={MODEL_COLOR[model] ?? 'text'}>● </Text> : null}
               <Text color={MODEL_COLOR[model] ?? 'text'} bold={atWork}>{model}</Text>
+              {/* The main loop's effort, next to its model while it works. */}
+              {atWork && main?.model === model && main.effort ? <Text dimColor>{` ${main.effort}`}</Text> : null}
               {/* Working on its first turn: no "0" (tokens add up when a turn completes). */}
               {n.fresh > 0 ? ` ${short(n.fresh)}` : null}
               {n.cache > 0 ? <Text dimColor>{` (+${short(n.cache)} cache)`}</Text> : null}
@@ -390,6 +448,13 @@ export const register: Register = on => {
             {percent >= 80 && reset ? <Text dimColor>{` resets ${reset}`}</Text> : null}
           </Text>
         ))}
+        {full ? (
+          <Text>
+            <Text dimColor> · </Text>
+            <Text color={ctx >= 85 ? 'error' : 'warning'}>{`context ${ctx}%`}</Text>
+            <Text dimColor> /compact</Text>
+          </Text>
+        ) : null}
         {/* Subagents at work go last: a long task wraps alone, the usage bars stay put. */}
         {subagents.map(([key, w]) => (
           <Text key={key}>
@@ -421,6 +486,21 @@ export const register: Register = on => {
     const text = e.args.trim()
     if (!text) return { text: 'Usage: /forge-remember <text>', exitCode: 1 }
     return run($, ['memory', 'add', 'note', text.slice(0, 60), text])
+  })
+
+  on('command.run', { command: 'forge-effort' }, async ($, e) => {
+    const level = e.args.trim().toLowerCase()
+    if (!level) {
+      const now = await read($, effort)
+      return { text: now ? `Effort in this session: ${now} (auto to go back).` : 'Effort: the session\'s own. Choose: low, medium, high, xhigh or max.', exitCode: 0 }
+    }
+    if (level === 'auto') {
+      await update($, effort, () => '')
+      return { text: 'Effort back to the session\'s own.', exitCode: 0 }
+    }
+    if (!isEffort(level)) return { text: `Unknown effort "${level}". Use low, medium, high, xhigh, max or auto.`, exitCode: 1 }
+    await update($, effort, () => level)
+    return { text: `Effort in this session: ${level}. It applies from your next message.`, exitCode: 0 }
   })
 
   on('command.run', { command: 'forge-memory' }, async ($, e) => {

@@ -125,15 +125,45 @@ impl AgentSpec {
     /// Abre Claude con el modelo elegido en Ajustes (`sonnet`, `opus`, `opusplan`), salvo
     /// que el comando ya diga uno. Otros agentes o sin elección: sin cambios.
     pub fn with_model(&self, command: &str, model: &str) -> String {
-        if self.mcp_style != Some(McpStyle::ClaudeJson)
-            || model.is_empty()
-            || command.contains("--model")
-        {
+        self.with_launch(command, model, "")
+    }
+
+    /// Modelo y esfuerzo con las opciones de cada agente (vacío = lo que tenga en su
+    /// configuración): `--model`/`--effort` en Claude Code, `-m`/`-c
+    /// model_reasoning_effort=…` en Codex. Lo que ya lleve el comando no se toca. Van justo
+    /// tras el programa, así sirven también para `codex resume --last`.
+    pub fn with_launch(&self, command: &str, model: &str, effort: &str) -> String {
+        let mut flags = Vec::new();
+        match self.mcp_style {
+            Some(McpStyle::ClaudeJson) => {
+                if !model.is_empty() && !command.contains("--model") {
+                    flags.push(format!("--model {}", quote(model)));
+                }
+                if !effort.is_empty() && !command.contains("--effort") {
+                    flags.push(format!("--effort {}", quote(effort)));
+                }
+            }
+            Some(McpStyle::CodexConfig) => {
+                let has_model = command
+                    .split_whitespace()
+                    .any(|w| w == "-m" || w == "--model");
+                if !model.is_empty() && !has_model {
+                    flags.push(format!("-m {}", quote(model)));
+                }
+                if !effort.is_empty() && !command.contains("model_reasoning_effort") {
+                    let setting = format!("model_reasoning_effort=\"{effort}\"");
+                    flags.push(format!("-c {}", quote(&setting)));
+                }
+            }
+            _ => {}
+        }
+        if flags.is_empty() {
             return command.to_string();
         }
+        let flags = flags.join(" ");
         match command.split_once(' ') {
-            Some((program, rest)) => format!("{program} --model {} {rest}", quote(model)),
-            None => format!("{command} --model {}", quote(model)),
+            Some((program, rest)) => format!("{program} {flags} {rest}"),
+            None => format!("{command} {flags}"),
         }
     }
 
@@ -668,7 +698,24 @@ mod tests {
             "claude",
             "sin elección: su configuración"
         );
-        assert_eq!(get("codex").with_model("codex", "sonnet"), "codex");
+        assert_eq!(
+            get("codex").with_model("codex", "gpt-5"),
+            "codex -m 'gpt-5'"
+        );
+        assert_eq!(get("opencode").with_model("opencode", "x"), "opencode");
+        // Esfuerzo: cada agente con su opción, y lo que ya trae el comando se respeta.
+        assert_eq!(
+            get("claude").with_launch("claude --continue", "", "high"),
+            "claude --effort 'high' --continue"
+        );
+        assert_eq!(
+            get("codex").with_launch("codex resume --last", "gpt-5", "xhigh"),
+            "codex -m 'gpt-5' -c 'model_reasoning_effort=\"xhigh\"' resume --last"
+        );
+        assert_eq!(
+            get("claude").with_launch("claude --effort low", "", "high"),
+            "claude --effort low"
+        );
     }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {
