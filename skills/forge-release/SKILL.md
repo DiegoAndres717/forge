@@ -1,17 +1,17 @@
 ---
 name: forge-release
-description: Sacar una versión nueva de Forge.
+description: Ship a new Forge version.
 ---
 
-# Versión nueva
+# New version
 
-Solo cuando la persona responsable lo pida.
+Only when the project owner asks for it.
 
-1. Rama `chore/release-X.Y.Z` desde `main` actualizado.
-2. Sube `version` en el `Cargo.toml` raíz y ejecuta `cargo build` para que se actualice `Cargo.lock`.
-3. `cargo fmt --all --check`, commit `chore(release): vX.Y.Z` y PR con un resumen de lo que trae la versión.
-4. Cuando el CI pase y se haga el merge: en `main` actualizado, `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. El workflow `release.yml` comprueba que la etiqueta coincide con la versión, genera el DMG universal y su `.sha256`, publica la versión en GitHub y actualiza la receta de Homebrew en `DiegoAndres717/homebrew-tap` (con el secreto `HOMEBREW_TAP_TOKEN`).
-6. Comprueba que la versión tiene `Forge-X.Y.Z.dmg` y `Forge-X.Y.Z.dmg.sha256` (`gh release view vX.Y.Z`).
+1. Branch `chore/release-X.Y.Z` from an up-to-date `main`.
+2. Bump `version` in the root `Cargo.toml` and run `cargo build` so `Cargo.lock` updates.
+3. `cargo fmt --all --check`, commit `chore(release): vX.Y.Z` and a PR summarizing what the version brings.
+4. Once CI passes and it's merged: on an up-to-date `main`, `git tag vX.Y.Z && git push origin vX.Y.Z`.
+5. The `release.yml` workflow checks the tag matches the version, builds the universal DMG and its `.sha256`, publishes the GitHub release and updates the Homebrew recipe in `DiegoAndres717/homebrew-tap` (with the `HOMEBREW_TAP_TOKEN` secret).
+6. Check the release has `Forge-X.Y.Z.dmg` and `Forge-X.Y.Z.dmg.sha256` (`gh release view vX.Y.Z`).
 
-Instalación para quien la use: `curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh` o `brew install --cask diegoandres717/tap/forge`; la app también avisa de las actualizaciones.
+Install for users: `curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh` or `brew install --cask diegoandres717/tap/forge`; the app also announces updates.

@@ -1,25 +1,25 @@
 ---
 name: forge-mod
-description: El mod de Claude Code de Forge (`claude-plugin/`).
+description: Forge's Claude Code mod (`claude-plugin/`).
 ---
 
-# Mod de Claude Code
+# Claude Code mod
 
-Vive en `claude-plugin/` y se incrusta en el binario de Forge; cualquier `claude` abierto en una terminal de Forge lo carga. Fuera de Forge no hace nada (comprueba `FORGE_BIN` / `FORGE_PROJECT`).
+It lives in `claude-plugin/` and is embedded in the Forge binary; any `claude` opened in a Forge terminal loads it. Outside Forge it does nothing (it checks `FORGE_BIN` / `FORGE_PROJECT`).
 
-## Piezas
-- `hooks/register.tsx`: los hooks (`session.start`, `prompt.context`, `turn.step`, `agent.spawn`, `ui.render` para la banda, `command.run`…).
-- `hooks/forge.test.ts`: los tests.
-- `.claude-plugin/plugin.json`: declara el servidor MCP `forge`.
-- Para hablar con Forge usa el ayudante `forge($, [args])`: nunca lanza errores y devuelve `null` fuera de Forge.
+## Pieces
+- `hooks/register.tsx`: the hooks (`session.start`, `prompt.context`, `turn.step`, `agent.spawn`, `ui.render` for the band, `command.run`…).
+- `hooks/forge.test.ts`: the tests.
+- `.claude-plugin/plugin.json`: declares the `forge` MCP server.
+- To talk to Forge use the `forge($, [args])` helper: it never throws and returns `null` outside Forge.
 
-## Reglas
-- Lo que pueda tardar (git, la CLI de Forge) va en segundo plano (`void …`): nunca retrases el arranque ni un turno.
-- La banda solo se dibuja cuando hay algo que mostrar; usa colores de tema con su significado (`error`, `warning`, `success`) solo para estados.
-- Recuerda que el mod es solo para Claude Code: lo que tenga que servir a todos los agentes va en el servidor MCP o en la app.
+## Rules
+- Anything that can take time (git, the Forge CLI) runs in the background (`void …`): never delay startup or a turn.
+- The band is only drawn when there's something to show; use theme colors with meaning (`error`, `warning`, `success`) only for states.
+- The mod is only for Claude Code: whatever must serve every agent goes in the MCP server or the app.
 
-## Comprobaciones
-1. `npx -p typescript@5.9.3 tsc --noEmit -p claude-plugin/tsconfig.json` (sin `any`).
+## Checks
+1. `npx -p typescript@5.9.3 tsc --noEmit -p claude-plugin/tsconfig.json` (no `any`).
 2. `claude plugin validate claude-plugin`.
 3. `claude plugin test claude-plugin`.
-Los tests responden por el motor con `on(...)`: mira los existentes (por ejemplo, `session.measure` para que la banda tenga algo que dibujar, `{ value: … }` en `process.run`).
+Tests answer through the engine with `on(...)`: look at the existing ones (for example `session.measure` so the band has something to draw, `{ value: … }` in `process.run`).
