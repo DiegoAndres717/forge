@@ -55,6 +55,40 @@ test('each prompt receives only matching memory references', async ($, on) => {
   expect(result.context?.[0]).toContain('#4 [Decision] Keep the cache')
 })
 
+test('no memory context for slash commands, short replies or no matches', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  for (const text of ['/forge-plans', 'ok', 'What about the login screen?']) {
+    const result = await $.prompt.submit({ text } as never)
+    expect(result.context ?? []).toEqual([])
+  }
+  expect(asked.length).toBe(1) // only the real question was looked up
+})
+
+test('a compaction updates the single last-session note', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const sent: { argv: string[]; stdin?: string }[] = []
+  on('process.run', ($, e) => {
+    sent.push({ argv: [...e.argv], stdin: (e.init as { stdin?: string } | undefined)?.stdin })
+    return { value: { exitCode: 0, stdout: '#9\n', stderr: '' } } as never
+  })
+  on('session.compact', () => ({
+    messages: [
+      { role: 'user', text: 'Summary — done: A. Next: B.', toolUses: [] },
+      { role: 'assistant', text: 'OK', toolUses: [] },
+    ],
+  }))
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'long chat', toolUses: [] }] })
+  for (let i = 0; i < 50 && sent.length === 0; i++) await Promise.resolve()
+  expect(sent[0]?.argv.slice(1, 3)).toEqual(['memory', 'session'])
+  expect(sent[0]?.stdin).toBe('Summary — done: A. Next: B.')
+})
+
 test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {
   // The band only draws when it has something to show: a plan usage window.
   on('session.measure', ($, e) => ({ changed: e.changed }))

@@ -1929,7 +1929,8 @@ mod tests {
         )
         .unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while term.term.lock().unwrap().grid().history_size() == 0 {
+        // Hasta tener al menos las 50 líneas que se desplazan (si no, falla según la carga).
+        while term.term.lock().unwrap().grid().history_size() < 50 {
             assert!(std::time::Instant::now() < deadline, "sin historial");
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
