@@ -310,6 +310,9 @@ pub struct Workspace {
     /// Cuentas de los agentes (todas) y la elegida en este proyecto para cada programa.
     accounts: Vec<Account>,
     chosen: HashMap<String, i64>,
+    /// Modelo y esfuerzo con que se abre cada agente aquí (programa → (modelo, esfuerzo));
+    /// vacío = lo que tenga el agente configurado.
+    launch: HashMap<String, (String, String)>,
     /// Terminales de agente cuya cuenta llegó a su límite de uso (muestran el aviso).
     limited: Vec<PanelId>,
     /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
@@ -382,6 +385,7 @@ impl Workspace {
             sessions: (HashMap::new(), None),
             accounts: Vec::new(),
             chosen: HashMap::new(),
+            launch: HashMap::new(),
             limited: Vec::new(),
             handoff_request: None,
             error: None,
@@ -796,11 +800,8 @@ impl Workspace {
             .map(|e| e.canonicalize().unwrap_or(e));
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
-                let model = crate::claude_plugin::CLAUDE_MODEL
-                    .lock()
-                    .map(|m| m.clone())
-                    .unwrap_or_default();
-                let command = spec.with_model(&command, &model);
+                let (model, effort) = self.launch.get(spec.program()).cloned().unwrap_or_default();
+                let command = spec.with_launch(&command, &model, &effort);
                 Some(spec.with_events(&command, &forge.to_string_lossy(), has_mod))
             }
             (_, typed, _) => typed,
@@ -921,6 +922,11 @@ impl Workspace {
         }
         self.accounts = accounts;
         self.chosen = chosen;
+    }
+
+    /// Modelo y esfuerzo de cada agente en este proyecto (los pone la app).
+    pub fn set_launch(&mut self, launch: HashMap<String, (String, String)>) {
+        self.launch = launch;
     }
 
     /// Cuenta con la que se abre ese programa aquí (`id` o la elegida en el proyecto);

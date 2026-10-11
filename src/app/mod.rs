@@ -343,11 +343,6 @@ impl App {
         }
         app.notifications_enabled =
             app.db(|s| s.setting("notifications")).flatten().as_deref() != Some("off");
-        if let Some(model) = app.db(|s| s.setting("claude_model")).flatten()
-            && let Ok(mut current) = crate::claude_plugin::CLAUDE_MODEL.lock()
-        {
-            *current = model;
-        }
         app
     }
 
@@ -447,11 +442,25 @@ impl App {
         (accounts, chosen)
     }
 
+    /// Modelo y esfuerzo de Claude Code y Codex en un proyecto (el suyo o el general).
+    fn launch_state(&self, project: &Path) -> HashMap<String, (String, String)> {
+        let Some(store) = self.store.as_ref() else {
+            return HashMap::new();
+        };
+        ["claude", "codex"]
+            .into_iter()
+            .map(|p| (p.to_string(), store.launch_for(p, project)))
+            .collect()
+    }
+
+    /// Reparte a cada proyecto sus cuentas y el modelo y esfuerzo de sus agentes.
     fn sync_accounts(&mut self) {
         for i in 0..self.workspaces.len() {
             let path = self.workspaces[i].project.path.clone();
             let (accounts, chosen) = self.account_state(&path);
+            let launch = self.launch_state(&path);
             self.workspaces[i].set_accounts(accounts, chosen);
+            self.workspaces[i].set_launch(launch);
         }
     }
 
@@ -492,6 +501,7 @@ impl App {
         ws.set_ask_first(self.settings.ask_first);
         let (accounts, chosen) = self.account_state(&path);
         ws.set_accounts(accounts, chosen);
+        ws.set_launch(self.launch_state(&path));
         if !awake {
             self.workspaces.push(ws);
             return;

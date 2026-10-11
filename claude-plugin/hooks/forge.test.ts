@@ -276,3 +276,65 @@ test('an exhausted usage window tells Forge once so it can offer another account
   expect(limits.length).toBe(1)
   expect(limits[0]?.slice(0, 3)).toEqual(['/forge', 'agent-event', 'limit'])
 })
+
+test('/forge-effort changes the main loop effort and the band shows it', async ($, on) => {
+  let sent: unknown
+  on('turn.step', async function* ($, e) {
+    if (!e.agentId) sent = e.effort
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [] } as never
+  })
+  const step = (fields: Partial<TurnStepInput>) =>
+    ({ turnId: 't', index: 0, messageCount: 1, model: 'claude-opus-5-5', effort: 'medium', ...fields }) as TurnStepInput
+  const run = async (fields: Partial<TurnStepInput> = {}) => {
+    for await (const _chunk of $.turn.step(step(fields))) {
+      // no chunks from the stub
+    }
+  }
+  expect((await $.command.run(command({ command: 'forge-effort', args: 'turbo' }))).exitCode).toBe(1)
+  await $.command.run(command({ command: 'forge-effort', args: 'high' }))
+  await run()
+  expect(sent).toBe('high')
+  const drawn = JSON.stringify(await (await $.ui.mount({
+    plugin: 'forge', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: true } as AbovePromptProps,
+  })).drawn())
+  expect(drawn).toContain(' high')
+  // A model without effort keeps going without one; auto goes back to the session's.
+  sent = 'unset'
+  await run({ effort: undefined })
+  expect(sent).toBeUndefined()
+  await $.command.run(command({ command: 'forge-effort', args: 'auto' }))
+  await run()
+  expect(sent).toBe('medium')
+})
+
+test('the main loop gets one nudge to delegate after several reads in a row', async ($, on) => {
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  const read = (agentId?: string) => $.tool.call({ tool: 'Read', file_path: '/x', agentId } as never)
+  const nudges: number[] = []
+  for (let i = 0; i < 6; i++) {
+    const r = (await read()) as { context?: readonly string[] }
+    nudges.push((r.context ?? []).filter(c => c.includes('forge:explorer')).length)
+  }
+  expect(nudges).toEqual([0, 0, 0, 1, 0, 0])
+  // A subagent reading is what it is for: no nudge.
+  for (let i = 0; i < 5; i++) {
+    const r = (await read('a1')) as { context?: readonly string[] }
+    expect((r.context ?? []).length).toBe(0)
+  }
+})
+
+test('the band warns when the context is getting full', async ($, on) => {
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { percent: 78, window: 200_000 } as never,
+    rateLimits: [],
+    changed: ['context'],
+  })
+  const drawn = JSON.stringify(await (await $.ui.mount({
+    plugin: 'forge', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })).drawn())
+  expect(drawn).toContain('context 78%')
+  expect(drawn).toContain('/compact')
+})
