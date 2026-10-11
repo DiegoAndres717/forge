@@ -271,13 +271,23 @@ impl App {
             m.open && m.dirty
         }) {
             let path = self.workspaces[i].project.path.clone();
-            let (query, kind) = (
+            let (query, kind, tag) = (
                 self.workspaces[i].memory.query.clone(),
                 self.workspaces[i].memory.kind.clone(),
+                self.workspaces[i].memory.tag.to_lowercase(),
             );
-            let results = self
+            let mut results = self
                 .db(|s| s.search_memories(&path, &query, kind.as_deref(), 50))
                 .unwrap_or_default();
+            if !tag.trim().is_empty() {
+                results.retain(|memory| {
+                    memory
+                        .tags
+                        .to_lowercase()
+                        .split(',')
+                        .any(|item| item.trim() == tag.trim())
+                });
+            }
             let count = self.db(|s| s.count_memories(&path)).unwrap_or(0);
             let memory = &mut self.workspaces[i].memory;
             (memory.results, memory.count, memory.dirty) = (results, count, false);

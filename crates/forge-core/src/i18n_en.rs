@@ -242,6 +242,7 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("{p0}  Buscar (sin tildes también)", "{p0}  Search"),
     ("Todos", "All"),
+    ("Etiqueta", "Tag"),
     ("{p0}  Nueva nota", "{p0}  New note"),
     ("Título", "Title"),
     (

@@ -243,6 +243,7 @@ pub struct MemoryView {
     pub open: bool,
     pub query: String,
     pub kind: Option<String>,
+    pub tag: String,
     pub results: Vec<forge_core::memory::Memory>,
     pub count: i64,
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).

@@ -2,6 +2,35 @@
 use super::*;
 use forge_core::tr;
 
+fn highlighted(text: &str) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob::default();
+    let mut active = false;
+    for part in text.split_inclusive(['[', ']']) {
+        let content = part.trim_end_matches(['[', ']']);
+        if !content.is_empty() {
+            job.append(
+                content,
+                0.0,
+                egui::TextFormat::simple(
+                    FontId::proportional(12.0),
+                    if active {
+                        theme::YELLOW
+                    } else {
+                        Color32::from_gray(0xa0)
+                    },
+                ),
+            );
+        }
+        if part.ends_with('[') {
+            active = true;
+        }
+        if part.ends_with(']') {
+            active = false;
+        }
+    }
+    job
+}
+
 impl App {
     /// Panel de memoria: búsqueda, filtro por tipo, notas nuevas y estado de la conexión con agentes.
     pub(super) fn memory_ui(
@@ -128,6 +157,14 @@ impl App {
                         }
                     }
                 });
+            let tag = ui.add(
+                theme::field(egui::TextEdit::singleline(&mut ws.memory.tag))
+                    .hint_text(tr!("Etiqueta"))
+                    .desired_width(110.0),
+            );
+            if tag.changed() {
+                ws.memory.dirty = true;
+            }
         });
         if ws.memory.form.is_none()
             && theme::secondary(&mut ui, tr!("{p0}  Nueva nota", p0 = icon::PLUS)).clicked()
@@ -206,41 +243,53 @@ impl App {
             .id_salt("memory-scroll")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
-                for m in &ws.memory.results {
-                    let header = RichText::new(format!("[{}] {}", kind_label(&m.kind), m.title));
-                    egui::CollapsingHeader::new(header)
-                        .id_salt(("memory", m.id))
-                        .show(ui, |ui| {
-                            if let Some(snippet) = &m.snippet {
-                                ui.label(
-                                    RichText::new(snippet)
-                                        .small()
-                                        .italics()
-                                        .color(Color32::from_gray(0xa0)),
-                                );
-                            }
-                            ui.label(&m.body);
-                            let tags = if m.tags.is_empty() {
-                                String::new()
-                            } else {
-                                format!(" · {}", m.tags)
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "#{} · {} · {}{tags}",
-                                        m.id,
-                                        m.source,
-                                        store::ago_precise(m.created_at)
-                                    ))
-                                    .small()
-                                    .color(Color32::from_gray(0x80)),
-                                );
-                                if ui.small_button(tr!("Borrar")).clicked() {
-                                    cmds.push(UiCmd::MemoryDelete(m.id));
+                for (kind, label) in KINDS {
+                    let entries: Vec<_> = ws
+                        .memory
+                        .results
+                        .iter()
+                        .filter(|m| m.kind == kind)
+                        .collect();
+                    if entries.is_empty() {
+                        continue;
+                    }
+                    ui.label(
+                        RichText::new(forge_core::i18n::t(label))
+                            .small()
+                            .color(theme::TEXT_3),
+                    );
+                    for m in entries {
+                        let header =
+                            RichText::new(format!("[{}] {}", kind_label(&m.kind), m.title));
+                        egui::CollapsingHeader::new(header)
+                            .id_salt(("memory", m.id))
+                            .show(ui, |ui| {
+                                if let Some(snippet) = &m.snippet {
+                                    ui.label(highlighted(snippet));
                                 }
+                                ui.label(&m.body);
+                                let tags = if m.tags.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" · {}", m.tags)
+                                };
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "#{} · {} · {}{tags}",
+                                            m.id,
+                                            m.source,
+                                            store::ago_precise(m.created_at)
+                                        ))
+                                        .small()
+                                        .color(Color32::from_gray(0x80)),
+                                    );
+                                    if ui.small_button(tr!("Borrar")).clicked() {
+                                        cmds.push(UiCmd::MemoryDelete(m.id));
+                                    }
+                                });
                             });
-                        });
+                    }
                 }
             });
     }
