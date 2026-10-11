@@ -233,6 +233,9 @@ impl Attention {
     }
 }
 
+/// Base de datos donde se guarda el resumen al cerrar un agente (solo la app real).
+pub static SESSION_NOTES: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 /// Carpeta del historial de las terminales (solo la app real; en tests no se guarda).
 pub static HISTORY_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
@@ -487,6 +490,10 @@ impl Workspace {
         }
         let state = self.state();
         self.save_history();
+        let ids: Vec<PanelId> = self.panels.keys().copied().collect();
+        for job in ids.into_iter().filter_map(|id| self.session_note(id)) {
+            std::thread::spawn(job);
+        }
         self.panels.clear();
         self.maximized = None;
         self.renaming = None;
@@ -1695,7 +1702,42 @@ impl Workspace {
         );
     }
 
+    /// Guardar en Forge Memory la última conversación del agente de una terminal, como
+    /// «Resumen de la última sesión»: la memoria se llena sin depender de que el agente
+    /// llame a memory_save. Leer la sesión puede tardar (archivos grandes).
+    fn session_note(&self, id: PanelId) -> Option<impl FnOnce() + Send + 'static> {
+        let db = SESSION_NOTES.get()?.clone();
+        let panel = self.panels.get(&id)?;
+        let spec = panel
+            .agent
+            .as_ref()
+            .and_then(|a| self.project.agents.iter().find(|s| &s.id == a))?;
+        let program = spec.program().to_string();
+        let config = self
+            .account_for(&program, panel.account)
+            .and_then(|a| a.dir.clone());
+        let (project, root) = (self.project.path.clone(), self.project.root());
+        Some(move || {
+            let summary = forge_core::sessions::session_summary(&program, &root, config.as_deref());
+            if let (Some(text), Ok(store)) = (summary, forge_core::store::Store::open(&db)) {
+                let _ = store.save_session_summary(&project, &text);
+            }
+        })
+    }
+
+    /// Al salir de Forge: los resúmenes de todas sus terminales de agente, esperando a
+    /// que se guarden (después ya no hay hilos).
+    pub fn save_session_notes(&self) {
+        let ids: Vec<PanelId> = self.panels.keys().copied().collect();
+        for job in ids.into_iter().filter_map(|id| self.session_note(id)) {
+            job();
+        }
+    }
+
     fn close(&mut self, id: PanelId) {
+        if let Some(job) = self.session_note(id) {
+            std::thread::spawn(job);
+        }
         if let Some(file) = self.history_file(id) {
             let _ = std::fs::remove_file(file);
         }
@@ -2000,6 +2042,10 @@ impl Workspace {
             })
         {
             return Some(crate::theme::RED);
+        }
+        // A la vista no hay nada que avisar (aunque escriba entre dos fotogramas).
+        if self.layout.ids().contains(&id) && self.maximized.is_none_or(|m| m == id) {
+            return None;
         }
         let seen = self.tab_seen.get(&id).copied().unwrap_or(0);
         self.panel_output(id)

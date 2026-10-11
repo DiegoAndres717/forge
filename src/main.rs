@@ -274,6 +274,9 @@ fn main() -> eframe::Result {
                         .and_then(|db| db.parent().map(|d| d.to_path_buf()))
                     {
                         let _ = workspace::HISTORY_DIR.set(base.join("scrollback"));
+                        if let Some(db) = forge_core::store::Store::default_path() {
+                            let _ = workspace::SESSION_NOTES.set(db);
+                        }
                         // Mod de Forge para Claude Code: cualquier `claude` de una terminal de
                         // Forge lo carga (escrito a mano o abierto desde la barra lateral).
                         if let Ok(dir) = claude_plugin::install(&base) {

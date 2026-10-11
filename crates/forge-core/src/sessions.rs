@@ -330,6 +330,32 @@ fn digest_codex(lines: impl Iterator<Item = serde_json::Value>) -> Digest {
 /// (`config`: la carpeta de su cuenta). Corto a propósito (~3 KB): el otro agente lee
 /// los planes y Forge Memory por MCP para el resto. `None` si no hay sesión.
 pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option<String> {
+    let (name, lines) = digest_last(program, cwd, config)?;
+    let mut out = vec![crate::tr!(
+        "Sigo una conversación que empezó en {name}. Resumen del traspaso:",
+        name = name
+    )];
+    out.extend(lines);
+    out.push(crate::tr!("Antes de seguir, revisa los planes en curso (plans_list) y Forge Memory (memory_search), y pregúntame si algo no está claro.").into());
+    Some(out.join("\n"))
+}
+
+/// La última conversación del agente en el proyecto como nota de Forge Memory (se guarda
+/// al cerrar su terminal, sin depender de que el agente guarde nada).
+pub fn session_summary(program: &str, cwd: &Path, config: Option<&Path>) -> Option<String> {
+    let (name, lines) = digest_last(program, cwd, config)?;
+    let mut out = vec![crate::tr!("Última sesión de {name}:", name = name)];
+    out.extend(lines);
+    Some(out.join("\n"))
+}
+
+/// Tema, objetivo, últimas peticiones, última respuesta, archivos y último error de la
+/// última sesión del agente en `cwd`.
+fn digest_last(
+    program: &str,
+    cwd: &Path,
+    config: Option<&Path>,
+) -> Option<(&'static str, Vec<String>)> {
     let session = last_session(program, cwd, config)?;
     let dir = config_dir(program, config)?;
     let file = match program {
@@ -357,10 +383,7 @@ pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option
         "claude" => "Claude Code",
         _ => "Codex",
     };
-    let mut out = vec![crate::tr!(
-        "Sigo una conversación que empezó en {name}. Resumen del traspaso:",
-        name = name
-    )];
+    let mut out = Vec::new();
     let topic = if end.topic.is_empty() {
         session.topic.clone()
     } else {
@@ -400,8 +423,7 @@ pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option
             p0 = clip(&one_line(&end.last_error), 300)
         ));
     }
-    out.push(crate::tr!("Antes de seguir, revisa los planes en curso (plans_list) y Forge Memory (memory_search), y pregúntame si algo no está claro.").into());
-    Some(out.join("\n"))
+    Some((name, out))
 }
 
 fn subdirs(dir: &Path) -> Vec<PathBuf> {
@@ -643,6 +665,11 @@ mod tests {
             !brief.contains("/clear"),
             "las etiquetas de sistema no son peticiones"
         );
+        // La misma sesión como nota de memoria: sin el saludo ni la petición del traspaso.
+        let note = session_summary("claude", cwd, Some(&tmp.join("claude"))).unwrap();
+        assert!(note.starts_with("Última sesión de Claude Code:"));
+        assert!(note.contains("ahora el envío con Resend") && note.contains("src/receipt.ts"));
+        assert!(!note.contains("traspaso") && !note.contains("plans_list"));
 
         // Pasar la conversación a otra cuenta: la encuentra allí.
         let other = tmp.join("claude-2");
