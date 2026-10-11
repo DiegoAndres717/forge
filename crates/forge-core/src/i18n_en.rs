@@ -2286,26 +2286,6 @@ pub const EN: &[(&str, &str)] = &[
         "Run `forge guard {stage}` in the project folder and explain the result to me: what happened, what blocks and how to fix it.",
     ),
     ("comando desconocido: {name}", "unknown command: {name}"),
-    (
-        "Usa plans_list del servidor MCP `forge` y resume en pocas líneas en qué va cada plan y qué toca ahora.",
-        "Use plans_list from the `forge` MCP server and summarize in a few lines where each plan stands and what comes next.",
-    ),
-    (
-        "Convierte en un plan la idea que el usuario escribió junto al comando: hazle solo las preguntas imprescindibles y, con sus respuestas, crea el plan por fases con plan_add del servidor MCP `forge` (cada fase con su rama y sus tareas) antes de escribir código.",
-        "Turn the idea the user wrote with the command into a plan: ask only the essential questions and, with the answers, create the phased plan with plan_add from the `forge` MCP server (each phase with its branch and tasks) before writing code.",
-    ),
-    (
-        "Busca en Forge Memory con memory_search del servidor MCP `forge` lo que el usuario escribió junto al comando (sin texto, usa memory_list para lo más reciente). Muéstralo resumido; para el detalle de alguna, usa memory_get.",
-        "Search Forge Memory with memory_search from the `forge` MCP server for what the user wrote with the command (no text: use memory_list for the most recent). Show it summarized; for the details of one, use memory_get.",
-    ),
-    (
-        "Guarda en Forge Memory lo que el usuario escribió junto al comando con memory_save del servidor MCP `forge`, eligiendo el tipo y un título claro (si ya hay una parecida, actualízala con memory_update).",
-        "Save what the user wrote with the command to Forge Memory with memory_save from the `forge` MCP server, choosing the type and a clear title (if a similar one exists, update it with memory_update).",
-    ),
-    (
-        "Ejecuta `forge guard commit` en la carpeta del proyecto (o `push` / `pr` si el usuario lo escribió junto al comando) y explica el resultado: qué pasó, qué bloquea y cómo arreglarlo.",
-        "Run `forge guard commit` in the project folder (or `push` / `pr` if the user wrote it with the command) and explain the result: what happened, what blocks and how to fix it.",
-    ),
     ("Comandos de Forge", "Forge commands"),
     (
         "Codex no muestra los comandos /forge: con esto se escriben como skills en ~/.codex/skills y se usan con $forge-plans, $forge-plan, $forge-memory, $forge-remember y $forge-guard. Quitarlos borra solo esas carpetas.",
@@ -2321,4 +2301,55 @@ pub const EN: &[(&str, &str)] = &[
     ("{p0}  Abrir en {name}", "{p0}  Open in {name}"),
     ("{p0}  Abrir con", "{p0}  Open With"),
     ("Abrir en {name}", "Open in {name}"),
+    ("Avisos", "Alerts"),
+    ("Agente terminó", "Agent finished"),
+    (
+        "Un agente acabó su turno y te deja la respuesta.",
+        "An agent finished its turn and left you its answer.",
+    ),
+    ("Pide aprobación", "Asks for approval"),
+    (
+        "Un agente está parado esperando tu respuesta o tu permiso para seguir.",
+        "An agent is stopped waiting for your answer or your permission to continue.",
+    ),
+    ("Proceso falló", "Process failed"),
+    (
+        "Un proceso administrado (servidor, watcher…) terminó con error.",
+        "A managed process (server, watcher…) exited with an error.",
+    ),
+    ("Guard bloqueó", "Guard blocked"),
+    (
+        "Project Guard encontró algo que impide el commit o el push.",
+        "Project Guard found something that blocks the commit or push.",
+    ),
+    ("Límite de la cuenta", "Account limit"),
+    (
+        "La cuenta de un agente llegó a su límite de uso; Forge ofrece seguir con otra.",
+        "An agent's account hit its usage limit; Forge offers to continue with another.",
+    ),
+    ("Plan creado", "Plan created"),
+    (
+        "Un agente creó un plan por fases en Planes.",
+        "An agent created a phased plan in Plans.",
+    ),
+    ("No molestar", "Do not disturb"),
+    (
+        "Sin notificaciones ni sonidos. Los puntos de la barra lateral siguen avisando.",
+        "No notifications or sounds. The sidebar dots still show alerts.",
+    ),
+    ("Silenciar todos los avisos", "Silence all alerts"),
+    ("Volumen", "Volume"),
+    (
+        "Volumen de los sonidos de Forge, aparte del volumen del Mac.",
+        "Volume of Forge's sounds, on top of the Mac's volume.",
+    ),
+    ("Cada aviso", "Each alert"),
+    ("Notificación", "Notification"),
+    ("Sin sonido", "No sound"),
+    ("Escuchar", "Listen"),
+    ("También con Forge al frente", "Also when Forge is in front"),
+    (
+        "Las notificaciones de macOS se pueden ajustar también en Ajustes del Sistema → Notificaciones → Forge.",
+        "macOS notifications can also be adjusted in System Settings → Notifications → Forge.",
+    ),
 ];

@@ -178,8 +178,59 @@ pub enum Attention {
     Failed(String),
     /// Guard bloqueó una validación.
     Blocked,
-    /// Mensaje del propio agente ("Claude Code terminó", "Claude needs your permission…").
-    Event(String),
+    /// Mensaje del propio agente ("Claude Code terminó", "Claude needs your permission…")
+    /// o de Forge (plan creado), con su tipo.
+    Event(Alert, String),
+}
+
+/// Tipos de aviso: cada uno con su notificación y su sonido (Ajustes → Avisos).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Alert {
+    /// Un agente terminó su turno.
+    Done,
+    /// Un agente espera tu respuesta o tu permiso.
+    Approval,
+    /// Un proceso administrado falló.
+    Failed,
+    /// Guard bloqueó una validación.
+    Blocked,
+    /// La cuenta de un agente llegó a su límite de uso.
+    Limit,
+    /// Un agente creó un plan.
+    Plan,
+}
+
+impl Alert {
+    pub const ALL: [Alert; 6] = [
+        Alert::Done,
+        Alert::Approval,
+        Alert::Failed,
+        Alert::Blocked,
+        Alert::Limit,
+        Alert::Plan,
+    ];
+
+    /// El de un evento de agente (`stop`, `waiting`, `limit`).
+    pub fn from_event(kind: &str) -> Self {
+        match kind {
+            "waiting" => Alert::Approval,
+            "limit" => Alert::Limit,
+            _ => Alert::Done,
+        }
+    }
+}
+
+impl Attention {
+    pub fn alert(&self) -> Alert {
+        match self {
+            // Adivinado por la salida: terminó o espera, no se sabe; cuenta como terminado.
+            Attention::Agent(_) => Alert::Done,
+            Attention::Failed(_) => Alert::Failed,
+            Attention::Blocked => Alert::Blocked,
+            Attention::Event(alert, _) => *alert,
+        }
+    }
 }
 
 /// Carpeta del historial de las terminales (solo la app real; en tests no se guarda).
@@ -533,8 +584,8 @@ impl Workspace {
     }
 
     /// Aviso enviado por el propio agente (hook): se mantiene hasta ver el proyecto.
-    pub fn agent_event(&mut self, text: String) {
-        self.sticky = Some(Attention::Event(text));
+    pub fn agent_event(&mut self, alert: Alert, text: String) {
+        self.sticky = Some(Attention::Event(alert, text));
     }
 
     /// La cuenta de esa terminal llegó a su límite: se ofrece seguir con otra.

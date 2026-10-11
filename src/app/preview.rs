@@ -454,6 +454,7 @@ fn ui_preview() {
     for (tab, name) in [
         (SettingsTab::General, "11-ajustes"),
         (SettingsTab::Agents, "11c-ajustes-agentes"),
+        (SettingsTab::Alerts, "11n-ajustes-avisos"),
         (SettingsTab::Usage, "11d-ajustes-uso"),
         (SettingsTab::Project, "11e-ajustes-proyecto"),
     ] {
@@ -470,6 +471,7 @@ fn ui_preview() {
     harness.set_size(Vec2::new(560.0, 760.0));
     for (tab, name) in [
         (SettingsTab::Agents, "11f-ajustes-estrecho-agentes"),
+        (SettingsTab::Alerts, "11o-ajustes-avisos-estrecho"),
         (SettingsTab::Project, "11g-ajustes-estrecho-proyecto"),
     ] {
         show_tab(&ctx, tab);
