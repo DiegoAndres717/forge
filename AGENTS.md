@@ -1,33 +1,35 @@
-# Forge — instrucciones para agentes
+# Forge — instructions for agents
 
-Forge es un workspace nativo de macOS (Rust + egui) para programar con agentes de IA. Estas reglas valen para cualquier agente (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code…).
+Forge is a native macOS workspace (Rust + egui) for coding with AI agents. These rules apply to every agent (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code…).
 
-## Reglas básicas
+## Ground rules
 
-- Nunca trabajes en `main`: cada fase o cambio va en su rama y su PR. Los merges los hace la persona responsable del proyecto.
-- Código e identificadores en inglés; comentarios y textos de la interfaz en español (con traducción al inglés).
-- Todo lo que Forge ofrezca a los agentes debe servir para todos los agentes compatibles, no solo para uno.
-- Sin navegador embebido ni botones que abran URLs: puertos y direcciones se muestran como texto.
-- Antes de dar algo por terminado: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` y, como último paso, `cargo fmt --all --check`.
+- Never work on `main`: every phase or change gets its own branch and PR. The project owner does the merges.
+- Code and identifiers in English. Code comments in Spanish. UI text in Spanish through `tr!` with its English translation.
+- Commits, PR titles and descriptions, and anything written for agents (skills, instructions, MCP prompts) in English.
+- Whatever Forge offers to agents must work for every supported agent, not just one.
+- No embedded browser and no buttons that open URLs: ports and addresses are shown as text.
+- Before calling something done: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and, as the very last step, `cargo fmt --all --check`.
 
 ## Skills
 
-Antes de empezar una tarea, mira la columna «Cuándo» y lee la skill que toque (puede ser más de una). Sigue lo que diga.
+Before starting a task, check the "When" column and read the matching skill (it can be more than one). Follow it.
 
-| Skill | Cuándo | Archivo |
+| Skill | When | File |
 |---|---|---|
-| `forge-branch-pr` | Al crear una rama, un commit o un pull request | [`skills/forge-branch-pr/SKILL.md`](skills/forge-branch-pr/SKILL.md) |
-| `forge-plans` | Al empezar o seguir una fase, o cuando te cuenten algo que quieren construir | [`skills/forge-plans/SKILL.md`](skills/forge-plans/SKILL.md) |
-| `forge-memory` | Al tomar una decisión, resolver un error, encontrar una convención o empezar a depurar | [`skills/forge-memory/SKILL.md`](skills/forge-memory/SKILL.md) |
-| `forge-ui` | Al tocar la interfaz de la app (`src/app/`, `src/theme.rs`, textos visibles) | [`skills/forge-ui/SKILL.md`](skills/forge-ui/SKILL.md) |
-| `forge-mod` | Al tocar el mod de Claude Code (`claude-plugin/`) | [`skills/forge-mod/SKILL.md`](skills/forge-mod/SKILL.md) |
-| `forge-release` | Al sacar una versión nueva | [`skills/forge-release/SKILL.md`](skills/forge-release/SKILL.md) |
-| `forge-docs` | Al cambiar el README, las capturas, el GIF o los diagramas | [`skills/forge-docs/SKILL.md`](skills/forge-docs/SKILL.md) |
+| `forge-branch-pr` | Creating a branch, a commit, a pull request or a review comment | [`skills/forge-branch-pr/SKILL.md`](skills/forge-branch-pr/SKILL.md) |
+| `forge-debug` | Fixing a bug, a failing test or a user report | [`skills/forge-debug/SKILL.md`](skills/forge-debug/SKILL.md) |
+| `forge-plans` | Starting or continuing a phase, or when someone describes something they want built | [`skills/forge-plans/SKILL.md`](skills/forge-plans/SKILL.md) |
+| `forge-memory` | Making a decision, solving an error, finding a convention or starting to debug | [`skills/forge-memory/SKILL.md`](skills/forge-memory/SKILL.md) |
+| `forge-ui` | Touching the app UI (`src/app/`, `src/theme.rs`, visible text) | [`skills/forge-ui/SKILL.md`](skills/forge-ui/SKILL.md) |
+| `forge-mod` | Touching the Claude Code mod (`claude-plugin/`) | [`skills/forge-mod/SKILL.md`](skills/forge-mod/SKILL.md) |
+| `forge-release` | Shipping a new version | [`skills/forge-release/SKILL.md`](skills/forge-release/SKILL.md) |
+| `forge-docs` | Changing the READMEs, screenshots, GIF or diagrams | [`skills/forge-docs/SKILL.md`](skills/forge-docs/SKILL.md) |
 
-## Mapa rápido
+## Quick map
 
-- `crates/forge-core/`: lógica sin interfaz (Guard, memoria, planes, cuentas, MCP, SQLite, traducciones).
-- `src/`: la app (ventana egui, terminales, layout, procesos) y la CLI (`src/cli.rs`).
-- `claude-plugin/`: el mod de Claude Code (hooks en TypeScript, se incrusta en el binario).
-- `tests/`: integración contra el binario real (hooks de Git y servidor MCP).
-- `scripts/`: instalar la app, generar el DMG, el instalador `curl | sh` y la receta de Homebrew.
+- `crates/forge-core/`: logic without UI (Guard, memory, plans, accounts, MCP, SQLite, translations).
+- `src/`: the app (egui window, terminals, layout, processes) and the CLI (`src/cli.rs`).
+- `claude-plugin/`: the Claude Code mod (TypeScript hooks, embedded in the binary).
+- `tests/`: integration tests against the real binary (Git hooks, MCP server, terminal trampoline).
+- `scripts/`: app install, DMG build, the `curl | sh` installer and the Homebrew recipe.

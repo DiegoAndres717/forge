@@ -1,12 +1,19 @@
 ---
 name: forge-docs
-description: README, capturas, GIF y diagramas de Forge.
+description: Forge's READMEs, screenshots, GIF and diagrams.
 ---
 
-# Documentación
+# Documentation
 
-- Hay dos README: `README.md` (inglés) y `README.es.md` (español). Todo cambio va en los dos.
-- Pocas capturas y actuales: las de `docs/screenshots/` salen de la vista previa (skill `forge-ui`), a 1440 px de ancho.
-- El GIF (`docs/demo.gif`) se arma con varias escenas de la vista previa a 1000 px, ~2 s por escena, 128 colores (Pillow).
-- Los diagramas de «Cómo funciona» se hacen con [Archify](https://github.com/tt-a1i/archify) desde los JSON de `docs/diagrams/src/` (inglés y español); ver `docs/diagrams/README.md`. Si cambia cómo funciona Forge Memory o Project Guard, actualiza el JSON y regenera los PNG.
-- Escribe para quien no conoce Forge: primero qué hace y para qué, luego los detalles. Nombres propios sin traducir (Forge Memory, Project Guard).
+## Files
+- Two READMEs: `README.md` (English) and `README.es.md` (Spanish). Every change goes in both.
+- Few, current screenshots: `docs/screenshots/` come from the UI preview (`forge-ui` skill), 1440 px wide.
+- The GIF (`docs/demo.gif`) is built from several preview scenes at 1000 px, ~2 s per scene, 128 colors (Pillow).
+- The "How it works" diagrams are made with [Archify](https://github.com/tt-a1i/archify) from the JSON in `docs/diagrams/src/` (English and Spanish); see `docs/diagrams/README.md`. If how Forge Memory or Project Guard works changes, update the JSON and regenerate the PNGs.
+
+## Writing so it's understood fast
+- Write for someone who doesn't know Forge: what it does and why first, details after.
+- Lead with the answer or the action; context comes after.
+- Quick path first (the usual steps and what you should see), then details and edge cases.
+- Short sections with clear headings. Prefer tables, checklists and examples over long paragraphs.
+- Proper names stay untranslated (Forge Memory, Project Guard).

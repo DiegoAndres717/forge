@@ -1,26 +1,26 @@
 ---
 name: forge-memory
-description: Usar Forge Memory (la memoria del proyecto) por MCP.
+description: Use Forge Memory (the project memory) over MCP.
 ---
 
 # Forge Memory
 
-La memoria del proyecto se comparte entre agentes por MCP (servidor `forge`). Va ligada al remoto de Git, no a la carpeta, y se guarda fuera del repo.
+The project memory is shared between agents over MCP (`forge` server). It's tied to the Git remote, not the folder, and stored outside the repo.
 
-## Cuándo buscar (`memory_search`)
-- Antes de tomar una decisión de diseño o de elegir una librería.
-- Al encontrar un error: puede que ya se resolviera antes.
-- Al tocar una parte del código que no conoces.
-Busca con pocas palabras clave (sin tildes también vale). `memory_list` da las más recientes.
+## When to search (`memory_search`)
+- Before a design decision or choosing a library.
+- When you hit an error: it may have been solved already.
+- When touching a part of the code you don't know.
+Search with a few keywords (accents optional). `memory_list` returns the most recent ones; `memory_get` gives the full text of one.
 
-## Cuándo guardar (`memory_save`)
-Guarda lo que le ahorraría tiempo a otro agente o a ti mañana, con un título claro y el porqué:
-- `decision`: qué se decidió y por qué (y qué se descartó).
-- `error`: el síntoma, la causa y la solución.
-- `convention`: una regla del proyecto que no se ve en el código.
-- `command`: un comando útil que no es obvio.
-- `architecture`: cómo encajan las piezas.
-No guardes lo que ya está en el código, en el historial de Git o en los planes.
+## When to save (`memory_save`)
+Save what would save another agent (or you, tomorrow) time, with a clear title and the why:
+- `decision`: what was decided and why (and what was discarded).
+- `error`: the symptom, the cause and the fix.
+- `convention`: a project rule you can't see in the code.
+- `command`: a useful, non-obvious command.
+- `architecture`: how the pieces fit together.
+Don't save what's already in the code, the Git history or the plans.
 
-## Sin duplicados
-Si `memory_save` responde que ya hay una memoria parecida, no la fuerces: actualiza esa con `memory_update` (su id) para que la memoria no se llene de repetidas. Usa `force=true` solo si de verdad es otra cosa. Si una memoria ya no es cierta, bórrala con `memory_delete`.
+## No duplicates
+If `memory_save` answers that a similar memory exists, don't force it: update that one with `memory_update` (its id) so memory doesn't fill up with repeats. Use `force=true` only if it really is something else. If a memory is no longer true, delete it with `memory_delete`.
