@@ -47,6 +47,46 @@ test('the delegation policy is added to the system prompt', async ($, on) => {
   expect(result.sections.map(s => s.id)).toContain('forge-team')
 })
 
+test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {
+  // The band only draws when it has something to show: a plan usage window.
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  await $.session.measure({
+    context: { percent: 10 } as never,
+    rateLimits: [{ kind: 'five_hour', percentUsed: 20 }],
+    changed: ['rateLimits'],
+  })
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  const text = JSON.stringify(await drawn.drawn())
+  expect(text).toContain('◆ ')
+  expect(text).toContain('#ff6a00')
+  expect(text).toContain('#ffc66b')
+  // The name itself in the brand orange, not in the status colours (error, warning…).
+  expect(text).toContain('{"color":"#ff6a00","bold":true},"children":["F"]')
+})
+
+test('a Forge session writes one compact project header', async ($, on) => {
+  mock.env(on, { FORGE_PROJECT: '/work/forge' })
+  // The engine's side of what the session start asks for.
+  on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+  on('agent.register', () => ({ value: {} }) as never)
+  on('command.register', () => ({ value: {} }) as never)
+  on('process.run', () => ({ value: { exitCode: 0, stdout: 'feat/mod-brand\n', stderr: '' } }) as never)
+  let header = ''
+  on('ui.log', async ($, e, next) => {
+    header = e.text
+    return next(e)
+  })
+  await $.session.start({ cwd: '/work/forge', surface: 'terminal', isInteractive: true })
+  // Written in the background, so the start never waits for git.
+  for (let i = 0; i < 50 && !header; i++) await Promise.resolve()
+  expect(header).toBe('◆ Forge · forge · feat/mod-brand')
+})
+
 test('the band shows new and cached tokens by model', async ($, on) => {
   on('turn.complete', ($, e) => ({ text: e.answer })) // the engine's side of the event
   // Two finished turns: the main loop on Opus and a subagent on Haiku.
