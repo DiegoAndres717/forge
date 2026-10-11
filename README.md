@@ -175,6 +175,7 @@ Write what the command needs right after it: `/forge-remember we bill with Wompi
 | `⌘⇧]` `⌘⇧[` | Next / previous terminal | `⌘]` `⌘[` | Next / previous panel |
 | `⌘D` / `⌘⇧D` | Split right / down | `⌘⇧H` | Home |
 | `⌘⌥←` `⌘⌥→` | Move focus | `⌘,` | Settings |
+| `⌘⇧E` | Open the project in your editor (VS Code, Cursor, Antigravity, Zed…; also right-click the project) | | |
 
 ## Configuration
 

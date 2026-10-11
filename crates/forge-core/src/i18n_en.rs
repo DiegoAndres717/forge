@@ -2313,4 +2313,12 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Quitar de Codex", "Remove from Codex"),
     ("Añadir a Codex", "Add to Codex"),
+    ("Abrir en el editor", "Open in Editor"),
+    (
+        "No hay ningún editor instalado (VS Code, Cursor, Antigravity, Zed…)",
+        "No editor installed (VS Code, Cursor, Antigravity, Zed…)",
+    ),
+    ("{p0}  Abrir en {name}", "{p0}  Open in {name}"),
+    ("{p0}  Abrir con", "{p0}  Open With"),
+    ("Abrir en {name}", "Open in {name}"),
 ];

@@ -80,6 +80,11 @@ impl MenuBar {
                     Some("CmdOrCtrl+O"),
                     act(Action::OpenFolder),
                 ),
+                &item(
+                    tr!("Abrir en el editor"),
+                    Some("CmdOrCtrl+Shift+E"),
+                    act(Action::OpenInEditor),
+                ),
                 &item(tr!("Inicio"), Some("CmdOrCtrl+Shift+H"), act(Action::Home)),
                 &sep(),
                 &item(

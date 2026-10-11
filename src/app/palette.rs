@@ -437,6 +437,27 @@ impl App {
                 cmd(UiCmd::ResetLayout),
             );
 
+            // Editores instalados: el preferido con ⌘⇧E y, con varios, cada uno.
+            let editors = editors::installed();
+            if !editors.is_empty() {
+                add(
+                    icon::CODE,
+                    tr!("Abrir en el editor").into(),
+                    "⌘⇧E",
+                    act(Action::OpenInEditor),
+                );
+            }
+            if let (Some(i), true) = (self.active, editors.len() > 1) {
+                for &(name, bundle) in editors {
+                    add(
+                        icon::CODE,
+                        tr!("Abrir en {name}", name = name),
+                        tr!("editor"),
+                        cmd(UiCmd::OpenInEditor(i, Some(bundle))),
+                    );
+                }
+            }
+
             // Proyecto.
             add(
                 icon::GEAR,

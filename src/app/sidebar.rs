@@ -115,6 +115,7 @@ impl App {
                         cmds.push(UiCmd::Activate(i));
                     }
                     row.context_menu(|ui| {
+                        editor_menu(ui, i, self.store.as_ref(), cmds);
                         if dormant {
                             if ui.button(tr!("{p0}  Despertar", p0 = icon::SUN)).clicked() {
                                 cmds.push(UiCmd::Activate(i));
@@ -674,4 +675,28 @@ impl App {
             });
         }
     }
+}
+
+/// «Abrir en <preferido>» y, con varios editores, «Abrir con» y la lista.
+fn editor_menu(ui: &mut egui::Ui, i: usize, store: Option<&Store>, cmds: &mut Vec<UiCmd>) {
+    let editors = super::editors::installed();
+    let Some((name, bundle)) = super::editors::preferred(store, editors) else {
+        return;
+    };
+    if ui
+        .button(tr!("{p0}  Abrir en {name}", p0 = icon::CODE, name = name))
+        .clicked()
+    {
+        cmds.push(UiCmd::OpenInEditor(i, Some(bundle)));
+    }
+    if editors.len() > 1 {
+        ui.menu_button(tr!("{p0}  Abrir con", p0 = icon::CODE), |ui| {
+            for &(name, bundle) in editors {
+                if ui.button(name).clicked() {
+                    cmds.push(UiCmd::OpenInEditor(i, Some(bundle)));
+                }
+            }
+        });
+    }
+    ui.separator();
 }

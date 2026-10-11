@@ -123,6 +123,8 @@ pub fn row(
     let height = 26.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    // Con nombre para VoiceOver (y para encontrarla en los tests).
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     let painter = ui.painter();
     if selected {
         painter.rect_filled(
