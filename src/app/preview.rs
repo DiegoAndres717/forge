@@ -190,7 +190,7 @@ fn ui_preview() {
                 "decision",
                 "Payments go through Stripe Checkout",
                 "Hosted checkout keeps card data off our servers (no PCI scope).",
-                "payments",
+                "payments, orders",
                 "claude-code",
             )
             .unwrap();
@@ -200,7 +200,7 @@ fn ui_preview() {
                 "error",
                 "Duplicate index in the orders migration",
                 "drizzle-kit failed; renamed the index to orders_customer_idx.",
-                "",
+                "database, orders",
                 "user",
             )
             .unwrap();

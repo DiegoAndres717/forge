@@ -242,7 +242,6 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("{p0}  Buscar (sin tildes también)", "{p0}  Search"),
     ("Todos", "All"),
-    ("Etiqueta", "Tag"),
     ("{p0}  Nueva nota", "{p0}  New note"),
     ("Título", "Title"),
     (
@@ -2127,4 +2126,9 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Resumen de la última sesión", "Summary of the last session"),
     ("el resumen está vacío", "the summary is empty"),
+    (
+        "Compartida con los agentes que abres desde Forge (MCP).",
+        "Shared with the agents you open from Forge (MCP).",
+    ),
+    ("Filtrar por esta etiqueta", "Filter by this tag"),
 ];

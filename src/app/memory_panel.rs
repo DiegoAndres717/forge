@@ -86,8 +86,7 @@ impl App {
                 tone_color(processes::Tone::Ok),
             ),
             Some(_) => (
-                tr!("Compartida con Claude Code y Codex al abrirlos desde Forge (MCP).")
-                    .to_string(),
+                tr!("Compartida con los agentes que abres desde Forge (MCP).").to_string(),
                 tone_color(processes::Tone::Ok),
             ),
             None => (
@@ -114,14 +113,15 @@ impl App {
             }
         }
 
-        ui.horizontal(|ui| {
+        // Buscador y tipo; en un panel estrecho, uno debajo del otro.
+        ui.horizontal_wrapped(|ui| {
             let search = ui.add(
                 theme::field(egui::TextEdit::singleline(&mut ws.memory.query))
                     .hint_text(tr!(
                         "{p0}  Buscar (sin tildes también)",
                         p0 = icon::MAGNIFYING_GLASS
                     ))
-                    .desired_width(200.0),
+                    .desired_width((ui.available_width() - 150.0).clamp(160.0, 320.0)),
             );
             if search.changed() {
                 ws.memory.dirty = true;
@@ -157,15 +157,24 @@ impl App {
                         }
                     }
                 });
-            let tag = ui.add(
-                theme::field(egui::TextEdit::singleline(&mut ws.memory.tag))
-                    .hint_text(tr!("Etiqueta"))
-                    .desired_width(110.0),
-            );
-            if tag.changed() {
-                ws.memory.dirty = true;
-            }
         });
+        // Etiquetas que existen, para filtrar con un clic (otro clic quita el filtro).
+        if !ws.memory.tags.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+                for (tag, n) in ws.memory.tags.clone() {
+                    let on = ws.memory.tag == tag;
+                    if ui
+                        .selectable_label(on, RichText::new(format!("#{tag} {n}")).size(12.0))
+                        .on_hover_text(tr!("Filtrar por esta etiqueta"))
+                        .clicked()
+                    {
+                        ws.memory.tag = if on { String::new() } else { tag };
+                        ws.memory.dirty = true;
+                    }
+                }
+            });
+        }
         if ws.memory.form.is_none()
             && theme::secondary(&mut ui, tr!("{p0}  Nueva nota", p0 = icon::PLUS)).clicked()
         {
@@ -259,8 +268,8 @@ impl App {
                             .color(theme::TEXT_3),
                     );
                     for m in entries {
-                        let header =
-                            RichText::new(format!("[{}] {}", kind_label(&m.kind), m.title));
+                        // El tipo ya lo dice el grupo.
+                        let header = RichText::new(&m.title);
                         egui::CollapsingHeader::new(header)
                             .id_salt(("memory", m.id))
                             .show(ui, |ui| {

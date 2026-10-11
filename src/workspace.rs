@@ -243,7 +243,10 @@ pub struct MemoryView {
     pub open: bool,
     pub query: String,
     pub kind: Option<String>,
+    /// Etiqueta elegida para filtrar ("" = todas).
     pub tag: String,
+    /// Etiquetas que hay en la memoria del proyecto y cuántas memorias tiene cada una.
+    pub tags: Vec<(String, usize)>,
     pub results: Vec<forge_core::memory::Memory>,
     pub count: i64,
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).

@@ -165,10 +165,9 @@ fn memory_note_created_from_the_panel_is_searchable() {
     assert_eq!(found[0].title, "Vacunación por lotes");
     h.get_by_label_contains("Vacunación por lotes");
 
-    let tag = h.get_by(|n| n.placeholder() == Some("Etiqueta"));
-    tag.focus();
-    tag.type_text("vacunas");
-    h.run_steps(2);
+    // Las etiquetas existentes salen como botones: un clic filtra, otro lo quita.
+    h.get_by_label_contains("#vacunas").click();
+    h.run_steps(3);
     assert_eq!(
         ws(h.state()).memory.results.len(),
         1,

@@ -276,21 +276,44 @@ impl App {
                 self.workspaces[i].memory.kind.clone(),
                 self.workspaces[i].memory.tag.to_lowercase(),
             );
+            let has_tag = |m: &forge_core::memory::Memory, tag: &str| {
+                m.tags
+                    .to_lowercase()
+                    .split(',')
+                    .any(|item| item.trim() == tag)
+            };
+            // Con etiqueta se filtra antes de quedarse con las 50 primeras.
+            // ponytail: filtro en Rust sobre 1000; pasarlo a SQL si un proyecto tiene más.
+            let tag = tag.trim().to_string();
+            let limit = if tag.is_empty() { 50 } else { 1000 };
             let mut results = self
-                .db(|s| s.search_memories(&path, &query, kind.as_deref(), 50))
+                .db(|s| s.search_memories(&path, &query, kind.as_deref(), limit))
                 .unwrap_or_default();
-            if !tag.trim().is_empty() {
-                results.retain(|memory| {
-                    memory
-                        .tags
-                        .to_lowercase()
-                        .split(',')
-                        .any(|item| item.trim() == tag.trim())
-                });
+            if !tag.is_empty() {
+                results.retain(|m| has_tag(m, &tag));
+                results.truncate(50);
             }
             let count = self.db(|s| s.count_memories(&path)).unwrap_or(0);
+            // Las etiquetas de todo el proyecto, las más usadas primero.
+            let mut tags: Vec<(String, usize)> = Vec::new();
+            for m in self
+                .db(|s| s.list_memories(&path, None, 1000))
+                .unwrap_or_default()
+            {
+                for t in m.tags.to_lowercase().split(',').map(str::trim) {
+                    if t.is_empty() {
+                        continue;
+                    }
+                    match tags.iter_mut().find(|(name, _)| name == t) {
+                        Some((_, n)) => *n += 1,
+                        None => tags.push((t.to_string(), 1)),
+                    }
+                }
+            }
+            tags.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             let memory = &mut self.workspaces[i].memory;
-            (memory.results, memory.count, memory.dirty) = (results, count, false);
+            (memory.results, memory.count, memory.tags, memory.dirty) =
+                (results, count, tags, false);
         }
         // Historial del panel abierto.
         if let Some(i) = self.active.filter(|i| {
