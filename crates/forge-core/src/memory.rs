@@ -3,7 +3,7 @@
 use crate::tr;
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::store::{Store, now};
@@ -160,6 +160,37 @@ impl Store {
         let Some(fts) = fts_query(query) else {
             return self.list_memories(project, kind, limit);
         };
+        self.fts_memories(project, &fts, kind, limit)
+    }
+
+    /// Memorias que pueden venir al caso para un mensaje libre: basta con que coincida
+    /// alguna palabra significativa (sin tildes ni palabras de relleno), y se ordenan por
+    /// relevancia. Sin palabras útiles, ninguna.
+    // ponytail: sin umbral de relevancia; las primeras `limit` (pocas) bastan como pista.
+    pub fn recall_memories(
+        &self,
+        project: &Path,
+        text: &str,
+        limit: usize,
+    ) -> Result<Vec<Memory>, String> {
+        let terms: Vec<String> = words(text)
+            .into_iter()
+            .take(12)
+            .map(|w| format!("\"{w}\"*"))
+            .collect();
+        if terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.fts_memories(project, &terms.join(" OR "), None, limit)
+    }
+
+    fn fts_memories(
+        &self,
+        project: &Path,
+        fts: &str,
+        kind: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Memory>, String> {
         let mut stmt = self
             .conn
             .prepare(
@@ -223,6 +254,51 @@ impl Store {
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
             .map_err(|e| e.to_string())
+    }
+
+    /// Una memoria por id, siempre dentro del proyecto actual.
+    pub fn get_memory(&self, project: &Path, id: i64) -> Result<Option<Memory>, String> {
+        self.conn
+            .query_row(
+                "SELECT id, kind, title, body, tags, source, created_at FROM memories
+                 WHERE id = ?1 AND project = ?2",
+                params![id, self.project_key(project)],
+                |r| {
+                    Ok(Memory {
+                        id: r.get(0)?,
+                        kind: r.get(1)?,
+                        title: r.get(2)?,
+                        body: r.get(3)?,
+                        tags: r.get(4)?,
+                        source: r.get(5)?,
+                        created_at: r.get(6)?,
+                        snippet: None,
+                    })
+                },
+            )
+            .optional()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Guarda el resumen de la última sesión (tras compactar): una sola nota por proyecto
+    /// que se actualiza cada vez. Devuelve su id; un resumen vacío no cambia nada.
+    pub fn save_session_summary(&self, project: &Path, summary: &str) -> Result<i64, String> {
+        let title = tr!("Resumen de la última sesión");
+        // ponytail: recorte fijo; es una pista para retomar, no el historial entero.
+        let body: String = summary.trim().chars().take(4000).collect();
+        let existing = self
+            .list_memories(project, Some("note"), 500)?
+            .into_iter()
+            .find(|m| m.title == title);
+        match existing {
+            Some(m) if body.is_empty() => Ok(m.id),
+            Some(m) => {
+                self.update_memory(project, m.id, None, None, Some(&body), None)?;
+                Ok(m.id)
+            }
+            None if body.is_empty() => Err(tr!("el resumen está vacío").into()),
+            None => self.add_memory(project, "note", title, &body, "", "forge"),
+        }
     }
 
     /// Memoria existente que trata de lo mismo que `title` (para no guardar duplicados).
@@ -314,6 +390,23 @@ pub fn render(m: &Memory) -> String {
     )
 }
 
+/// Resultado breve de búsqueda: el detalle se obtiene con `memory_get`.
+pub fn render_search(m: &Memory) -> String {
+    let snippet = m.snippet.as_deref().unwrap_or(&m.body);
+    tr!(
+        "#{p0} [{p1}] {p2}\n{p3}",
+        p0 = m.id,
+        p1 = kind_label(&m.kind),
+        p2 = m.title,
+        p3 = snippet
+    )
+}
+
+/// Referencia mínima para inyectar en el contexto de un agente.
+pub fn render_title(m: &Memory) -> String {
+    format!("#{} [{}] {}", m.id, kind_label(&m.kind), m.title)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,6 +482,39 @@ mod tests {
                 .search_memories(p, "\"; DROP TABLE memories; --", None, 10)
                 .is_ok()
         );
+        // El resumen de sesión es una sola nota que se actualiza.
+        let first = store
+            .save_session_summary(p, "Hecho: A. Pendiente: B.")
+            .unwrap();
+        let again = store
+            .save_session_summary(p, "Hecho: A y B. Pendiente: C.")
+            .unwrap();
+        assert_eq!(first, again);
+        assert!(
+            store
+                .get_memory(p, first)
+                .unwrap()
+                .unwrap()
+                .body
+                .contains("Pendiente: C")
+        );
+        store.delete_memory(p, first).unwrap();
+
+        // Un mensaje libre encuentra lo relacionado aunque no estén todas sus palabras.
+        let recalled = store
+            .recall_memories(p, "¿Qué pasa con la vacunación de los lotes?", 3)
+            .unwrap();
+        assert_eq!(recalled[0].title, "Vacunación en lotes");
+        assert!(
+            store
+                .recall_memories(p, "arregla el login", 3)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(store.recall_memories(p, "¿y eso?", 3).unwrap().is_empty());
+        let memory = store.get_memory(p, hits[0].id).unwrap().unwrap();
+        assert_eq!(memory.title, "Vacunación en lotes");
+        assert!(store.get_memory(other, memory.id).unwrap().is_none());
 
         assert_eq!(store.list_memories(p, None, 10).unwrap().len(), 3);
         assert_eq!(store.count_memories(p).unwrap(), 3);

@@ -1026,7 +1026,10 @@ fn memory_cli(
 ) -> Result<i32, String> {
     let store = open_store()?;
     let kind = flag(args, "--kind");
+    let brief = args.iter().any(|arg| arg == "--brief");
     let found = match action {
+        // --brief: lo que hace el mod en cada mensaje; pocas referencias y nada si no hay.
+        "search" if brief => store.recall_memories(project, &rest.join(" "), 3)?,
         "search" => store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?,
         "list" => store.list_memories(project, kind.as_deref(), 30)?,
         "add" => {
@@ -1036,6 +1039,16 @@ fn memory_cli(
             let tags = flag(args, "--tags").unwrap_or_default();
             let id = store.add_memory(project, k, title, &body.join(" "), &tags, "usuario")?;
             out.line(&format!("Guardada como #{id}."));
+            return Ok(0);
+        }
+        // El mod guarda aquí el resumen de cada compactación (por stdin): una sola nota
+        // que se va actualizando, para no llenar la memoria de copias.
+        "session" => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin().take(64 * 1024), &mut text)
+                .map_err(|e| e.to_string())?;
+            let id = store.save_session_summary(project, &text)?;
+            out.line(&format!("#{id}"));
             return Ok(0);
         }
         "delete" => {
@@ -1058,11 +1071,16 @@ fn memory_cli(
             ));
         }
     };
-    if found.is_empty() {
+    if found.is_empty() && !brief {
         out.line(tr!("Sin resultados."));
     }
     for m in found {
-        out.line(&forge_core::memory::render(&m));
+        let text = if brief {
+            forge_core::memory::render_title(&m)
+        } else {
+            forge_core::memory::render(&m)
+        };
+        out.line(&text);
         out.line("");
     }
     Ok(0)

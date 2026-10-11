@@ -130,14 +130,14 @@ async function sessionHeader($: EngineInterface, cwd: string) {
 }
 
 /** Runs Forge's CLI for this project; null when the session was not opened by Forge. */
-async function forge($: EngineInterface, args: string[], stdin?: string) {
+async function forge($: EngineInterface, args: string[], stdin?: string, timeoutMs = 300_000) {
   // Never throws: most calls are fire-and-forget and must not break a turn.
   try {
     const bin = await $.env.get('FORGE_BIN')
     if (!bin) return null
     const project = await $.env.get('FORGE_PROJECT')
     const argv = [bin, ...args, ...(project ? ['--project', project] : [])]
-    return await $.process.run(argv, { stdin, timeoutMs: 300_000 })
+    return await $.process.run(argv, { stdin, timeoutMs })
   } catch {
     return null
   }
@@ -223,6 +223,28 @@ export const register: Register = on => {
       text: `${text}\n\nFrom Forge (this project's memory and plans). Search more with memory_search and plans_list; save new decisions and fixed bugs with memory_save.`,
     }
     return { ...result, blocks: [...result.blocks, block] }
+  })
+
+  // A local search per message adds only references (a few titles): the model asks for
+  // the detail with memory_get when it needs it. Slash commands and one-word replies
+  // carry nothing to look up; it never waits more than 2 s.
+  on('prompt.submit', async ($, e, next) => {
+    const text = e.text.trim()
+    if (text.startsWith('/') || text.length < 12) return next(e)
+    const out = await forge($, ['memory', 'search', '--brief', text], undefined, 2_000)
+    const memories = out && out.exitCode === 0 ? out.stdout.trim() : ''
+    return next(memories ? { ...e, context: [...(e.context ?? []), `Relevant Forge Memory:\n${memories}`] } : e)
+  })
+
+  on('session.compact', async ($, e, next) => {
+    const result = await next(e)
+    const messages = 'messages' in result ? result.messages : undefined
+    // The summary is the longest text left after compacting (it may come as a user turn).
+    // ponytail: by length; read a marker if the engine ever labels the summary.
+    const summary = [...(messages ?? [])].sort((a, b) => b.text.length - a.text.length)[0]?.text.trim()
+    // One note per project, updated each time (see `forge memory session`).
+    if (summary && e.trigger !== 'precompute') void forge($, ['memory', 'session'], summary)
+    return result
   })
 
   // The delegation policy, added to the main session's system prompt.

@@ -801,6 +801,10 @@ pub const EN: &[(&str, &str)] = &[
         "Searches Forge Memory, the project memory (decisions, architecture, fixed errors, commands, conventions). Use it before deciding something or when you hit an error that may already have been solved.",
     ),
     (
+        "Lee el detalle de una memoria de Forge por id, después de encontrarla con memory_search.",
+        "Reads a Forge memory's details by id, after finding it with memory_search.",
+    ),
+    (
         "Palabras a buscar (sin tildes también vale)",
         "Words to search for",
     ),
@@ -908,6 +912,7 @@ pub const EN: &[(&str, &str)] = &[
         "#{p0} [{p1}] {p2}\n{p3}\n(guardada por {p4}, {p5}{tags})",
         "#{p0} [{p1}] {p2}\n{p3}\n(saved by {p4}, {p5}{tags})",
     ),
+    ("#{p0} [{p1}] {p2}\n{p3}", "#{p0} [{p1}] {p2}\n{p3}"),
     (
         "estás en `{branch}`: crea una rama para el PR (git switch -c mi-cambio)",
         "you are on `{branch}`: create a branch for the PR (git switch -c my-change)",
@@ -1273,8 +1278,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Incluir los completados", "Include completed ones"),
     (
-        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
-        "Forge Memory: the shared project memory. Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover (if a similar one exists, update it with memory_update). Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
+        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
+        "Forge Memory: the shared project memory. Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the detail with memory_get. Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
     ),
     (
         "No existe el plan #{id} en esta lista.",
@@ -2119,4 +2124,6 @@ pub const EN: &[(&str, &str)] = &[
         "Forge Memory · memoria del proyecto (⌘⇧M)",
         "Forge Memory · project memory (⌘⇧M)",
     ),
+    ("Resumen de la última sesión", "Summary of the last session"),
+    ("el resumen está vacío", "the summary is empty"),
 ];
