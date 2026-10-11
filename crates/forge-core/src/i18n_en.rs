@@ -1092,6 +1092,8 @@ pub const EN: &[(&str, &str)] = &[
     ("General", "General"),
     ("Idioma", "Language"),
     ("Notificaciones", "Notifications"),
+    ("Primero pregunta", "Ask first"),
+    ("Aclarar antes de planificar", "Clarify before planning"),
     (
         "Avisar cuando un agente termina, un proceso falla o Guard bloquea",
         "Notify when an agent finishes, a process fails or Guard blocks",
@@ -1280,6 +1282,14 @@ pub const EN: &[(&str, &str)] = &[
     (
         "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.",
         "Forge Memory: the shared project memory. Check memory_search before important decisions or when debugging; save with memory_save the decisions, fixed bugs and conventions you discover (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the detail with memory_get. Work to do goes into plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch if it deserves one, and its tasks); anything that comes up for later goes to the backlog (plan_add without phases). When starting a phase mark it in_progress, tick tasks as you finish them and mark the phase done when it's over.",
+    ),
+    (
+        "Modo «Primero pregunta»: ante una petición grande, haz hasta tres preguntas para aclarar lo imprescindible antes de crear el plan. Cuando el usuario responda, crea el plan con plan_add antes de escribir código.",
+        "Ask first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user responds, create the plan with plan_add before writing code.",
+    ),
+    (
+        "La IA creó el plan #{id}: {title}",
+        "The AI created plan #{id}: {title}",
     ),
     (
         "No existe el plan #{id} en esta lista.",
@@ -2131,4 +2141,9 @@ pub const EN: &[(&str, &str)] = &[
         "Shared with the agents you open from Forge (MCP).",
     ),
     ("Filtrar por esta etiqueta", "Filter by this tag"),
+    ("Cómo trabajan", "How they work"),
+    (
+        "Ante una petición grande, el agente hace hasta tres preguntas para aclarar lo imprescindible y luego crea el plan por fases antes de escribir código. Vale para todos los agentes y se aplica a los que abras a partir de ahora.",
+        "For a large request, the agent asks up to three questions to clarify what is essential, then creates the phased plan before writing code. Works for every agent and applies to the ones you open from now on.",
+    ),
 ];

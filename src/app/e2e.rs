@@ -404,9 +404,9 @@ fn plans_backlog_phases_and_tasks_from_the_panel() {
             .unwrap()
     };
 
-    // En el backlog está plegado: se despliega, se empieza la fase 1 y se tacha la tarea.
-    h.get_by_label("Ver fases").click();
-    h.run_steps(2);
+    // Un plan que crea un agente se abre desplegado y resaltado: se empieza la fase 1 y
+    // se tacha la tarea.
+    assert_eq!(ws(h.state()).ideas.highlighted, Some(plan));
     h.get_by_label_contains("pasar a En progreso — Modelo")
         .click();
     h.run_steps(3);
@@ -451,6 +451,32 @@ fn plans_backlog_phases_and_tasks_from_the_panel() {
     h.key_press(Key::Enter);
     h.run_steps(3);
     assert_eq!(store(&h, None)[0].title, "App para talleres");
+}
+
+#[test]
+fn mcp_plan_opens_and_highlights_plans() {
+    let _serial = serial();
+    let dir = project("mcp-plan");
+    let mut h = app(dir.clone());
+    let plan = h
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .add_plan(
+            Some(&dir),
+            "Exportación fiable",
+            "",
+            &[forge_core::ideas::Phase::new("Modelo")],
+            "claude-code",
+        )
+        .unwrap();
+    h.state_mut().workspaces[0].ideas.dirty = true;
+    h.run_steps(3);
+    let ideas = &ws(h.state()).ideas;
+    assert!(ideas.open, "un plan del MCP abre Planes");
+    assert_eq!(ideas.highlighted, Some(plan));
+    assert_eq!(ideas.toggled.get(&plan), Some(&true));
 }
 
 fn app_with(store: Store, open: Option<PathBuf>) -> Harness<'static, App> {

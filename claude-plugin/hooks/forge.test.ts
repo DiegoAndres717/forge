@@ -89,6 +89,18 @@ test('a compaction updates the single last-session note', async ($, on) => {
   expect(sent[0]?.stdin).toBe('Summary — done: A. Next: B.')
 })
 
+test('ask first adds its instruction only when it is on', async ($, on) => {
+  on('prompt.compose', () => ({ sections: [] }))
+  const compose = () => $.prompt.compose({
+    model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: ['terminal'],
+    tools: [], outputStyle: null, traits: [],
+  })
+  mock.env(on, { FORGE_ASK_FIRST: '1' })
+  const ids = (await compose()).sections.map(s => s.id)
+  expect(ids).toContain('forge-ask-first')
+  expect(ids).toContain('forge-team')
+})
+
 test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {
   // The band only draws when it has something to show: a plan usage window.
   on('session.measure', ($, e) => ({ changed: e.changed }))

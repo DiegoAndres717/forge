@@ -41,6 +41,8 @@ pub struct Settings {
     font_bold_italic: Option<PathBuf>,
     /// Option (⌥) envía ESC+tecla en vez de caracteres especiales (∂, ƒ...).
     option_as_meta: bool,
+    /// Antes de planificar, los agentes aclaran lo imprescindible con el usuario.
+    ask_first: bool,
 }
 
 impl Default for Settings {
@@ -52,6 +54,7 @@ impl Default for Settings {
             font_italic: None,
             font_bold_italic: None,
             option_as_meta: true,
+            ask_first: false,
         }
     }
 }
@@ -293,9 +296,11 @@ mod tests {
 
     #[test]
     fn settings_parse_and_reject_typos() {
-        let s: Settings = toml::from_str("font_size = 16\noption_as_meta = false").unwrap();
+        let s: Settings =
+            toml::from_str("font_size = 16\noption_as_meta = false\nask_first = true").unwrap();
         assert_eq!(s.font_size, 16.0);
         assert!(!s.option_as_meta);
+        assert!(s.ask_first);
         assert!(toml::from_str::<Settings>("font_sise = 16").is_err());
     }
 }

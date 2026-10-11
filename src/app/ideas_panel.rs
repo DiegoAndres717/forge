@@ -144,6 +144,7 @@ impl App {
             show_done,
             toggled,
             phase_toggled,
+            highlighted,
             phase_input,
             ..
         } = view;
@@ -159,6 +160,7 @@ impl App {
                 planner,
                 toggled,
                 phase_toggled,
+                highlighted: *highlighted,
                 phase_input: &phase_cell,
             };
             if let Some(edit) = editing.as_mut().filter(|e| e.0 == idea.id) {
@@ -233,23 +235,52 @@ impl App {
         match self.active {
             Some(i) => {
                 let view = &self.workspaces[i].ideas;
-                // Abierto: lista completa cada 2 s; cerrado: solo el contador cada 5 s.
-                let (full, count) = (view.open && every(view, 2), !view.open && every(view, 5));
-                if !(full || count) {
+                let due = every(view, if view.open { 2 } else { 5 });
+                if !due {
                     return;
                 }
                 let path = self.workspaces[i].project.path.clone();
                 let open_count = self.db(|s| s.open_ideas(Some(&path))).unwrap_or(0);
-                let items = full.then(|| {
-                    self.db(|s| s.list_ideas(Some(&path), true))
-                        .unwrap_or_default()
-                });
-                let view = &mut self.workspaces[i].ideas;
-                if let Some(items) = items {
-                    view.items = items;
+                let items = self
+                    .db(|s| s.list_ideas(Some(&path), true))
+                    .unwrap_or_default();
+                let ws = &mut self.workspaces[i];
+                let view = &mut ws.ideas;
+                let new_plan = view
+                    .loaded
+                    .is_some()
+                    .then(|| {
+                        items
+                            .iter()
+                            .find(|idea| {
+                                !view.known_ids.contains(&idea.id)
+                                    && idea.source != "usuario"
+                                    && !idea.phases.is_empty()
+                            })
+                            .map(|idea| (idea.id, idea.title.clone()))
+                    })
+                    .flatten();
+                if let Some((id, _)) = &new_plan {
+                    view.open = true;
+                    view.highlighted = Some(*id);
+                    view.toggled.insert(*id, true);
                 }
+                view.known_ids = items.iter().map(|idea| idea.id).collect();
+                view.items = items;
                 (view.open_count, view.dirty, view.loaded) =
                     (open_count, false, Some(Instant::now()));
+                // Un plan que acaba de crear un agente: Planes a la vista (como al abrirlo
+                // a mano, sin otro panel encima) y un aviso.
+                if let Some((id, title)) = new_plan {
+                    ws.guard.open = false;
+                    ws.memory.open = false;
+                    ws.git.open = false;
+                    ws.agent_event(tr!(
+                        "La IA creó el plan #{id}: {title}",
+                        id = id,
+                        title = title
+                    ));
+                }
             }
             None if every(&self.general, 2) => {
                 let items = self.db(|s| s.list_ideas(None, true)).unwrap_or_default();
@@ -397,6 +428,7 @@ struct ItemCtx<'a> {
     planner: Option<&'a str>,
     toggled: &'a HashMap<i64, bool>,
     phase_toggled: &'a HashMap<(i64, usize), bool>,
+    highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
 }
@@ -515,7 +547,13 @@ fn plan_card(
             ui.allocate_ui(Vec2::new(width, 0.0), |ui| {
                 // Ocupa todo el ancho: los botones de la derecha quedan alineados.
                 ui.set_min_width(width);
-                let mut title = RichText::new(&idea.title).color(theme::TEXT).strong();
+                let mut title = RichText::new(&idea.title)
+                    .color(if ctx.highlighted == Some(idea.id) {
+                        theme::ACCENT
+                    } else {
+                        theme::TEXT
+                    })
+                    .strong();
                 if idea.done() {
                     title = title.color(theme::TEXT_3);
                 }
