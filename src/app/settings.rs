@@ -317,6 +317,29 @@ impl App {
                 },
             );
         });
+        theme::section(ui, tr!("Cómo trabajan"));
+        let mut ask = self.settings.ask_first;
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("Primero pregunta"),
+                tr!(
+                    "Ante una petición grande, el agente hace hasta tres preguntas para aclarar lo imprescindible y luego crea el plan por fases antes de escribir código. Vale para todos los agentes y se aplica a los que abras a partir de ahora."
+                ),
+                |ui| {
+                    ui.checkbox(&mut ask, tr!("Aclarar antes de planificar"));
+                },
+            );
+        });
+        if ask != self.settings.ask_first {
+            self.settings.ask_first = ask;
+            for workspace in &mut self.workspaces {
+                workspace.set_ask_first(ask);
+            }
+            if let Err(e) = crate::save_settings(&self.settings) {
+                self.error = Some(e);
+            }
+        }
         self.accounts_ui(ui, cmds);
     }
 

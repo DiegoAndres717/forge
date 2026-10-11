@@ -235,6 +235,10 @@ pub struct IdeasView {
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
+    /// Planes ya vistos, para detectar los que crea un agente mientras el panel está cerrado.
+    pub known_ids: std::collections::HashSet<i64>,
+    /// Plan que acaba de crear un agente y se destaca al abrir el panel.
+    pub highlighted: Option<i64>,
 }
 
 /// Panel de memoria del proyecto (⌘⇧M).
@@ -330,6 +334,8 @@ pub struct Workspace {
     /// Último aviso visto: se mantiene hasta entrar al proyecto (sin parpadeos si el
     /// agente redibuja su pantalla mientras espera).
     sticky: Option<Attention>,
+    /// Los agentes nuevos de este workspace preguntan antes de planificar.
+    ask_first: bool,
 }
 
 impl Workspace {
@@ -387,6 +393,7 @@ impl Workspace {
             history_saved: HashMap::new(),
             notified: Vec::new(),
             sticky: None,
+            ask_first: false,
         }
     }
 
@@ -697,6 +704,11 @@ impl Workspace {
         self.project = project;
     }
 
+    /// Aplica el ajuste global a las terminales de agente que se abran después.
+    pub fn set_ask_first(&mut self, ask_first: bool) {
+        self.ask_first = ask_first;
+    }
+
     fn insert(&mut self, id: PanelId, panel: Panel) {
         self.panels.insert(id, panel);
         self.next_id = self.next_id.max(id + 1);
@@ -733,6 +745,9 @@ impl Workspace {
             "FORGE_PROJECT".into(),
             self.project.path.to_string_lossy().into_owned(),
         );
+        if self.ask_first {
+            env.insert("FORGE_ASK_FIRST".into(), "1".into());
+        }
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
@@ -828,11 +843,14 @@ impl Workspace {
                 Some(forge_core::agents::McpServer {
                     name: "forge".into(),
                     command: exe.to_string_lossy().into_owned(),
-                    args: vec![
+                    args: [
                         "mcp".into(),
                         "--project".into(),
                         self.project.path.to_string_lossy().into_owned(),
-                    ],
+                    ]
+                    .into_iter()
+                    .chain(self.ask_first.then(|| "--ask-first".to_string()))
+                    .collect(),
                 })
             }
             // ponytail: el comando externo se separa por espacios (sin comillas).
@@ -2788,5 +2806,19 @@ mod agent_tests {
             "la conversación está en la otra cuenta"
         );
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// «Primero pregunta» llega al servidor MCP como argumento: algunos agentes (Codex)
+    /// no le pasan el entorno de la terminal.
+    #[test]
+    fn ask_first_reaches_the_mcp_server_as_an_argument() {
+        let dir = std::env::temp_dir().join(format!("forge-askfirst-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ws = Workspace::new(Project::load(&dir).unwrap());
+        let args = |ws: &Workspace| ws.mcp_server().unwrap().args;
+        assert!(!args(&ws).contains(&"--ask-first".to_string()));
+        ws.set_ask_first(true);
+        assert!(args(&ws).contains(&"--ask-first".to_string()));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

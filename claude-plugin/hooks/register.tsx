@@ -251,7 +251,12 @@ export const register: Register = on => {
   // The delegation policy, added to the main session's system prompt.
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
-    return { sections: [...result.sections, { id: 'forge-team', text: DELEGATION, scope: 'session' as const }] }
+    const sections = [...result.sections, { id: 'forge-team', text: DELEGATION, scope: 'session' as const }]
+    // Never lose the delegation policy because the variable can't be read.
+    if (await $.env.get('FORGE_ASK_FIRST').catch(() => undefined) === '1') {
+      sections.push({ id: 'forge-ask-first', text: 'Before planning a large request, ask up to three questions to clarify what is essential. Once answered, create the plan with plan_add before writing code.', scope: 'session' as const })
+    }
+    return { sections }
   })
 
   // The built-in explorer runs on Haiku too unless the model asked for another; the

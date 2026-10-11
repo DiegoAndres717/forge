@@ -12,6 +12,22 @@ use crate::store::Store;
 
 const PROTOCOL: &str = "2025-06-18";
 
+fn instructions(ask_first: bool) -> String {
+    let base = tr!(
+        "Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar."
+    );
+    if ask_first {
+        format!(
+            "{base}\n\n{}",
+            tr!(
+                "Modo «Primero pregunta»: ante una petición grande, haz hasta tres preguntas para aclarar lo imprescindible antes de crear el plan. Cuando el usuario responda, crea el plan con plan_add antes de escribir código."
+            )
+        )
+    } else {
+        base.into()
+    }
+}
+
 fn tools() -> Value {
     let kinds: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
     json!([
@@ -163,6 +179,8 @@ pub struct Server<'a> {
     store: &'a Store,
     /// Cliente conectado (clientInfo.name): queda como autor de lo que guarde.
     client: String,
+    /// Modo «Primero pregunta» (Ajustes): `forge mcp --ask-first` o `FORGE_ASK_FIRST=1`.
+    pub ask_first: bool,
 }
 
 impl<'a> Server<'a> {
@@ -171,6 +189,7 @@ impl<'a> Server<'a> {
             project,
             store,
             client: "agente".into(),
+            ask_first: std::env::var("FORGE_ASK_FIRST").as_deref() == Ok("1"),
         }
     }
 
@@ -189,7 +208,7 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": tr!("Forge Memory: la memoria compartida del proyecto. Consulta memory_search antes de decisiones importantes o al depurar; guarda con memory_save las decisiones, errores resueltos y convenciones que descubras (si ya hay una parecida, actualízala con memory_update). memory_search devuelve títulos y fragmentos: lee el detalle con memory_get. Lo que hay por hacer va en los planes (plans_list, plan_add, plan_update): cuando el usuario cuente algo que quiere hacer, crea un plan por fases (cada fase con su rama si la merece y sus tareas); lo que surja para después, al backlog (plan_add sin fases). Al empezar una fase márcala in_progress, tacha las tareas al terminarlas y marca la fase done al acabar.")
+                    "instructions": instructions(self.ask_first)
                 }))
             }
             "ping" => Ok(json!({})),
@@ -559,8 +578,11 @@ pub fn project_context(project: &Path, store: &Store) -> String {
 }
 
 /// Bucle del servidor: un mensaje JSON por línea en stdin, respuestas por stdout.
-pub fn serve(project: &Path, store: &Store) -> std::io::Result<()> {
+/// `ask_first`: el modo «Primero pregunta» llega como argumento porque algunos agentes
+/// (Codex) lanzan sus servidores MCP sin el entorno de la terminal.
+pub fn serve(project: &Path, store: &Store, ask_first: bool) -> std::io::Result<()> {
     let mut server = Server::new(project, store);
+    server.ask_first |= ask_first;
     let stdout = std::io::stdout();
     for line in std::io::stdin().lock().lines() {
         let line = line?;
@@ -676,5 +698,11 @@ mod tests {
                 .unwrap()
                 .contains("Pagos con Wompi")
         );
+    }
+
+    #[test]
+    fn ask_first_adds_the_planning_instruction() {
+        assert!(instructions(true).contains("hasta tres preguntas"));
+        assert!(!instructions(false).contains("hasta tres preguntas"));
     }
 }

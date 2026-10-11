@@ -489,6 +489,7 @@ impl App {
         let name = project.name();
         self.db(|s| s.touch(&path, &name));
         let mut ws = Workspace::asleep(project, saved);
+        ws.set_ask_first(self.settings.ask_first);
         let (accounts, chosen) = self.account_state(&path);
         ws.set_accounts(accounts, chosen);
         if !awake {
