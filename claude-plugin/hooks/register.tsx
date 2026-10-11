@@ -32,7 +32,13 @@ type Effort = (typeof EFFORTS)[number]
 const isEffort = (v: string): v is Effort => (EFFORTS as readonly string[]).includes(v)
 
 /** Context fuller than this: the band suggests /compact before it gets expensive. */
-const CONTEXT_WARN = 70
+// Quality drops well before the window is full: warn early enough to compact in time.
+const CONTEXT_WARN = 60
+// The plan anchor is repeated when it changes or every few messages: each copy stays in
+// the context, so not on every turn.
+const ANCHOR_EVERY = 8
+let lastAnchor = ''
+let sinceAnchor = 0
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
  * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */
@@ -261,13 +267,27 @@ export const register: Register = on => {
   // A local search per message adds only references (a few titles): the model asks for
   // the detail with memory_get when it needs it. Slash commands and one-word replies
   // carry nothing to look up; it never waits more than 2 s.
+  // The plan anchor goes last, right before the model answers: what sits at the end of a
+  // long context is what it attends to best ("lost in the middle").
   on('prompt.submit', async ($, e, next) => {
     exploring = 0
     const text = e.text.trim()
-    if (text.startsWith('/') || text.length < 12) return next(e)
-    const out = await forge($, ['memory', 'search', '--brief', text], undefined, 2_000)
-    const memories = out && out.exitCode === 0 ? out.stdout.trim() : ''
-    return next(memories ? { ...e, context: [...(e.context ?? []), `Relevant Forge Memory:\n${memories}`] } : e)
+    if (text.startsWith('/')) return next(e)
+    const [found, anchored] = await Promise.all([
+      text.length < 12 ? null : forge($, ['memory', 'search', '--brief', text], undefined, 2_000),
+      forge($, ['anchor'], undefined, 2_000),
+    ])
+    const memories = found && found.exitCode === 0 ? found.stdout.trim() : ''
+    const anchor = anchored && anchored.exitCode === 0 ? anchored.stdout.trim() : ''
+    sinceAnchor += 1
+    const repeat = anchor !== '' && (anchor !== lastAnchor || sinceAnchor >= ANCHOR_EVERY)
+    const context = [
+      ...(e.context ?? []),
+      ...(memories ? [`Relevant Forge Memory:\n${memories}`] : []),
+      ...(repeat ? [`Forge: ${anchor}`] : []),
+    ]
+    if (repeat) [lastAnchor, sinceAnchor] = [anchor, 0]
+    return next(context.length === (e.context ?? []).length ? e : { ...e, context })
   })
 
   on('session.compact', async ($, e, next) => {

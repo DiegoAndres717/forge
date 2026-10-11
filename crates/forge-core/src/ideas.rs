@@ -128,6 +128,44 @@ impl Idea {
     }
 }
 
+/// En qué se está trabajando, en una línea (~50 tokens): las fases en curso y sus
+/// próximas tareas. Va al final del contexto en cada turno, donde el modelo mejor
+/// atiende («lost in the middle»). En inglés: es para el agente.
+pub fn anchor(ideas: &[Idea]) -> Option<String> {
+    let clip = |s: &str| -> String {
+        let s = s.trim();
+        match s.char_indices().nth(80) {
+            Some((i, _)) => format!("{}…", &s[..i]),
+            None => s.to_string(),
+        }
+    };
+    let lines: Vec<String> = ideas
+        .iter()
+        .filter(|i| !i.done())
+        .filter_map(|i| {
+            let (n, phase) = i
+                .phases
+                .iter()
+                .enumerate()
+                .find(|(_, p)| p.status == "doing")?;
+            let next: Vec<String> = phase
+                .tasks
+                .iter()
+                .filter(|t| !t.done)
+                .take(3)
+                .map(|t| clip(&t.text))
+                .collect();
+            let mut line = format!("plan #{} phase {} \"{}\"", i.id, n + 1, clip(&phase.title));
+            if !next.is_empty() {
+                line.push_str(&format!(" (next: {})", next.join("; ")));
+            }
+            Some(line)
+        })
+        .take(2)
+        .collect();
+    (!lines.is_empty()).then(|| format!("Working on {}.", lines.join(" and ")))
+}
+
 pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS ideas (
@@ -467,6 +505,51 @@ pub fn render(idea: &Idea) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn anchor_names_the_phase_in_progress_and_its_next_tasks() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/x");
+        let phase = |title: &str, tasks: &[&str]| Phase {
+            tasks: tasks
+                .iter()
+                .map(|t| Task {
+                    text: t.to_string(),
+                    done: false,
+                })
+                .collect(),
+            ..Phase::new(title)
+        };
+        let id = store
+            .add_plan(
+                Some(p),
+                "Recibos",
+                "",
+                &[
+                    phase("Modelo", &["a"]),
+                    phase("Envío", &["Resend", "Plantilla", "Reintentos", "Logs"]),
+                ],
+                "u",
+            )
+            .unwrap();
+        let anchor = |s: &Store| anchor(&s.list_ideas(Some(p), false).unwrap());
+        assert_eq!(anchor(&store), None, "nada en curso: sin ancla");
+        let done = PhaseChange {
+            status: Some("done"),
+            ..Default::default()
+        };
+        store.update_phase(Some(p), id, 0, done, "u").unwrap();
+        let doing = PhaseChange {
+            status: Some("in_progress"),
+            task: Some((0, true)),
+            ..Default::default()
+        };
+        store.update_phase(Some(p), id, 1, doing, "u").unwrap();
+        assert_eq!(
+            anchor(&store).unwrap(),
+            format!("Working on plan #{id} phase 2 \"Envío\" (next: Plantilla; Reintentos; Logs).")
+        );
+    }
 
     #[test]
     fn ideas_lifecycle_per_project_and_general() {

@@ -258,6 +258,14 @@ pub fn run(args: &[String]) -> i32 {
             println!("{cut}");
             0
         }),
+        // Una línea con la fase en curso: el mod la pone al final de cada mensaje.
+        (Some("anchor"), _) => open_store().and_then(|store| {
+            let plans = store.list_ideas(Some(&project), false)?;
+            if let Some(line) = forge_core::ideas::anchor(&plans) {
+                println!("{line}");
+            }
+            Ok(0)
+        }),
         (Some("plans" | "ideas"), action) => plans_cli(
             &out,
             &project,

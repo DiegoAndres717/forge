@@ -149,6 +149,7 @@ Cualquier `claude` que se ejecute en una terminal de Forge (escrito a mano, `cla
 - **Banda en vivo** encima del cuadro de texto: estado de Guard, planes en progreso y backlog, el modelo que trabaja en ese momento (● opus / ↳ explorer: … (haiku)), tokens de la sesión (nuevos frente a caché) y barras de uso del plan (5 h y semanal).
 - **Consumo por modelo**: cada turno, subagentes incluidos, queda registrado; se ve en Ajustes.
 - **Empieza sabiendo del proyecto**: cada conversación (y tras compactar o `/clear`) arranca con las decisiones clave, convenciones, reglas de Guard y planes en curso.
+- **No pierde el objetivo**: en contextos largos se pierde lo del medio, así que la fase en curso y sus próximas tareas van al final de tu mensaje (cuando cambian y cada pocos mensajes), la banda avisa al 60 % del contexto y **Empezar limpio**, en el menú del agente, abre una sesión nueva que empieza con un resumen de la anterior.
 - **Varias cuentas**: cuentas de Claude Code y Codex a la vez sin cerrar sesión (Ajustes → Cuentas). Cada una tiene su login e historial y comparte tus ajustes, `CLAUDE.md` y skills; eliges cuál usar en cada proyecto desde el clic derecho del agente. Puedes pasar una conversación a otra cuenta y seguir donde ibas, o a otro agente (Claude Code ↔ Codex…) con un resumen corto de lo hecho y lo pendiente; Forge te lo ofrece también cuando una cuenta llega a su límite.
 - **Comandos sin tokens**: `/forge-plans`, `/forge-guard`, `/forge-remember`, `/forge-memory`, `/forge-effort` (escribe `/forge` para verlos).
 
