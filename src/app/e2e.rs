@@ -147,6 +147,9 @@ fn memory_note_created_from_the_panel_is_searchable() {
     let title = h.get_by(|n| n.placeholder() == Some("Título"));
     title.focus();
     title.type_text("Vacunación por lotes");
+    let tags = h.get_by(|n| n.placeholder() == Some("Etiquetas, separadas por comas"));
+    tags.focus();
+    tags.type_text("vacunas");
     h.run_steps(2);
     h.get_by_label("Guardar").click();
     h.run_steps(3);
@@ -161,6 +164,15 @@ fn memory_note_created_from_the_panel_is_searchable() {
     assert_eq!(found.len(), 1, "la búsqueda ignora tildes");
     assert_eq!(found[0].title, "Vacunación por lotes");
     h.get_by_label_contains("Vacunación por lotes");
+
+    // Las etiquetas existentes salen como botones: un clic filtra, otro lo quita.
+    h.get_by_label_contains("#vacunas").click();
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).memory.results.len(),
+        1,
+        "el filtro de etiqueta se combina con la búsqueda"
+    );
 }
 
 #[test]

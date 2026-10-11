@@ -180,6 +180,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'forge-plans', description: "Forge: this project's plans and backlog", argumentHint: '[add <text> | show <id>]' })
     await $.command.register({ name: 'forge-guard', description: 'Forge: check the commit with Project Guard' })
     await $.command.register({ name: 'forge-remember', description: 'Forge: save a note to Forge Memory', argumentHint: '<text>' })
+    await $.command.register({ name: 'forge-memory', description: 'Forge: search project memory without a model call', argumentHint: '<text>' })
     void sessionHeader($, e.cwd) // `git` may be slow: never hold up the session start
     void refreshBand($)
     void $.session
@@ -415,5 +416,10 @@ export const register: Register = on => {
     const text = e.args.trim()
     if (!text) return { text: 'Usage: /forge-remember <text>', exitCode: 1 }
     return run($, ['memory', 'add', 'note', text.slice(0, 60), text])
+  })
+
+  on('command.run', { command: 'forge-memory' }, async ($, e) => {
+    const text = e.args.trim()
+    return run($, ['memory', 'search', text])
   })
 }
