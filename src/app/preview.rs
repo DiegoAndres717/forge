@@ -358,6 +358,11 @@ fn ui_preview() {
     // Clic derecho en el proyecto: abrirlo en el editor instalado.
     harness.get_by_label("Acme Store").click_secondary();
     settle(&mut harness);
+    // Con varios editores, «Abrir con» los lista con su icono.
+    if let Some(with) = harness.query_by_label_contains(forge_core::tr!("Abrir con")) {
+        with.hover();
+        settle(&mut harness);
+    }
     save(&mut harness, &out, "19-abrir-en-editor");
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
