@@ -1424,3 +1424,109 @@ fn add_process_in_the_sidebar_opens_its_form() {
         "abre en Este proyecto, con el formulario de procesos"
     );
 }
+
+/// Memoria, hilos y descriptores del proceso: (RSS en bytes, hilos, archivos abiertos).
+fn usage() -> (u64, u64, usize) {
+    let fds = std::fs::read_dir("/dev/fd").map(|d| d.count()).unwrap_or(0);
+    #[cfg(target_os = "macos")]
+    {
+        let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+        // SAFETY: proc_pidinfo escribe como máximo `size` bytes en `info`, que es POD.
+        let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+        let written = unsafe {
+            libc::proc_pidinfo(
+                std::process::id() as libc::c_int,
+                libc::PROC_PIDTASKINFO,
+                0,
+                (&mut info as *mut libc::proc_taskinfo).cast(),
+                size,
+            )
+        };
+        assert_eq!(written, size);
+        (info.pti_resident_size, info.pti_threadnum as u64, fds)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").unwrap();
+        let field = |name: &str| {
+            status
+                .lines()
+                .find_map(|l| l.strip_prefix(name))
+                .and_then(|v| v.split_whitespace().next()?.parse::<u64>().ok())
+                .unwrap()
+        };
+        (field("VmRSS:") * 1024, field("Threads:"), fds)
+    }
+}
+
+/// Abrir y cerrar terminales una y otra vez no deja nada atrás: los hilos y los archivos
+/// abiertos vuelven a su nivel y la memoria no crece con cada vuelta. Corre en un proceso
+/// propio (`memory_stays_flat_inner`): los demás tests abren hilos y archivos a la vez.
+#[test]
+fn opening_and_closing_terminals_does_not_leak() {
+    let out = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "app::e2e::memory_stays_flat_inner",
+            "--exact",
+            "--ignored",
+            "--test-threads=1",
+            "--nocapture",
+        ])
+        .output()
+        .unwrap();
+    let log =
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{log}");
+    assert!(log.contains("1 passed"), "no corrió el test interno: {log}");
+}
+
+#[test]
+#[ignore = "lo lanza opening_and_closing_terminals_does_not_leak en su propio proceso"]
+fn memory_stays_flat_inner() {
+    let mut h = app(project("leaks"));
+    let cycle = |h: &mut Harness<'_, App>, n: usize| {
+        for _ in 0..n {
+            h.key_press_modifiers(CMD, Key::D);
+            h.run_steps(3);
+            h.key_press_modifiers(CMD, Key::W);
+            h.run_steps(3);
+        }
+        assert_eq!(ws(h.state()).panel_count(), 1);
+    };
+    // Calentar: cachés de egui, fuentes, el primer shell.
+    cycle(&mut h, 5);
+    let settle = |h: &mut Harness<'_, App>, (_, threads, fds): (u64, u64, usize)| {
+        // Los hilos lectores terminan cuando el shell cerrado suelta su PTY.
+        let start = Instant::now();
+        loop {
+            h.run_steps(2);
+            let now = usage();
+            if now.1 <= threads + 2 && now.2 <= fds + 2 {
+                return now;
+            }
+            assert!(
+                start.elapsed() < Duration::from_secs(30),
+                "hilos o archivos sin cerrar: antes {threads} hilos y {fds} archivos, ahora {} y {}",
+                now.1,
+                now.2
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    };
+    let before = settle(&mut h, usage());
+    cycle(&mut h, 40);
+    let after = settle(&mut h, before);
+    let grown = after.0.saturating_sub(before.0) / (1 << 20);
+    eprintln!(
+        "40 terminales abiertas y cerradas: RSS {} → {} MB, hilos {} → {}, archivos {} → {}",
+        before.0 >> 20,
+        after.0 >> 20,
+        before.1,
+        after.1,
+        before.2,
+        after.2
+    );
+    // ponytail: margen amplio para el asignador; una fuga por terminal (su rejilla, su
+    // historial) pasaría de largo.
+    assert!(grown < 40, "la memoria creció {grown} MB en 40 terminales");
+}
