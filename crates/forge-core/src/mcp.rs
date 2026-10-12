@@ -103,6 +103,14 @@ fn prompts() -> Value {
     ])
 }
 
+/// El texto de una memoria: `body`, o `content`, que es como lo llaman muchos agentes.
+fn body(args: &Value) -> Option<&str> {
+    ["body", "content"]
+        .iter()
+        .find_map(|k| args[k].as_str())
+        .filter(|b| !b.trim().is_empty())
+}
+
 /// Codex no muestra los prompts MCP: los mismos comandos van como skills suyas
 /// (`$forge-plans`…), que usan las herramientas de este servidor. En inglés siempre:
 /// son instrucciones para el agente, no texto de la interfaz. (nombre, SKILL.md)
@@ -484,6 +492,12 @@ impl<'a> Server<'a> {
                 .store
                 .list_memories(self.project, kind, limit)
                 .map(|found| listing(&found, tr!("La memoria está vacía."))),
+            // Sin contenido no hay memoria: se dice qué falta en vez de guardar solo el
+            // título (los agentes a veces mandan `content` o un objeto).
+            "memory_save" if body(args).is_none() => Err(tr!(
+                "falta `body`: el texto de la memoria, como una cadena (qué, por qué y dónde)"
+            )
+            .into()),
             "memory_save"
                 if !args["force"].as_bool().unwrap_or(false)
                     && let Ok(Some(m)) = self.store.similar_memory(
@@ -503,7 +517,7 @@ impl<'a> Server<'a> {
                     self.project,
                     kind.unwrap_or("note"),
                     args["title"].as_str().unwrap_or_default(),
-                    args["body"].as_str().unwrap_or_default(),
+                    body(args).unwrap_or_default(),
                     args["tags"].as_str().unwrap_or_default(),
                     &self.client,
                 )
@@ -516,7 +530,7 @@ impl<'a> Server<'a> {
                         id,
                         kind,
                         args["title"].as_str(),
-                        args["body"].as_str(),
+                        body(args),
                         args["tags"].as_str(),
                     )
                     .map(|ok| {
@@ -835,6 +849,40 @@ pub fn serve(project: &Path, store: &Store, modes: Modes) -> std::io::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn memory_save_needs_a_body_and_accepts_content() {
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/x");
+        let mut server = Server::new(project, &store);
+        let mut call = |args: Value| {
+            let r = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "memory_save", "arguments": args}}))
+                .unwrap();
+            (
+                r["result"]["isError"].as_bool().unwrap_or(false),
+                r["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        };
+        // Sin texto: error que dice qué falta, y no se guarda nada.
+        let (error, text) = call(json!({"kind": "decision", "title": "Pagos"}));
+        assert!(error && text.contains("body"), "{text}");
+        let (error, _) =
+            call(json!({"kind": "decision", "title": "Pagos", "content": {"what": "x"}}));
+        assert!(error, "un objeto no es texto");
+        assert!(store.list_memories(project, None, 10).unwrap().is_empty());
+        // `content` como texto vale igual que `body`.
+        let (error, _) =
+            call(json!({"kind": "decision", "title": "Pagos con Wompi", "content": "Por PSE."}));
+        assert!(!error);
+        assert_eq!(
+            store.list_memories(project, None, 10).unwrap()[0].body,
+            "Por PSE."
+        );
+    }
 
     #[test]
     fn protocol_and_tools() {
