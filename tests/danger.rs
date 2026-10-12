@@ -19,8 +19,9 @@ fn setup(name: &str) -> Env {
     let _ = std::fs::remove_dir_all(&base);
     let repo = base.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    let base = base.canonicalize().unwrap();
-    let repo = repo.canonicalize().unwrap();
+    // Sin `\\?\` en Windows: el sh de Git for Windows no entiende esas rutas en el PATH.
+    let base = forge_core::canonical(&base);
+    let repo = forge_core::canonical(&repo);
     let mut vars = danger::install(&base.join("forge"), Path::new(FORGE)).unwrap();
     // El "proceso de la app" es este test (sigue vivo mientras espera la respuesta).
     vars.insert("FORGE_APP_PID".into(), std::process::id().to_string());
