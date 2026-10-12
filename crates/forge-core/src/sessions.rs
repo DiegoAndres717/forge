@@ -124,12 +124,15 @@ pub fn codex_limits(account: Option<&Path>) -> Option<crate::accounts::AccountLi
         .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
         .map(|p| (mtime(&p), p))
         .collect();
-    // Los nombres llevan la fecha: desempatan si se escribieron en el mismo segundo.
+    // Los nombres llevan la fecha: desempatan si se escribieron en el mismo segundo. La
+    // más reciente con medidas: una sesión abierta y cerrada sin conversar no tiene.
     files.sort();
-    let (at, file) = files.pop()?;
-    let text = tail(&file, 256 * 1024);
-    let limits = json_lines(&text).rev().find(|e| {
-        e["payload"]["type"] == "token_count" && e["payload"]["rate_limits"].is_object()
+    let (at, limits) = files.iter().rev().find_map(|(at, file)| {
+        let text = tail(file, 256 * 1024);
+        let found = json_lines(&text).rev().find(|e| {
+            e["payload"]["type"] == "token_count" && e["payload"]["rate_limits"].is_object()
+        })?;
+        Some((*at, found))
     })?;
     let windows = ["primary", "secondary"]
         .iter()
@@ -331,6 +334,9 @@ fn digest_codex(lines: impl Iterator<Item = serde_json::Value>) -> Digest {
 /// los planes y Forge Memory por MCP para el resto. `None` si no hay sesión.
 pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option<String> {
     let (name, lines) = digest_last(program, cwd, config)?;
+    if lines.is_empty() {
+        return None;
+    }
     let mut out = vec![crate::tr!(
         "Sigo una conversación que empezó en {name}. Resumen del traspaso:",
         name = name
@@ -344,6 +350,9 @@ pub fn handoff_brief(program: &str, cwd: &Path, config: Option<&Path>) -> Option
 /// al cerrar su terminal, sin depender de que el agente guarde nada).
 pub fn session_summary(program: &str, cwd: &Path, config: Option<&Path>) -> Option<String> {
     let (name, lines) = digest_last(program, cwd, config)?;
+    if lines.is_empty() {
+        return None;
+    }
     let mut out = vec![crate::tr!("Última sesión de {name}:", name = name)];
     out.extend(lines);
     Some(out.join("\n"))
@@ -547,11 +556,14 @@ fn codex(home: &Path, cwd: &Path) -> Option<LastSession> {
         files.sort_by_key(|f| std::cmp::Reverse(f.0));
         files.into_iter().find_map(|(when, path)| {
             let mut first = String::new();
-            std::io::BufRead::read_line(
-                &mut std::io::BufReader::new(std::fs::File::open(&path).ok()?),
-                &mut first,
-            )
-            .ok()?;
+            let mut reader = std::io::BufReader::new(std::fs::File::open(&path).ok()?);
+            std::io::BufRead::read_line(&mut reader, &mut first).ok()?;
+            // Una sesión abierta y cerrada sin conversar (solo la cabecera) no cuenta.
+            let mut rest = vec![0; 256 * 1024];
+            let n = reader.read(&mut rest).ok()?;
+            if !String::from_utf8_lossy(&rest[..n]).contains("\"response_item\"") {
+                return None;
+            }
             let meta: serde_json::Value = serde_json::from_str(&first).ok()?;
             let p = &meta["payload"];
             if p["cwd"].as_str() != Some(&*cwd.to_string_lossy()) || p["source"] == "exec" {
@@ -609,11 +621,21 @@ mod tests {
                 "{{\"type\":\"session_meta\",\"payload\":{{\"id\":\"{id}\",\"cwd\":\"{cwd}\",\"source\":\"{source}\"}}}}\n"
             )
         };
+        let said = "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Migra la base\"}]}}\n";
         std::fs::write(
             day.join("rollout-a.jsonl"),
-            meta("a", "/Users/a/mi proyecto", "cli"),
+            meta("a", "/Users/a/mi proyecto", "cli") + said,
         )
         .unwrap();
+        // Más reciente pero sin conversar (Codex abierto y cerrado): no cuenta.
+        let empty = day.join("rollout-d.jsonl");
+        std::fs::write(&empty, meta("d", "/Users/a/mi proyecto", "cli")).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&empty)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+            .unwrap();
         std::fs::write(
             day.join("rollout-b.jsonl"),
             meta("b", "/Users/a/mi proyecto", "exec"),
@@ -709,7 +731,7 @@ mod tests {
         };
         std::fs::write(
             day.join("rollout-z.jsonl"),
-            meta("z", "/x", "cli") + &rate(10.0) + &rate(64.0),
+            meta("z", "/x", "cli") + said + &rate(10.0) + &rate(64.0),
         )
         .unwrap();
         let l = codex_limits(Some(&tmp.join("codex"))).unwrap();
