@@ -21,6 +21,7 @@ pub mod reviewers;
 pub mod router;
 pub mod sessions;
 pub mod store;
+pub mod subagents;
 pub mod updates;
 
 /// Quita secuencias de escape ANSI (CSI y OSC) de la salida de un comando.

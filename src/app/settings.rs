@@ -303,6 +303,16 @@ impl App {
                 let codex = std::path::PathBuf::from(home).join(".codex");
                 theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
             }
+            let codex = detected.get("codex").and_then(|d| d.path.clone());
+            theme::card(ui, |ui| {
+                self.subagents_ui(ui, forge_core::subagents::Agent::Codex, codex.as_deref())
+            });
+        }
+        if installed("gemini") {
+            theme::section(ui, "Gemini CLI");
+            theme::card(ui, |ui| {
+                self.subagents_ui(ui, forge_core::subagents::Agent::Gemini, None)
+            });
         }
         self.accounts_ui(ui, cmds);
     }
@@ -379,6 +389,57 @@ impl App {
                     }
                 } else if ui.button(tr!("Añadir a Codex")).clicked() {
                     result = Some(forge_core::mcp::install_codex_skills(codex));
+                }
+            },
+        );
+        if let Some(Err(e)) = result {
+            self.error = Some(e);
+        }
+    }
+
+    /// El explorador y el revisor de Forge como subagentes de Codex o Gemini, en un modelo
+    /// barato; solo si el usuario lo pide (es su carpeta).
+    fn subagents_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        agent: forge_core::subagents::Agent,
+        codex: Option<&std::path::Path>,
+    ) {
+        use forge_core::subagents;
+        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let installed = subagents::installed(agent, &home);
+        let mut result = None;
+        let dir = match agent {
+            subagents::Agent::Codex => "~/.codex/agents",
+            subagents::Agent::Gemini => "~/.gemini/agents",
+        };
+        row(
+            ui,
+            tr!("Subagentes más baratos"),
+            &tr!(
+                "Escribe forge-explorer (busca y lee código) y forge-reviewer (corre tests y builds y revisa) en {p0}, con un modelo rápido y barato. El agente principal les pasa ese trabajo y su contexto queda limpio. Quitarlos borra solo esos archivos.",
+                p0 = dir
+            ),
+            |ui| {
+                if installed {
+                    if ui.button(tr!("Quitar subagentes")).clicked() {
+                        result = Some(subagents::remove(agent, &home));
+                    }
+                } else if ui.button(tr!("Añadir subagentes")).clicked() {
+                    // ponytail: el catálogo de Codex se lee al pulsar (es local y rápido).
+                    let model = codex
+                        .and_then(|c| {
+                            std::process::Command::new(c)
+                                .args(["debug", "models"])
+                                .output()
+                                .ok()
+                        })
+                        .and_then(|o| {
+                            subagents::cheap_codex_model(&String::from_utf8_lossy(&o.stdout))
+                        });
+                    result = Some(subagents::install(agent, &home, model.as_deref()));
                 }
             },
         );
