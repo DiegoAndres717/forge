@@ -223,6 +223,15 @@ pub struct Terminal {
 /// carpeta de autorizaciones). Las fija la app al arrancar; en tests queda vacío.
 pub static SHELL_ENV: std::sync::OnceLock<HashMap<String, String>> = std::sync::OnceLock::new();
 
+/// bash no tiene ZDOTDIR: se lanza con `--rcfile` y el arranque de Forge (que carga el
+/// perfil del usuario como un login y deja los enlaces de Guard primero en el PATH).
+fn bash_rcfile(shell: &str) -> Option<String> {
+    if !shell.ends_with("bash") {
+        return None;
+    }
+    SHELL_ENV.get()?.get("FORGE_BASHRC").cloned()
+}
+
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
 
 impl Terminal {
@@ -234,7 +243,12 @@ impl Terminal {
         command: Option<&str>,
         env: &HashMap<String, String>,
     ) -> SpawnResult {
-        Self::start(ctx, cwd, env, CommandBuilder::new_default_prog(), command)
+        let mut cmd = CommandBuilder::new_default_prog();
+        if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
+            cmd = CommandBuilder::new(cmd.get_shell());
+            cmd.args(["--rcfile", &rc, "-i"]);
+        }
+        Self::start(ctx, cwd, env, cmd, command)
     }
 
     /// Ejecuta `command` en un shell de login interactivo (carga PATH, nvm, etc.) que termina
@@ -251,8 +265,11 @@ impl Terminal {
             "/bin/bash"
         };
         let shell = std::env::var("SHELL").unwrap_or_else(|_| fallback.into());
-        let mut cmd = CommandBuilder::new(shell);
-        cmd.args(["-l", "-i", "-c", command]);
+        let mut cmd = CommandBuilder::new(&shell);
+        match bash_rcfile(&shell) {
+            Some(rc) => cmd.args(["--rcfile", &rc, "-i", "-c", command]),
+            None => cmd.args(["-l", "-i", "-c", command]),
+        }
         Self::start(ctx, cwd, env, cmd, None)
     }
 

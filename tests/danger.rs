@@ -161,3 +161,43 @@ fn forge_zsh_puts_shims_first() {
         "{text}"
     );
 }
+
+/// Con bash (lo normal en Linux) el arranque de Forge carga el perfil del usuario y, aunque
+/// este reordene el PATH, deja primero los lectores de secretos y los enlaces.
+#[test]
+fn forge_bash_puts_shims_first() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
+    if !Path::new("/bin/bash").exists() {
+        return;
+    }
+    let e = setup("bash");
+    let home = e.base.join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join(".bash_profile"),
+        "export PATH=/delante:$PATH\nexport PERFIL_CARGADO=1\n",
+    )
+    .unwrap();
+    let rcfile = e.vars.get("FORGE_BASHRC").expect("sin FORGE_BASHRC");
+    let out = Command::new("/bin/bash")
+        .args([
+            "--rcfile",
+            rcfile,
+            "-i",
+            "-c",
+            "echo FORGE_PATH=$PATH; echo PERFIL=$PERFIL_CARGADO",
+        ])
+        .env("HOME", &home)
+        .envs(&e.vars)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let path = text
+        .lines()
+        .find_map(|l| l.split_once("FORGE_PATH=").map(|(_, p)| p))
+        .unwrap_or_else(|| panic!("sin PATH en la salida:\n{text}"));
+    let (read, shims) = (&e.vars["FORGE_READ_SHIMS"], &e.vars["FORGE_SHIMS"]);
+    assert!(path.starts_with(&format!("{read}:{shims}:")), "{path}");
+    assert!(text.contains("PERFIL=1"), "{text}");
+}
