@@ -55,6 +55,13 @@ const explores = (e: { tool: string }) =>
   (e.tool === 'Bash' && 'command' in e && typeof e.command === 'string' && EXPLORE_SHELL.test(e.command))
 let exploring = 0
 
+/** Whole suites, builds and type checks: long output that stays in the context, the
+ * reviewer's job. Once per message of yours the main loop is reminded to hand it over. */
+// ponytail: matches by command; a single targeted test (`cargo test name`) gets the same
+// one reminder, which says to ignore it for the test being fixed.
+const CHECK_SHELL = /(?:^|&&|;)\s*(?:cargo\s+(?:test|build|clippy|check)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|typecheck|lint)|npx\s+(?:-p\s+\S+\s+)?tsc|tsc|pytest|go\s+(?:test|build|vet)|gradle|\.\/gradlew|mvn|xcodebuild|swift\s+(?:test|build))\b/
+let checkNudged = false
+
 /** Models always listed in the band, in this order (others are added when used). */
 const MODELS = ['opus', 'sonnet', 'haiku']
 
@@ -131,8 +138,10 @@ and keep your context clean:
 - forge:researcher (fast model): anything outside the code through the connected tools
   or the web, such as "did X reply?", "what's the status of this ticket?", "find the
   thread about…". It searches and reads; you get back a short summary with links.
-- forge:reviewer: running test suites, type checks or builds and interpreting their
-  failures; reviewing a finished change.
+- forge:reviewer (cheaper model): full test suites, type checks and builds, and the
+  review of a finished change before you commit. Their long output stays in its
+  context, not yours; you get back what failed and why. Run only the single test you
+  are fixing yourself.
 - forge:architect (strongest model): only for genuinely hard design decisions or bugs
   that resisted the obvious fixes.
 Keep doing the actual editing yourself.
@@ -287,6 +296,7 @@ export const register: Register = on => {
   // long context is what it attends to best ("lost in the middle").
   on('prompt.submit', async ($, e, next) => {
     exploring = 0
+    checkNudged = false
     const text = e.text.trim()
     if (text.startsWith('/')) return next(e)
     const [found, anchored] = await Promise.all([
@@ -379,6 +389,17 @@ export const register: Register = on => {
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId || 'deny' in result) return result
+    if (!checkNudged && e.tool === 'Bash' && 'command' in e && typeof e.command === 'string' && CHECK_SHELL.test(e.command)) {
+      checkNudged = true
+      exploring = 0
+      return {
+        ...result,
+        context: [
+          ...(result.context ?? []),
+          'Forge: whole test suites, builds and type checks are forge:reviewer\'s job (cheaper model, and their long output stays out of your context). Hand it the next full run and the review of the finished change; run only the single test you are fixing yourself.',
+        ],
+      }
+    }
     if (!explores(e)) {
       exploring = 0
       return result
