@@ -280,6 +280,9 @@ mod tests {
         assert_eq!(loaded, alerts);
         assert!(!loaded.get(Alert::Done).notify);
         assert_eq!(loaded.get(Alert::Failed).sound, "Basso");
-        assert!(sounds().iter().any(|s| s == "Glass"));
+        // Los sonidos son los de macOS (/System/Library/Sounds).
+        if cfg!(target_os = "macos") {
+            assert!(sounds().iter().any(|s| s == "Glass"));
+        }
     }
 }
