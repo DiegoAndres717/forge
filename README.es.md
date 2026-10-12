@@ -144,10 +144,10 @@ El mismo comando sirve en Linux (x86_64 o aarch64): comprueba el SHA-256 e insta
 
 | Funciona | Todavía no |
 |---|---|
-| Terminales, agentes, procesos, Forge Memory, planes, MCP | Sonidos de los avisos |
-| Project Guard en zsh y bash | Barra de menús nativa e iconos de editores |
-| Notificaciones de escritorio, `xdg-open`, editores en el PATH (`code`, `cursor`, `zed`…) | Actualizaciones automáticas (vuelve a ejecutar el instalador) |
-| Selector de carpetas con `zenity` o `kdialog` | Sugerencias de carpetas al escribir en bash (solo zsh) |
+| Terminales, agentes, procesos, Forge Memory, planes, MCP | Iconos de editores |
+| Project Guard en zsh y bash | Actualizaciones automáticas (vuelve a ejecutar el instalador) |
+| Notificaciones de escritorio y sonidos de los avisos (`paplay`), `xdg-open`, editores en el PATH (`code`, `cursor`, `zed`…) | Sugerencias de carpetas al escribir en bash (solo zsh) |
+| Menús en el botón ☰, selector de carpetas con `zenity` o `kdialog` | |
 
 Los datos van en `~/.local/share/forge` (o `$XDG_DATA_HOME/forge`); los ajustes, en `~/.config/forge/config.toml`.
 

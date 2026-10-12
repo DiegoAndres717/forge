@@ -1512,6 +1512,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Ocultar otros", "Hide Others"),
     ("Mostrar todo", "Show All"),
     ("Salir de Forge", "Quit Forge"),
+    ("Menú", "Menu"),
     ("Archivo", "File"),
     ("Ver", "View"),
     ("Paleta de comandos", "Command Palette"),

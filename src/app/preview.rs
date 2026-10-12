@@ -308,6 +308,20 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "1-workspace");
 
+    // Linux y Windows: sin semáforos y con el botón ☰ de los menús, abierto en Ver.
+    harness.state_mut().traffic_end = 0.0;
+    harness.state_mut().menu_button = true;
+    harness.run_steps(3);
+    harness.get_by_label("Menú").click();
+    harness.run_steps(3);
+    harness.get_by_label_contains("Ver").click();
+    settle(&mut harness);
+    save(&mut harness, &out, "20-linux-menu");
+    harness.key_press(egui::Key::Escape);
+    harness.state_mut().traffic_end = 72.0;
+    harness.state_mut().menu_button = false;
+    settle(&mut harness);
+
     harness.state_mut().workspaces[0].guard.open = true;
     harness
         .state_mut()

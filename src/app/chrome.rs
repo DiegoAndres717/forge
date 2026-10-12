@@ -3,7 +3,9 @@ use super::*;
 use forge_core::tr;
 
 /// Ancho de los botones junto a los semáforos (barra lateral y Ajustes).
+/// Barra lateral y Ajustes (y el botón ☰ fuera de macOS).
 const WINDOW_BUTTONS_WIDTH: f32 = 58.0;
+const MENU_BUTTON_WIDTH: f32 = 28.0;
 
 impl App {
     /// Inicio: proyectos recientes como lista agrupada, con abrir y arrastrar carpeta.
@@ -235,12 +237,22 @@ impl App {
         }
     }
 
-    /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes.
+    fn window_buttons_width(&self) -> f32 {
+        WINDOW_BUTTONS_WIDTH
+            + if self.menu.is_none() {
+                MENU_BUTTON_WIDTH
+            } else {
+                0.0
+            }
+    }
+
+    /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes; sin barra de
+    /// menús nativa (Linux, Windows), antes el botón ☰ con los menús.
     pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui) {
         let start = self.traffic_end + 12.0;
         let strip = Rect::from_min_max(
             egui::pos2(start, 0.0),
-            egui::pos2(start + WINDOW_BUTTONS_WIDTH, theme::TOOLBAR_HEIGHT),
+            egui::pos2(start + self.window_buttons_width(), theme::TOOLBAR_HEIGHT),
         );
         let mut ui = ui.new_child(
             egui::UiBuilder::new()
@@ -248,6 +260,12 @@ impl App {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         ui.spacing_mut().item_spacing.x = 2.0;
+        if self.menu_button
+            && let Some(cmd) = super::menu::menu_button(&mut ui)
+        {
+            self.menu_chosen.push(cmd);
+            ui.ctx().request_repaint();
+        }
         let tip = if self.sidebar {
             tr!("Ocultar barra lateral (⌘B)")
         } else {
@@ -274,7 +292,7 @@ impl App {
         ui.painter().rect_filled(rect, 0.0, theme::TOOLBAR);
         theme::hairline(ui, rect, false);
         // Sin barra lateral, los semáforos y sus botones quedan sobre la barra de herramientas.
-        let left = self.traffic_end + 12.0 + WINDOW_BUTTONS_WIDTH + 12.0;
+        let left = self.traffic_end + 12.0 + self.window_buttons_width() + 12.0;
         let inner = Rect::from_min_max(
             rect.min + Vec2::new(left, 0.0),
             rect.max - Vec2::new(10.0, 0.0),
