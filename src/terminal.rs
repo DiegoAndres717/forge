@@ -260,7 +260,12 @@ impl Terminal {
         command: &str,
         env: &HashMap<String, String>,
     ) -> SpawnResult {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let fallback = if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else {
+            "/bin/bash"
+        };
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| fallback.into());
         let mut cmd = CommandBuilder::new(shell);
         cmd.args(["-l", "-i", "-c", command]);
         Self::start(ctx, cwd, env, cmd, None)
@@ -1180,7 +1185,7 @@ impl Terminal {
                         // ⌘+clic abre la URL en el navegador predeterminado.
                         if let Some(url) = hover_url.clone().or_else(|| url_at_point(&term, point))
                         {
-                            let _ = std::process::Command::new("open").arg(url).spawn();
+                            let _ = crate::open_command().arg(url).spawn();
                         }
                     } else {
                         term.selection = Some(Selection::new(SelectionType::Simple, point, side));

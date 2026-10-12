@@ -126,6 +126,15 @@ fn term_variants(
     })
 }
 
+/// Abre archivos y URLs con la app predeterminada: `open` en macOS, `xdg-open` en Linux.
+pub fn open_command() -> std::process::Command {
+    std::process::Command::new(if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    })
+}
+
 pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
     let load = |path: &PathBuf, index: u32| {
         std::fs::read(path)

@@ -757,8 +757,8 @@ impl App {
                         return;
                     }
                 }
-                if let Err(e) = std::process::Command::new("open")
-                    .arg("-t")
+                if let Err(e) = crate::open_command()
+                    .args(cfg!(target_os = "macos").then_some("-t"))
                     .arg(&file)
                     .spawn()
                 {
@@ -1200,9 +1200,9 @@ impl App {
             UiCmd::EditConfig => {
                 let Some(i) = self.active else { return };
                 let file = self.workspaces[i].project.path.join(".forge/project.toml");
-                // Editor de texto por defecto de macOS.
-                if let Err(e) = std::process::Command::new("open")
-                    .arg("-t")
+                // Editor de texto por defecto (en Linux, la app de los .toml).
+                if let Err(e) = crate::open_command()
+                    .args(cfg!(target_os = "macos").then_some("-t"))
                     .arg(&file)
                     .spawn()
                 {
