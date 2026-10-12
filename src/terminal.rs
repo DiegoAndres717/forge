@@ -192,6 +192,9 @@ pub struct Terminal {
     writer: Writer,
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
+    /// Windows: todo lo que lanza el shell, para cerrarlo con él.
+    #[cfg(windows)]
+    job: Option<Job>,
     exited: Arc<AtomicBool>,
     events: Receiver<UiEvent>,
     size: Size,
@@ -333,6 +336,8 @@ impl Terminal {
         cmd.cwd(cwd);
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
+        #[cfg(windows)]
+        let job = child.process_id().and_then(Job::for_process);
 
         let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer()?));
         let (tx, events) = channel();
@@ -409,6 +414,8 @@ impl Terminal {
         }
 
         Ok(Self {
+            #[cfg(windows)]
+            job,
             term,
             writer,
             master: pair.master,
@@ -530,9 +537,14 @@ impl Terminal {
             // SAFETY: killpg solo envía una señal; pid es el líder de la sesión creada con setsid.
             unsafe { libc::killpg(pid as libc::pid_t, signal) };
         }
-        // ponytail: en Windows solo el shell (ConPTY cierra la consola; Job Objects si quedan hijos).
-        #[cfg(not(unix))]
-        let _ = force;
+        // Windows no tiene señales: se para todo el Job Object (shell, hijos y nietos).
+        #[cfg(windows)]
+        {
+            let _ = force;
+            if let Some(job) = &self.job {
+                job.kill();
+            }
+        }
         let _ = self.child.kill();
     }
 
@@ -1337,6 +1349,73 @@ impl Drop for Terminal {
         if !self.exited() {
             self.kill(false);
         }
+    }
+}
+
+/// Windows: un Job Object con el shell dentro. Lo que lance (y lo que lancen sus hijos, aunque
+/// el padre ya haya muerto) entra en el mismo job, y Windows los mata a todos al cerrarlo:
+/// el equivalente de matar el grupo de procesos en Unix.
+#[cfg(windows)]
+struct Job(windows_sys::Win32::Foundation::HANDLE);
+
+// SAFETY: un HANDLE de Job Object vale desde cualquier hilo.
+#[cfg(windows)]
+unsafe impl Send for Job {}
+#[cfg(windows)]
+unsafe impl Sync for Job {}
+
+#[cfg(windows)]
+impl Job {
+    fn for_process(pid: u32) -> Option<Job> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        };
+        // SAFETY: handles propios; cada uno se cierra (el del job, en Drop).
+        unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if handle.is_null() {
+                return None;
+            }
+            let job = Job(handle);
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let set = SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            if set == 0 {
+                return None;
+            }
+            let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+            if process.is_null() {
+                return None;
+            }
+            let assigned = AssignProcessToJobObject(job.0, process) != 0;
+            CloseHandle(process);
+            assigned.then_some(job)
+        }
+    }
+
+    fn kill(&self) {
+        // SAFETY: handle propio y abierto mientras viva `self`.
+        unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(self.0, 1) };
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    fn drop(&mut self) {
+        // Con KILL_ON_JOB_CLOSE, cerrar el último handle mata lo que quede dentro.
+        // SAFETY: handle propio, se cierra una sola vez.
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0) };
     }
 }
 
