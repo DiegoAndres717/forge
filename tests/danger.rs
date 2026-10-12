@@ -70,6 +70,10 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
+)]
 fn dangerous_commands_wait_for_authorization() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -110,6 +114,10 @@ fn dangerous_commands_wait_for_authorization() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
+)]
 fn without_forge_open_and_no_terminal_it_is_blocked() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };

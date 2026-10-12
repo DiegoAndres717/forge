@@ -217,6 +217,10 @@ mod unit {
 
     /// Fase 7: los checks prueban el candidato exacto y la evidencia solo vale para él.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "its checks are sh commands (grep, single quotes); port to Windows: plan #11"
+    )]
     fn checks_run_on_frozen_candidate_and_reuse_evidence() {
         let dir = std::env::temp_dir().join(format!("forge-frozen-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -233,7 +237,9 @@ mod unit {
                 "{cmd}"
             )
         };
-        sh("git init -q -b main && git config user.email t@t && git config user.name t");
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
         sh("echo v0 > a.txt && git add . && git commit -qm inicio");
         sh("echo v1 > a.txt && git add a.txt && echo 'v2 sin preparar' > a.txt");
         let counter = dir
@@ -376,7 +382,7 @@ mod unit {
         let r = rules(
             "[commit]\nrequire_lint = true\nrequire_tests = true\n\
              [[checks]]\nid = \"lint\"\ncommand = \"echo lint ok\"\n\
-             [[checks]]\nid = \"tests\"\ncommand = \"echo fallo de prueba; exit 4\"\n\
+             [[checks]]\nid = \"tests\"\ncommand = \"echo 'fallo de prueba'; exit 4\"\n\
              [[checks]]\nid = \"lento\"\ncommand = \"sleep 30\"\ntimeout_seconds = 1\nseverity = \"warning\"\nstages = [\"commit\"]\n",
         );
         let diff = collect_diff(&dir, Stage::Commit, &r, None).unwrap();

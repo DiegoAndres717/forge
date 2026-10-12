@@ -267,6 +267,11 @@ impl Terminal {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| fallback.into());
         let mut cmd = CommandBuilder::new(&shell);
         match bash_rcfile(&shell) {
+            // Windows: PowerShell, con el perfil del usuario (PATH de nvm, etc.).
+            _ if cfg!(windows) => {
+                cmd = CommandBuilder::new(forge_core::powershell());
+                cmd.args(["-NoLogo", "-Command", command]);
+            }
             Some(rc) => cmd.args(["--rcfile", &rc, "-i", "-c", command]),
             None => cmd.args(["-l", "-i", "-c", command]),
         }
@@ -476,12 +481,18 @@ impl Terminal {
         self.send(b"\x03");
     }
 
-    /// Mata el grupo de procesos entero (npm → node → esbuild...).
-    pub fn kill(&mut self, signal: libc::c_int) {
+    /// Mata el grupo de procesos entero (npm → node → esbuild...): SIGHUP como al cerrar la
+    /// terminal, o SIGKILL con `force`.
+    pub fn kill(&mut self, force: bool) {
+        #[cfg(unix)]
         if let Some(pid) = self.pid() {
+            let signal = if force { libc::SIGKILL } else { libc::SIGHUP };
             // SAFETY: killpg solo envía una señal; pid es el líder de la sesión creada con setsid.
             unsafe { libc::killpg(pid as libc::pid_t, signal) };
         }
+        // ponytail: en Windows solo el shell (ConPTY cierra la consola; Job Objects si quedan hijos).
+        #[cfg(not(unix))]
+        let _ = force;
         let _ = self.child.kill();
     }
 
@@ -1281,7 +1292,7 @@ impl Drop for Terminal {
         // Cerrar el panel cuelga la sesión entera, no solo el shell: así un `npm run dev`
         // no queda huérfano ocupando el puerto.
         if !self.exited() {
-            self.kill(libc::SIGHUP);
+            self.kill(false);
         }
     }
 }
@@ -1482,7 +1493,8 @@ fn process_cwd(pid: u32) -> Option<PathBuf> {
 
 #[cfg(not(target_os = "macos"))]
 fn process_cwd(pid: u32) -> Option<PathBuf> {
-    // ponytail: Linux; Windows (Fase 12) necesitará otra vía.
+    // Linux. En Windows no hay /proc: None hasta que el prompt de PowerShell avise de la
+    // carpeta (secuencia OSC 7).
     std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
 }
 
@@ -1945,6 +1957,10 @@ mod tests {
 
     /// zsh real en un PTY: el comando inicial se ejecuta y Forge ve el nuevo directorio.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn shell_cwd_follows_cd() {
         let ctx = egui::Context::default();
         let term =
@@ -2057,6 +2073,10 @@ mod tests {
     /// Busca en pantalla e historial (un marcador propio: la salida del shell del usuario,
     /// como fastfetch, puede contener cualquier otra cosa).
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn search_finds_matches_in_scrollback() {
         let ctx = egui::Context::default();
         let term = Terminal::exec(
@@ -2120,6 +2140,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn cwd_of_own_process() {
         assert_eq!(
             process_cwd(std::process::id()),

@@ -871,10 +871,21 @@ pub(crate) fn run_check(
     env: &std::collections::HashMap<String, String>,
     cancel: &AtomicBool,
 ) -> (CheckState, String) {
-    use std::os::unix::process::CommandExt;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let child = Command::new(shell)
-        .args(["-l", "-c", &format!("{{ {}\n}} 2>&1", check.command)])
+    // stderr junto a stdout, para mostrar el error del comando. En PowerShell, el código de
+    // salida: el del último programa si falló (npm, tsc…) o 1 si falló un comando suyo.
+    let script = if cfg!(windows) {
+        format!(
+            "$global:LASTEXITCODE = 0\n{}\n$ok = $?; $code = $LASTEXITCODE\nif ($code) {{ exit $code }}\nif (-not $ok) {{ exit 1 }}",
+            check.command
+        )
+    } else {
+        format!("{{ {}\n}} 2>&1", check.command)
+    };
+    let mut cmd = crate::shell_command(&script);
+    // Grupo de procesos propio: al cancelar se para también lo que lance el comando.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let child = cmd
         .current_dir(workdir)
         .envs(env)
         // Variables de los hooks: dentro de la copia aislada apuntarían al repositorio real.
@@ -886,22 +897,34 @@ pub(crate) fn run_check(
         .env("FORCE_COLOR", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .process_group(0)
+        // Windows: los errores de PowerShell y de los programas van a stderr (sin `2>&1`, que
+        // en PowerShell cambia cómo se ven y el código de salida); se juntan tras la salida.
+        .stderr(if cfg!(windows) {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn();
     let mut child = match child {
         Ok(c) => c,
         Err(e) => return (CheckState::Error(e.to_string()), String::new()),
     };
     let mut stdout = child.stdout.take().expect("stdout con pipe");
+    let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.read_to_end(&mut buf);
         buf
     });
+    let errors = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = stderr.read_to_end(&mut buf);
+        }
+        buf
+    });
 
     let deadline = Instant::now() + Duration::from_secs(check.timeout_seconds.max(1));
-    let pgid = child.id() as libc::pid_t;
     let state = loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break CheckState::Passed,
@@ -917,16 +940,24 @@ pub(crate) fn run_check(
             None
         };
         if let Some(stop) = stop {
-            // SAFETY: killpg solo envía señales al grupo creado con process_group(0).
-            unsafe { libc::killpg(pgid, libc::SIGTERM) };
-            std::thread::sleep(Duration::from_millis(500));
-            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            #[cfg(unix)]
+            {
+                let pgid = child.id() as libc::pid_t;
+                // SAFETY: killpg solo envía señales al grupo creado con process_group(0).
+                unsafe { libc::killpg(pgid, libc::SIGTERM) };
+                std::thread::sleep(Duration::from_millis(500));
+                unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+            // ponytail: en Windows solo el proceso principal (Job Objects si deja hijos vivos).
+            #[cfg(not(unix))]
+            let _ = child.kill();
             let _ = child.wait();
             break stop;
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let output = reader.join().unwrap_or_default();
+    let mut output = reader.join().unwrap_or_default();
+    output.extend(errors.join().unwrap_or_default());
     (
         state,
         tail(&crate::strip_ansi(&String::from_utf8_lossy(&output)), 80),

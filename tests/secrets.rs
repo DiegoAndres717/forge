@@ -1,3 +1,4 @@
+#![cfg(unix)]
 // Las órdenes que usa el mod (`forge anchor`, `forge secret`) se ejecutan en la CLI y no
 // abren la app, y los lectores de las terminales de agente piden permiso antes de leer
 // secretos.

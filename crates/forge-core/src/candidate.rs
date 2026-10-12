@@ -209,7 +209,7 @@ impl Snapshot {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            std::os::unix::fs::symlink(self.repo.join(rel), &target)
+            crate::symlink(&self.repo.join(rel), &target)
                 .map_err(|e| format!("{}: {e}", target.display()))?;
         }
         Ok(())
@@ -245,7 +245,9 @@ mod tests {
                 "{c}"
             )
         };
-        sh("git init -q -b main && git config user.email t@t && git config user.name t");
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
         sh(
             "printf 'node_modules/\\n.env\\n' > .gitignore && echo v0 > a.txt && git add . && git commit -qm inicio",
         );

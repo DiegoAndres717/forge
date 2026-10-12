@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       # Acciones fijadas por commit (no por etiqueta movible); Dependabot las actualiza.
@@ -28,7 +28,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev mesa-vulkan-drivers zsh
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      # Todos los fallos de una vez (sin parar en el primer grupo de tests que falle).
+      - run: cargo test --workspace --no-fail-fast
 
   # La protección de main exige un check llamado «check»: pasa solo si pasan todos los sistemas.
   check:

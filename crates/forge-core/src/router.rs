@@ -770,9 +770,7 @@ fn call(
             "{max_cost}",
             &format!("{:.2}", config.max_cost_per_call_usd),
         );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let mut child = Command::new(shell)
-        .args(["-l", "-c", &command])
+    let mut child = crate::shell_command(&command)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1324,6 +1322,10 @@ mod tests {
 
     /// Repo real + proveedores falsos (sin gastar): escalado por desacuerdo y presupuesto.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+    )]
     fn escalation_with_fake_providers() {
         let dir = std::env::temp_dir().join(format!("forge-router-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

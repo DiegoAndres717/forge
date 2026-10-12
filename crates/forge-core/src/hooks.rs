@@ -177,9 +177,15 @@ pub fn uninstall(project: &Path) -> Result<Vec<String>, String> {
 }
 
 fn set_executable(path: &Path) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-        .map_err(|e| format!("{}: {e}", path.display()))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+    }
+    // Windows no tiene bit de ejecución: Git for Windows ejecuta el hook con su sh.
+    let _ = path;
+    Ok(())
 }
 
 /// Rango a evaluar a partir del stdin de pre-push:

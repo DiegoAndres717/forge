@@ -298,7 +298,9 @@ mod tests {
                     .success()
             )
         };
-        sh("git init -q -b main && git config user.email t@t && git config user.name t");
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
         std::fs::write(dir.join("a.txt"), "1\n").unwrap();
         stage(&dir, &["a.txt"]).unwrap();
         assert!(status(&dir).unwrap().files[0].is_staged());
