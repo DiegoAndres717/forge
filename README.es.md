@@ -88,7 +88,7 @@ Lo que pasa entre `git commit` (o el push, o el pull request) y que tu cambio sa
 
 ## Instalar
 
-> **Requisitos:** macOS 13 Ventura o superior, en Apple Silicon o Intel (app universal).
+> **Requisitos:** macOS 13 Ventura o superior, en Apple Silicon o Intel (app universal). Linux está en vista previa: ver [Linux](#linux-vista-previa).
 
 ### Con un comando (recomendado)
 
@@ -133,6 +133,23 @@ forge help
 ```
 
 El idioma se cambia en Ajustes (`⌘,`).
+
+### Linux (vista previa)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+```
+
+El mismo comando sirve en Linux (x86_64 o aarch64): comprueba el SHA-256 e instala `forge` en `~/.local/bin`. Ábrelo con `forge` o `forge <carpeta>`. Para actualizar, vuelve a ejecutarlo.
+
+| Funciona | Todavía no |
+|---|---|
+| Terminales, agentes, procesos, Forge Memory, planes, MCP | Sonidos de los avisos |
+| Project Guard en zsh y bash | Barra de menús nativa e iconos de editores |
+| Notificaciones de escritorio, `xdg-open`, editores en el PATH (`code`, `cursor`, `zed`…) | Actualizaciones automáticas (vuelve a ejecutar el instalador) |
+| Selector de carpetas con `zenity` o `kdialog` | Sugerencias de carpetas al escribir en bash (solo zsh) |
+
+Los datos van en `~/.local/share/forge` (o `$XDG_DATA_HOME/forge`); los ajustes, en `~/.config/forge/config.toml`.
 
 ## Primeros pasos
 
@@ -202,7 +219,7 @@ La referencia completa de la CLI está en el [README en inglés](README.md#confi
 No. Forge funciona en local; su única llamada de red es la comprobación de actualizaciones en GitHub Releases (más la revisión con IA opcional, si la activas en `routing.toml`). Los agentes que lances hablan con sus proveedores como siempre.
 
 **¿Macs Intel? ¿Windows?**
-Macs Intel: sí, la app es universal. Windows y Linux: por ahora no.
+Macs Intel: sí, la app es universal. Linux: en vista previa (ver [Linux](#linux-vista-previa)). Windows: todavía no; viene el soporte con WSL.
 
 **¿Necesito Claude Code?**
 No. Terminales, procesos, Guard, Git y planes funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.

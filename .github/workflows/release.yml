@@ -1,7 +1,7 @@
 name: Release
 
 # Al subir una etiqueta vX.Y.Z: compila (universal: Apple Silicon e Intel), genera el .dmg
-# y publica la versión con el archivo.
+# y publica la versión con el archivo; después añade los .tar.gz de Linux (x86_64 y aarch64).
 on:
   push:
     tags: ["v*"]
@@ -46,3 +46,31 @@ jobs:
           git add Casks/forge.rb
           git commit -m "forge $VERSION"
           git push
+
+  # Linux: el binario solo, en un .tar.gz por arquitectura (lo instala scripts/install.sh).
+  linux:
+    needs: dmg
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libgl1-mesa-dev
+      - run: cargo build --release --locked
+      - name: Empaquetar
+        run: |
+          NAME="forge-${GITHUB_REF_NAME#v}-linux-${{ matrix.arch }}.tar.gz"
+          mkdir -p dist
+          tar -czf "dist/$NAME" -C target/release forge
+          cd dist && sha256sum "$NAME" > "$NAME.sha256"
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.tar.gz.sha256
