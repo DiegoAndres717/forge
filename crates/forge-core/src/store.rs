@@ -41,20 +41,21 @@ pub fn now() -> i64 {
 }
 
 /// macOS: `~/Library/Application Support/Forge`. Linux: `$XDG_DATA_HOME/forge`
-/// (o `~/.local/share/forge`).
+/// (o `~/.local/share/forge`). Windows: `%LOCALAPPDATA%\\Forge`, no la carpeta Roaming:
+/// el historial de las terminales no debe copiarse al servidor en cada inicio de sesión.
 fn db_path(
     home: &Path,
     xdg_data_home: Option<std::ffi::OsString>,
-    appdata: Option<std::ffi::OsString>,
+    local_appdata: Option<std::ffi::OsString>,
     os: &str,
 ) -> PathBuf {
     if os == "macos" {
         return home.join("Library/Application Support/Forge/forge.db");
     }
     if os == "windows" {
-        return appdata
+        return local_appdata
             .filter(|d| !d.is_empty())
-            .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from)
+            .map_or_else(|| home.join("AppData").join("Local"), PathBuf::from)
             .join("Forge")
             .join("forge.db");
     }
@@ -79,7 +80,7 @@ impl Store {
         Some(db_path(
             &home,
             std::env::var_os("XDG_DATA_HOME"),
-            std::env::var_os("APPDATA"),
+            std::env::var_os("LOCALAPPDATA"),
             std::env::consts::OS,
         ))
     }
@@ -569,16 +570,16 @@ mod tests {
             db_path(home, Some("/data".into()), None, "linux"),
             Path::new("/data/forge/forge.db")
         );
-        // Windows: %APPDATA%\\Forge (o AppData\\Roaming de la carpeta personal).
-        let roaming = Path::new(r"C:\Users\ana\AppData\Roaming");
+        // Windows: %LOCALAPPDATA%\\Forge (o AppData\\Local de la carpeta personal).
+        let local = Path::new(r"C:\Users\ana\AppData\Local");
         assert_eq!(
-            db_path(home, None, Some(roaming.into()), "windows"),
-            roaming.join("Forge").join("forge.db")
+            db_path(home, None, Some(local.into()), "windows"),
+            local.join("Forge").join("forge.db")
         );
         assert_eq!(
             db_path(home, None, None, "windows"),
             home.join("AppData")
-                .join("Roaming")
+                .join("Local")
                 .join("Forge")
                 .join("forge.db")
         );

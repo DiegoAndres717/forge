@@ -106,11 +106,29 @@ pub fn canonical(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// Carpeta personal: HOME (macOS, Linux) o, en Windows, USERPROFILE.
+/// Carpeta personal: HOME en macOS y Linux; en Windows, USERPROFILE (la que usan Claude
+/// Code y Codex con `os.homedir()`), aunque Git for Windows o MSYS definan otro HOME.
 pub fn home_dir() -> Option<std::path::PathBuf> {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .filter(|h| !h.is_empty())
+    pick_home(
+        std::env::var_os("HOME"),
+        std::env::var_os("USERPROFILE"),
+        cfg!(windows),
+    )
+}
+
+fn pick_home(
+    home: Option<std::ffi::OsString>,
+    userprofile: Option<std::ffi::OsString>,
+    windows: bool,
+) -> Option<std::path::PathBuf> {
+    let non_empty = |v: Option<std::ffi::OsString>| v.filter(|h| !h.is_empty());
+    let (first, then) = if windows {
+        (userprofile, home)
+    } else {
+        (home, userprofile)
+    };
+    non_empty(first)
+        .or_else(|| non_empty(then))
         .map(std::path::PathBuf::from)
 }
 
@@ -224,6 +242,23 @@ mod platform_tests {
         assert!(real.is_absolute());
         let missing = std::path::Path::new("no/existe");
         assert_eq!(super::canonical(missing), missing);
+    }
+
+    #[test]
+    fn windows_home_is_userprofile_even_with_a_git_bash_home() {
+        let some = |s: &str| Some(std::ffi::OsString::from(s));
+        assert_eq!(
+            super::pick_home(some("/c/Users/ana"), some(r"C:\Users\ana"), true),
+            Some(PathBuf::from(r"C:\Users\ana"))
+        );
+        assert_eq!(
+            super::pick_home(some("/home/ana"), None, false),
+            Some(PathBuf::from("/home/ana"))
+        );
+        assert_eq!(
+            super::pick_home(some("/home/ana"), some(""), true),
+            Some(PathBuf::from("/home/ana"))
+        );
     }
 
     #[test]
