@@ -2291,6 +2291,13 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Quitar de Codex", "Remove from Codex"),
     ("Añadir a Codex", "Add to Codex"),
+    ("Subagentes más baratos", "Cheaper subagents"),
+    (
+        "Escribe forge-explorer (busca y lee código) y forge-reviewer (corre tests y builds y revisa) en {p0}, con un modelo rápido y barato. El agente principal les pasa ese trabajo y su contexto queda limpio. Quitarlos borra solo esos archivos.",
+        "Writes forge-explorer (searches and reads code) and forge-reviewer (runs tests and builds, and reviews) to {p0}, on a fast, cheap model. The main agent hands them that work and keeps its context clean. Removing them deletes only those files.",
+    ),
+    ("Quitar subagentes", "Remove subagents"),
+    ("Añadir subagentes", "Add subagents"),
     ("Abrir en el editor", "Open in Editor"),
     (
         "No hay ningún editor instalado (VS Code, Cursor, Antigravity, Zed…)",
