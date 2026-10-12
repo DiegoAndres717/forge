@@ -551,6 +551,13 @@ impl App {
             self.workspaces.push(ws);
             return;
         }
+        // WSL fija WSL_DISTRO_NAME en todos sus procesos.
+        if slow_on_wsl(&path, std::env::var_os("WSL_DISTRO_NAME").is_some()) {
+            self.error = Some(tr!(
+                "{p0} está en un disco de Windows: Git y los tests irán lentos. Mejor dentro de WSL (p. ej. ~/proyectos).",
+                p0 = path.display()
+            ));
+        }
         ws.wake(ctx);
         self.workspaces.push(ws);
         self.active = Some(self.workspaces.len() - 1);
@@ -1523,8 +1530,34 @@ impl eframe::App for App {
     }
 }
 
+/// En WSL, ¿está el proyecto en un disco de Windows (`/mnt/c/…`)? Ahí Git y los tests van
+/// mucho más lentos que en el disco de Linux.
+fn slow_on_wsl(path: &Path, wsl: bool) -> bool {
+    let mut parts = path
+        .components()
+        .skip(1)
+        .map(|c| c.as_os_str().to_string_lossy());
+    wsl && parts.next().as_deref() == Some("mnt")
+        && parts
+            .next()
+            .is_some_and(|drive| drive.len() == 1 && drive.chars().all(|c| c.is_ascii_alphabetic()))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wsl_projects_on_a_windows_drive_are_slow() {
+        use std::path::Path;
+        assert!(super::slow_on_wsl(Path::new("/mnt/c/Users/ana/app"), true));
+        assert!(super::slow_on_wsl(Path::new("/mnt/d"), true));
+        assert!(!super::slow_on_wsl(Path::new("/home/ana/app"), true));
+        assert!(!super::slow_on_wsl(Path::new("/mnt/wsl/x"), true));
+        assert!(!super::slow_on_wsl(
+            Path::new("/mnt/c/Users/ana/app"),
+            false
+        ));
+    }
+
     use super::*;
 
     #[test]

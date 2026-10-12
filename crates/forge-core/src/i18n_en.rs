@@ -1912,6 +1912,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Quitar agente", "Remove agent"),
     ("Abrir", "Open"),
     ("Elige la carpeta del proyecto", "Choose the project folder"),
+    (
+        "{p0} está en un disco de Windows: Git y los tests irán lentos. Mejor dentro de WSL (p. ej. ~/proyectos).",
+        "{p0} is on a Windows drive: Git and tests will be slow. Keep it inside WSL instead (e.g. ~/projects).",
+    ),
     ("p. ej. aider --model sonnet", "e.g. aider --model sonnet"),
     (
         "Cómo se abre en la terminal; puedes añadir opciones, p. ej. claude --model opus",

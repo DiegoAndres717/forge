@@ -151,6 +151,20 @@ El mismo comando sirve en Linux (x86_64 o aarch64): comprueba el SHA-256 e insta
 
 Los datos van en `~/.local/share/forge` (o `$XDG_DATA_HOME/forge`); los ajustes, en `~/.config/forge/config.toml`.
 
+### Windows (WSL, experimental)
+
+Forge corre dentro de WSL2 como app de Linux; Windows 11 muestra su ventana con WSLg. Aún no está probado en equipos reales: cuéntanos qué falla.
+
+1. En PowerShell: `wsl --install` (o `wsl --update`) y abre **Ubuntu**.
+2. Dentro de Ubuntu, ejecuta el comando de instalación de Linux de arriba y luego `forge`.
+
+Ten en cuenta:
+
+- **Proyectos dentro de WSL** (`~/proyectos`), no en `/mnt/c/...`: ahí Git y los tests van mucho más lentos, y Forge te avisa.
+- **Agentes dentro de WSL:** `~/.claude` y `~/.codex` de WSL son otros que los de Windows. Instala Claude Code, Codex… e inicia sesión dentro de Ubuntu; Forge no ve las copias de Windows.
+- **Editores:** `code` abre VS Code de Windows conectado a WSL. Cursor y otros funcionan si su comando está en el PATH de WSL.
+- **Todavía no:** puede que las notificaciones de escritorio no lleguen a Windows; el escalado HiDPI y el portapapeles con Windows están por probar.
+
 ## Primeros pasos
 
 1. Abre Forge y elige una carpeta (o arrástrala a la ventana, o ejecuta `forge .`).
@@ -219,7 +233,7 @@ La referencia completa de la CLI está en el [README en inglés](README.md#confi
 No. Forge funciona en local; su única llamada de red es la comprobación de actualizaciones en GitHub Releases (más la revisión con IA opcional, si la activas en `routing.toml`). Los agentes que lances hablan con sus proveedores como siempre.
 
 **¿Macs Intel? ¿Windows?**
-Macs Intel: sí, la app es universal. Linux: en vista previa (ver [Linux](#linux-vista-previa)). Windows: todavía no; viene el soporte con WSL.
+Macs Intel: sí, la app es universal. Linux: en vista previa (ver [Linux](#linux-vista-previa)). Windows: con WSL, experimental (ver [Windows](#windows-wsl-experimental)).
 
 **¿Necesito Claude Code?**
 No. Terminales, procesos, Guard, Git y planes funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.
