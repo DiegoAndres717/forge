@@ -348,7 +348,8 @@ impl Terminal {
         // ponytail: un hilo bloqueante por PTY; tokio si los paneles se cuentan por cientos.
         let mut reader = pair.master.try_clone_reader()?;
         let urls = Arc::new(Mutex::new(Vec::new()));
-        let osc_cwd = Arc::new(Mutex::new(None));
+        // Hasta que el shell avise (OSC 7), sigue en la carpeta donde se abrió.
+        let osc_cwd = Arc::new(Mutex::new(Some(cwd.to_path_buf())));
         let shell_cwd = osc_cwd.clone();
         let last_output = Arc::new(Mutex::new(None));
         let (t, e, c, u) = (term.clone(), exited.clone(), ctx.clone(), urls.clone());
