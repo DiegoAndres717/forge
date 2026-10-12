@@ -139,6 +139,9 @@ pub fn open_command() -> std::process::Command {
             .any(|d| d.join("wslview").is_file());
     std::process::Command::new(if cfg!(target_os = "macos") {
         "open"
+    } else if cfg!(windows) {
+        // Abre URLs en el navegador y archivos con su app, como un doble clic.
+        "explorer.exe"
     } else if wslview {
         "wslview"
     } else {

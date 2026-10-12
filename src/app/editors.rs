@@ -78,17 +78,25 @@ pub(super) fn installed() -> &'static [Editor] {
     use std::sync::OnceLock;
     static FOUND: OnceLock<Vec<Editor>> = OnceLock::new();
     FOUND.get_or_init(|| {
+        #[cfg(not(windows))]
         let path = std::env::var_os("PATH").unwrap_or_default();
         EDITORS
             .iter()
             .copied()
-            .filter(|(_, cmd)| on_path(cmd, &path))
+            .filter(|(_, cmd)| {
+                // Windows: con las extensiones de PATHEXT (code.cmd, cursor.cmd…).
+                #[cfg(windows)]
+                let found = forge_core::which(cmd).is_some();
+                #[cfg(not(windows))]
+                let found = on_path(cmd, &path);
+                found
+            })
             .collect()
     })
 }
 
 /// ¿Hay un ejecutable `cmd` en alguna carpeta de `path` (formato de $PATH)?
-#[cfg(any(test, not(target_os = "macos")))]
+#[cfg(any(test, not(any(target_os = "macos", windows))))]
 fn on_path(cmd: &str, path: &std::ffi::OsStr) -> bool {
     std::env::split_paths(path).any(|dir| dir.join(cmd).is_file())
 }
@@ -183,7 +191,13 @@ pub(super) fn open(store: Option<&Store>, bundle: &str, folder: &Path) -> Result
         open.args(["-b", bundle]);
         open
     } else {
-        std::process::Command::new(bundle)
+        // Windows: la ruta completa (`…\\code.cmd`); Rust lanza los .cmd por cmd.exe con las
+        // comillas bien puestas.
+        #[cfg(windows)]
+        let program = forge_core::which(bundle).unwrap_or_else(|| bundle.into());
+        #[cfg(not(windows))]
+        let program = bundle;
+        std::process::Command::new(program)
     };
     cmd.arg(folder).spawn().map_err(|e| e.to_string())?;
     if let Some(store) = store {

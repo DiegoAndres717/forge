@@ -628,6 +628,22 @@ impl App {
                         &format!("POSIX path of (choose folder with prompt \"{prompt}\")"),
                     ])
                     .output()
+            } else if cfg!(windows) {
+                // Diálogo nativo de Windows (WinForms pide -STA); el título va en una variable
+                // y la salida en UTF-8, para rutas con tildes.
+                std::process::Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-STA",
+                        "-Command",
+                        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \
+                         Add-Type -AssemblyName System.Windows.Forms; \
+                         $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
+                         $d.Description = $env:FORGE_PROMPT; \
+                         if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { exit 1 }",
+                    ])
+                    .env("FORGE_PROMPT", prompt)
+                    .output()
             } else {
                 std::process::Command::new("zenity")
                     .args(["--file-selection", "--directory", "--title", prompt])
