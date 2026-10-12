@@ -72,7 +72,7 @@ Pestañas, un ⓘ en cada opción y formularios para Guard, agentes, revisión c
 </tr>
 </table>
 
-Además: paleta `⌘K` para todo · confirmación antes de comandos peligrosos (`rm -rf` fuera del proyecto, `git push --force`, `DROP DATABASE`…), también si los lanza un agente · panel de Git · barra de menús de macOS con todas las acciones · avisos con su propio sonido cuando un agente termina o pide aprobación, un proceso falla o Guard bloquea (cada uno se configura en Ajustes → Avisos, con No molestar) · actualizaciones automáticas · inglés y español.
+Además: paleta `⌘K` para todo · confirmación antes de comandos peligrosos (`rm -rf` fuera del proyecto, `git push --force`, `DROP DATABASE`…), también si los lanza un agente, y antes de que un agente lea un archivo con secretos (`.env`, `~/.ssh`, credenciales…) · panel de Git · barra de menús de macOS con todas las acciones · avisos con su propio sonido cuando un agente termina o pide aprobación, un proceso falla o Guard bloquea (cada uno se configura en Ajustes → Avisos, con No molestar) · actualizaciones automáticas · inglés y español.
 
 ## Cómo funciona
 

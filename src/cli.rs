@@ -182,6 +182,14 @@ fn open_store() -> Result<Store, String> {
         .and_then(|p| Store::open(&p))
 }
 
+/// Órdenes de la CLI (sin ventana). `main` las manda aquí; cualquier otra palabra es una
+/// carpeta que abrir en la app. Una sola lista: una orden nueva que falte aquí abriría
+/// la app en vez de ejecutarse.
+pub const COMMANDS: &[&str] = &[
+    "agent", "ai", "anchor", "context", "doctor", "guard", "handoff", "hooks", "ideas", "mcp",
+    "memory", "plans", "secret", "status",
+];
+
 pub fn run(args: &[String]) -> i32 {
     let pos = positional(args);
     let project = find_project(args);
@@ -258,6 +266,23 @@ pub fn run(args: &[String]) -> i32 {
             println!("{cut}");
             0
         }),
+        // ¿Lee un archivo con secretos? (`--path p` o `--command "…"`; el mod de Claude Code
+        // lo pregunta antes de Read, Grep y Bash). Sale 0 con el motivo si sí, 1 si no.
+        (Some("secret"), _) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let found = match (flag(args, "--path"), flag(args, "--command")) {
+                (Some(p), _) => forge_core::danger::secret_file(&p, &cwd),
+                (_, Some(c)) => forge_core::danger::secret_in_command(&c, &cwd),
+                _ => None,
+            };
+            match found {
+                Some(reason) => {
+                    println!("{reason}");
+                    Ok(0)
+                }
+                None => Ok(1),
+            }
+        }
         // Una línea con la fase en curso: el mod la pone al final de cada mensaje.
         (Some("anchor"), _) => open_store().and_then(|store| {
             let plans = store.list_ideas(Some(&project), false)?;

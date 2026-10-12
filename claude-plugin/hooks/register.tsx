@@ -39,6 +39,9 @@ const CONTEXT_WARN = 60
 const ANCHOR_EVERY = 8
 let lastAnchor = ''
 let sinceAnchor = 0
+// Quick filter before asking Forge (`forge secret`) whether a call reads a file with
+// secrets; Forge decides. Same idea as the reader shims of the other agents.
+const SECRET_HINT = /\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
  * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */
@@ -267,6 +270,19 @@ export const register: Register = on => {
   // A local search per message adds only references (a few titles): the model asks for
   // the detail with memory_get when it needs it. Slash commands and one-word replies
   // carry nothing to look up; it never waits more than 2 s.
+  // Files with secrets (.env, ~/.ssh, credentials…): the person decides each time, with
+  // Claude Code's own permission dialog.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    if (verdict.decision === 'deny') return verdict
+    const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; command?: unknown }
+    const target = e.tool === 'Bash' ? input.command : e.tool === 'Read' || e.tool === 'Grep' ? input.file_path ?? input.path : undefined
+    if (typeof target !== 'string' || !SECRET_HINT.test(target)) return verdict
+    const out = await forge($, ['secret', e.tool === 'Bash' ? '--command' : '--path', target], undefined, 2_000)
+    if (!out || out.exitCode !== 0) return verdict
+    return { decision: 'ask' as const, reason: `Forge: ${out.stdout.trim()}` }
+  })
+
   // The plan anchor goes last, right before the model answers: what sits at the end of a
   // long context is what it attends to best ("lost in the middle").
   on('prompt.submit', async ($, e, next) => {

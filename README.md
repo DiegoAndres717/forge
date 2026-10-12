@@ -72,7 +72,7 @@ Tabs, an ⓘ on every option, and forms for Guard, agents, AI review and process
 </tr>
 </table>
 
-Also: `⌘K` command palette for everything · confirmation before dangerous commands (`rm -rf` outside the project, `git push --force`, `DROP DATABASE`…), even from an agent · Git panel · macOS menu bar with every action · alerts with their own sound when an agent finishes or asks for approval, a process fails or Guard blocks (each one configurable in Settings → Alerts, with Do not disturb) · automatic updates · English and Spanish.
+Also: `⌘K` command palette for everything · confirmation before dangerous commands (`rm -rf` outside the project, `git push --force`, `DROP DATABASE`…), even from an agent, and before an agent reads a file with secrets (`.env`, `~/.ssh`, credentials…) · Git panel · macOS menu bar with every action · alerts with their own sound when an agent finishes or asks for approval, a process fails or Guard blocks (each one configurable in Settings → Alerts, with Do not disturb) · automatic updates · English and Spanish.
 
 ## How it works
 
