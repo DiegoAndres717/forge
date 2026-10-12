@@ -89,7 +89,7 @@ struct Panel {
 
 /// `/Users/x/dev` → `~/dev`
 pub fn tilde(path: &std::path::Path) -> String {
-    match std::env::var_os("HOME").and_then(|h| path.strip_prefix(h).ok().map(PathBuf::from)) {
+    match forge_core::home_dir().and_then(|h| path.strip_prefix(h).ok().map(PathBuf::from)) {
         Some(rest) if rest.as_os_str().is_empty() => "~".into(),
         Some(rest) => format!("~/{}", rest.display()),
         None => path.display().to_string(),

@@ -578,9 +578,7 @@ impl Terminal {
                 UiEvent::ResetTitle => self.title = None,
                 UiEvent::Clipboard(text) => ctx.copy_text(text),
                 UiEvent::Line(line) => {
-                    let home = std::env::var_os("HOME")
-                        .map(PathBuf::from)
-                        .unwrap_or_default();
+                    let home = forge_core::home_dir().unwrap_or_default();
                     self.suggest = line.and_then(|l| crate::suggest::suggest(&l, &home));
                 }
             }

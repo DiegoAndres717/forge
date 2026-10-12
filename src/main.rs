@@ -60,7 +60,24 @@ impl Default for Settings {
 }
 
 fn config_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config/forge/config.toml"))
+    let home = forge_core::home_dir()?;
+    Some(config_file(
+        &home,
+        std::env::var_os("APPDATA"),
+        std::env::consts::OS,
+    ))
+}
+
+/// `~/.config/forge/config.toml`; en Windows, `%APPDATA%\\Forge\\config.toml`.
+fn config_file(home: &Path, appdata: Option<std::ffi::OsString>, os: &str) -> PathBuf {
+    if os == "windows" {
+        return appdata
+            .filter(|d| !d.is_empty())
+            .map_or_else(|| home.join("AppData").join("Roaming"), PathBuf::from)
+            .join("Forge")
+            .join("config.toml");
+    }
+    home.join(".config/forge/config.toml")
 }
 
 /// Lee la configuración; si es inválida devuelve los valores por defecto y el error.
@@ -354,6 +371,21 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_live_in_appdata_on_windows() {
+        use std::path::Path;
+        let home = Path::new("/home/ana");
+        assert_eq!(
+            super::config_file(home, None, "linux"),
+            home.join(".config/forge/config.toml")
+        );
+        let roaming = Path::new(r"C:\Users\ana\AppData\Roaming");
+        assert_eq!(
+            super::config_file(home, Some(roaming.into()), "windows"),
+            roaming.join("Forge").join("config.toml")
+        );
+    }
+
     #[test]
     fn without_menlo_the_terminal_uses_eguis_monospace() {
         let missing = std::path::Path::new("/no/such/font.ttf");
