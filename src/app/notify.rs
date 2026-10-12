@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 /// Sonidos del sistema (Glass, Ping, Basso…).
 const SOUNDS: &str = "/System/Library/Sounds";
+/// Linux: el tema de sonidos freedesktop (viene con Ubuntu, Fedora…).
+const LINUX_SOUNDS: &str = "/usr/share/sounds/freedesktop/stereo";
 
 /// Cómo avisa un tipo de aviso.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -110,18 +112,42 @@ pub(super) fn alert_text(alert: Alert) -> (&'static str, &'static str) {
     }
 }
 
+/// Archivo de un sonido por su nombre.
+/// En Linux, los de macOS (los valores por defecto) pasan a su parecido de freedesktop.
+fn sound_path(name: &str, macos: bool) -> PathBuf {
+    if macos {
+        return Path::new(SOUNDS).join(format!("{name}.aiff"));
+    }
+    let linux = match name {
+        "Glass" => "complete",
+        "Ping" => "message-new-instant",
+        "Basso" => "dialog-warning",
+        "Pop" => "message",
+        "Sosumi" => "suspend-error",
+        "Funk" | "Hero" | "Morse" | "Purr" | "Submarine" | "Tink" | "Blow" | "Bottle" | "Frog" => {
+            "bell"
+        }
+        other => other,
+    };
+    Path::new(LINUX_SOUNDS).join(format!("{linux}.oga"))
+}
+
 /// Sonidos del sistema disponibles, por nombre.
 pub(super) fn sounds() -> &'static [String] {
     static SOUND_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     SOUND_NAMES.get_or_init(|| {
-        let mut names: Vec<String> = std::fs::read_dir(SOUNDS)
+        let (dir, ext) = if cfg!(target_os = "macos") {
+            (SOUNDS, "aiff")
+        } else {
+            (LINUX_SOUNDS, "oga")
+        };
+        let mut names: Vec<String> = std::fs::read_dir(dir)
             .into_iter()
             .flatten()
             .flatten()
             .filter_map(|e| {
                 let path = e.path();
-                (path.extension()? == "aiff")
-                    .then(|| path.file_stem()?.to_str().map(String::from))?
+                (path.extension()? == ext).then(|| path.file_stem()?.to_str().map(String::from))?
             })
             .collect();
         names.sort();
@@ -129,20 +155,22 @@ pub(super) fn sounds() -> &'static [String] {
     })
 }
 
-/// Suena sin esperar (afplay respeta el volumen; la notificación va muda).
-// ponytail: solo macOS; en Linux la lista de sonidos sale vacía y no se llega aquí.
+/// Suena sin esperar: afplay en macOS, paplay (PulseAudio/PipeWire, también en WSLg) en
+/// Linux; los dos respetan el volumen. La notificación va muda.
 pub(super) fn play(sound: &str, volume: f32) {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let path = Path::new(SOUNDS).join(format!("{sound}.aiff"));
-    let volume = format!("{:.2}", volume.clamp(0.0, 1.0));
+    let path = sound_path(sound, cfg!(target_os = "macos"));
+    let volume = volume.clamp(0.0, 1.0);
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("/usr/bin/afplay")
-            .arg("-v")
-            .arg(volume)
-            .arg(path)
-            .status();
+        let mut cmd = if cfg!(target_os = "macos") {
+            let mut c = std::process::Command::new("/usr/bin/afplay");
+            c.arg("-v").arg(format!("{volume:.2}"));
+            c
+        } else {
+            let mut c = std::process::Command::new("paplay");
+            c.arg(format!("--volume={}", (volume * 65536.0) as u32));
+            c
+        };
+        let _ = cmd.arg(path).status();
     });
 }
 
@@ -333,6 +361,22 @@ fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: e
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linux_plays_the_freedesktop_sound_closest_to_each_macos_one() {
+        let linux = Path::new("/usr/share/sounds/freedesktop/stereo");
+        assert_eq!(sound_path("Glass", false), linux.join("complete.oga"));
+        assert_eq!(
+            sound_path("Ping", false),
+            linux.join("message-new-instant.oga")
+        );
+        // Un sonido de Linux elegido en Ajustes se usa tal cual.
+        assert_eq!(sound_path("bell", false), linux.join("bell.oga"));
+        assert_eq!(
+            sound_path("Glass", true),
+            Path::new("/System/Library/Sounds/Glass.aiff")
+        );
+    }
 
     #[test]
     fn wslenv_gets_the_toast_variables_without_a_stray_colon() {

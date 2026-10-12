@@ -142,10 +142,10 @@ The same command works on Linux (x86_64 or aarch64): it checks the SHA-256 and i
 
 | Works | Not yet |
 |---|---|
-| Terminals, agents, processes, Forge Memory, plans, MCP | Alert sounds |
-| Project Guard in zsh and bash | Native menu bar and editor icons |
-| Desktop notifications, `xdg-open`, editors on PATH (`code`, `cursor`, `zed`…) | Automatic updates (run the installer again) |
-| Folder picker with `zenity` or `kdialog` | Folder suggestions while typing in bash (zsh only) |
+| Terminals, agents, processes, Forge Memory, plans, MCP | Editor icons |
+| Project Guard in zsh and bash | Automatic updates (run the installer again) |
+| Desktop notifications and alert sounds (`paplay`), `xdg-open`, editors on PATH (`code`, `cursor`, `zed`…) | Folder suggestions while typing in bash (zsh only) |
+| Menus in the ☰ button, folder picker with `zenity` or `kdialog` | |
 
 Data goes in `~/.local/share/forge` (or `$XDG_DATA_HOME/forge`); settings in `~/.config/forge/config.toml`.
 
