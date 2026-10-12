@@ -103,15 +103,14 @@ pub fn home_dir() -> Option<std::path::PathBuf> {
 
 /// Enlace simbólico a un archivo o carpeta. En Windows los symlinks piden Modo de
 /// desarrollador o administrador (error 1314); sin ellos, una carpeta se enlaza con un
-/// junction (no pide permisos) y un archivo se copia.
+/// junction y un archivo con un enlace duro (ninguno pide permisos ni duplica datos).
 pub fn symlink(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         if from.is_dir() {
             std::os::windows::fs::symlink_dir(from, to).or_else(|_| junction(from, to))
         } else {
-            std::os::windows::fs::symlink_file(from, to)
-                .or_else(|_| std::fs::copy(from, to).map(|_| ()))
+            std::os::windows::fs::symlink_file(from, to).or_else(|_| std::fs::hard_link(from, to))
         }
     }
     #[cfg(not(windows))]

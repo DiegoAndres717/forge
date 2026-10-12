@@ -97,6 +97,22 @@ fn main_account(program: &str) -> Account {
     }
 }
 
+/// Enlaza un archivo o carpeta de la cuenta principal. En Windows, un archivo solo se
+/// comparte de verdad con un symlink (Modo de desarrollador): un enlace duro se rompe cuando
+/// el agente reescribe el archivo y una copia no recibe los cambios, así que se avisa.
+fn share(from: &Path, to: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    if from.is_file() {
+        return std::os::windows::fs::symlink_file(from, to).map_err(|_| {
+            tr!(
+                "Para compartir {p0} entre cuentas, activa el Modo de desarrollador de Windows (Configuración → Sistema → Para desarrolladores).",
+                p0 = from.display()
+            )
+        });
+    }
+    crate::symlink(from, to).map_err(|e| e.to_string())
+}
+
 /// Crea la carpeta de la cuenta y enlaza lo compartido con la principal (lo que ya
 /// exista en la carpeta no se toca).
 fn prepare(account: &Account, home: Option<&Path>) -> Result<(), String> {
@@ -112,7 +128,7 @@ fn prepare(account: &Account, home: Option<&Path>) -> Result<(), String> {
     for name in agent.3 {
         let (from, to) = (main.join(name), dir.join(name));
         if from.exists() && to.symlink_metadata().is_err() {
-            crate::symlink(&from, &to).map_err(|e| e.to_string())?;
+            share(&from, &to)?;
         }
     }
     Ok(())

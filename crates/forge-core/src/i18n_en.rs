@@ -1513,6 +1513,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Mostrar todo", "Show All"),
     ("Salir de Forge", "Quit Forge"),
     ("Menú", "Menu"),
+    (
+        "Para compartir {p0} entre cuentas, activa el Modo de desarrollador de Windows (Configuración → Sistema → Para desarrolladores).",
+        "To share {p0} between accounts, turn on Windows Developer Mode (Settings → System → For developers).",
+    ),
     ("Archivo", "File"),
     ("Ver", "View"),
     ("Paleta de comandos", "Command Palette"),

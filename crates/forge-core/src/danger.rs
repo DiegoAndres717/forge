@@ -601,7 +601,9 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     for dir in [&shims, &zsh, &approvals, &events] {
         std::fs::create_dir_all(dir)?;
     }
-    for name in SHIMMED {
+    // ponytail: en Windows, sin enlaces hasta que Guard llegue allí (plan #11, fase 4): sin
+    // `.exe` no servirían como comandos, y sin Modo de desarrollador serían copias de Forge.
+    for name in SHIMMED.iter().filter(|_| cfg!(unix)) {
         let link = shims.join(name);
         let _ = std::fs::remove_file(&link);
         crate::symlink(exe, &link)?;
