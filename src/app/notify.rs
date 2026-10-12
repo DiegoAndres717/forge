@@ -114,6 +114,13 @@ pub(super) fn alert_text(alert: Alert) -> (&'static str, &'static str) {
     }
 }
 
+/// Carpeta de sonidos de Windows: `%SystemRoot%\\Media` (C:\\Windows si falta).
+fn windows_media(system_root: Option<String>) -> String {
+    system_root
+        .filter(|r| !r.is_empty())
+        .map_or_else(|| WINDOWS_SOUNDS.to_string(), |r| format!("{r}\\Media"))
+}
+
 /// Archivo de un sonido por su nombre.
 /// En Linux, los de macOS (los valores por defecto) pasan a su parecido de freedesktop.
 fn sound_path(name: &str, os: &str) -> PathBuf {
@@ -132,7 +139,8 @@ fn sound_path(name: &str, os: &str) -> PathBuf {
             other => other,
         };
         // Texto, no Path::join: en macOS (tests) la `\\` no es separador.
-        return PathBuf::from(format!("{WINDOWS_SOUNDS}\\{windows}.wav"));
+        let media = windows_media(std::env::var("SystemRoot").ok());
+        return PathBuf::from(format!("{media}\\{windows}.wav"));
     }
     let linux = match name {
         "Glass" => "complete",
@@ -153,11 +161,11 @@ pub(super) fn sounds() -> &'static [String] {
     static SOUND_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     SOUND_NAMES.get_or_init(|| {
         let (dir, ext) = if cfg!(target_os = "macos") {
-            (SOUNDS, "aiff")
+            (SOUNDS.to_string(), "aiff")
         } else if cfg!(windows) {
-            (WINDOWS_SOUNDS, "wav")
+            (windows_media(std::env::var("SystemRoot").ok()), "wav")
         } else {
-            (LINUX_SOUNDS, "oga")
+            (LINUX_SOUNDS.to_string(), "oga")
         };
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .into_iter()
@@ -174,8 +182,8 @@ pub(super) fn sounds() -> &'static [String] {
 }
 
 /// Suena sin esperar: afplay en macOS, paplay (PulseAudio/PipeWire, también en WSLg) en
-/// Linux (los dos respetan el volumen) y Media.SoundPlayer en Windows. La notificación va muda.
-// ponytail: en Windows suena al volumen del sistema (SoundPlayer no tiene volumen propio).
+/// Linux (los dos respetan el volumen) y PlaySound en Windows. La notificación va muda.
+// ponytail: en Windows suena al volumen del sistema (PlaySound no tiene volumen propio).
 pub(super) fn play(sound: &str, volume: f32) {
     let path = sound_path(sound, std::env::consts::OS);
     let volume = volume.clamp(0.0, 1.0);
@@ -185,16 +193,25 @@ pub(super) fn play(sound: &str, volume: f32) {
             c.arg("-v").arg(format!("{volume:.2}"));
             c
         } else if cfg!(windows) {
-            // La ruta va en una variable: sin comillas que escapar en el script.
-            let mut c = std::process::Command::new(forge_core::powershell());
-            c.args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(New-Object Media.SoundPlayer $env:FORGE_SOUND).PlaySync()",
-            ])
-            .env("FORGE_SOUND", &path);
-            let _ = c.status();
+            #[cfg(windows)]
+            {
+                use windows_sys::Win32::Media::Audio::{
+                    PlaySoundW, SND_FILENAME, SND_NODEFAULT, SND_SYNC,
+                };
+                let wide: Vec<u16> = path
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                // SAFETY: `wide` termina en 0 y vive hasta que PlaySound vuelve (SND_SYNC).
+                unsafe {
+                    PlaySoundW(
+                        wide.as_ptr(),
+                        std::ptr::null_mut(),
+                        SND_FILENAME | SND_SYNC | SND_NODEFAULT,
+                    )
+                };
+            }
             return;
         } else {
             let mut c = std::process::Command::new("paplay");
@@ -440,6 +457,8 @@ mod tests {
             sound_path("tada", "windows"),
             Path::new(r"C:\Windows\Media\tada.wav")
         );
+        // Windows instalado en otra unidad.
+        assert_eq!(windows_media(Some(r"D:\Win".into())), r"D:\Win\Media");
     }
 
     #[test]
