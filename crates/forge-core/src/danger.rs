@@ -483,6 +483,22 @@ const ZSH_PROMPT: &str = r#"if [[ -o interactive && -n $TTY ]]; then
 fi
 "#;
 
+/// Arranque de bash de Forge (`bash --rcfile`): bash no tiene ZDOTDIR, así que este
+/// archivo carga lo mismo que un login (/etc/profile y el primero de .bash_profile,
+/// .bash_login o .profile; si no hay, .bashrc) y al final pone los enlaces primero en el PATH.
+// ponytail: sin las sugerencias de carpetas mientras se escribe (OSC 7777), solo en zsh.
+const BASHRC: &str = r#"# Generado por Forge: carga la configuración del usuario.
+[ -f /etc/profile ] && . /etc/profile
+if [ -f ~/.bash_profile ]; then . ~/.bash_profile
+elif [ -f ~/.bash_login ]; then . ~/.bash_login
+elif [ -f ~/.profile ]; then . ~/.profile
+elif [ -f ~/.bashrc ]; then . ~/.bashrc
+fi
+PATH="$FORGE_SHIMS:${PATH//"$FORGE_SHIMS:"/}"
+# Terminales de agente: los lectores que piden permiso antes de leer secretos.
+[ -n "$FORGE_ORIGIN" ] && PATH="$FORGE_READ_SHIMS:${PATH//"$FORGE_READ_SHIMS:"/}"
+"#;
+
 /// Lector de una terminal de agente: solo si algún argumento parece un archivo con
 /// secretos llama a Forge; si no, ejecuta el programa de siempre (sin estos guiones en
 /// el PATH, para no volver a entrar).
@@ -536,7 +552,7 @@ fn zsh_file(name: &str, tail: &str) -> String {
     s
 }
 
-/// Crea `shims/` (enlaces a `exe`) y `zsh/` dentro de `base` y devuelve las variables para
+/// Crea `shims/` (enlaces a `exe`), `zsh/` y `bash/` dentro de `base` y devuelve las variables para
 /// las terminales de Forge.
 pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, String>> {
     let shims = base.join("shims");
@@ -561,6 +577,9 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     for (name, tail) in ZSH_FILES {
         std::fs::write(zsh.join(name), zsh_file(name, tail))?;
     }
+    let bash = base.join("bash");
+    std::fs::create_dir_all(&bash)?;
+    std::fs::write(bash.join("bashrc"), BASHRC)?;
     let mut env = HashMap::from([
         ("FORGE_SHIMS".into(), shims.to_string_lossy().into_owned()),
         (
@@ -573,6 +592,10 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         ),
         ("FORGE_EVENTS".into(), events.to_string_lossy().into_owned()),
         ("FORGE_BIN".into(), exe.to_string_lossy().into_owned()),
+        (
+            "FORGE_BASHRC".into(),
+            bash.join("bashrc").to_string_lossy().into_owned(),
+        ),
         ("FORGE_APP_PID".into(), std::process::id().to_string()),
     ]);
     let shell = std::env::var("SHELL").unwrap_or_default();
@@ -585,8 +608,8 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         }
         env.insert("ZDOTDIR".into(), zsh.to_string_lossy().into_owned());
     } else {
-        // ponytail: solo zsh reordena el PATH al final del arranque; en bash/fish los
-        // enlaces van delante del PATH heredado (su perfil puede volver a reordenarlo).
+        // bash los vuelve a poner primero al final de su arranque (FORGE_BASHRC).
+        // ponytail: en fish van delante del PATH heredado (su perfil puede reordenarlo).
         let path = std::env::var("PATH").unwrap_or_default();
         env.insert("PATH".into(), format!("{}:{path}", shims.display()));
     }
