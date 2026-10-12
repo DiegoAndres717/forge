@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 const SOUNDS: &str = "/System/Library/Sounds";
 /// Linux: el tema de sonidos freedesktop (viene con Ubuntu, Fedora…).
 const LINUX_SOUNDS: &str = "/usr/share/sounds/freedesktop/stereo";
+/// Windows: los sonidos del sistema.
+const WINDOWS_SOUNDS: &str = r"C:\Windows\Media";
 
 /// Cómo avisa un tipo de aviso.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -112,11 +114,33 @@ pub(super) fn alert_text(alert: Alert) -> (&'static str, &'static str) {
     }
 }
 
+/// Carpeta de sonidos de Windows: `%SystemRoot%\\Media` (C:\\Windows si falta).
+fn windows_media(system_root: Option<String>) -> String {
+    system_root
+        .filter(|r| !r.is_empty())
+        .map_or_else(|| WINDOWS_SOUNDS.to_string(), |r| format!("{r}\\Media"))
+}
+
 /// Archivo de un sonido por su nombre.
 /// En Linux, los de macOS (los valores por defecto) pasan a su parecido de freedesktop.
-fn sound_path(name: &str, macos: bool) -> PathBuf {
-    if macos {
+fn sound_path(name: &str, os: &str) -> PathBuf {
+    if os == "macos" {
         return Path::new(SOUNDS).join(format!("{name}.aiff"));
+    }
+    if os == "windows" {
+        let windows = match name {
+            "Glass" => "Windows Notify System Generic",
+            "Ping" => "Windows Notify Messaging",
+            "Basso" => "Windows Critical Stop",
+            "Pop" => "Windows Message Nudge",
+            "Sosumi" => "Windows Exclamation",
+            "Funk" | "Hero" | "Morse" | "Purr" | "Submarine" | "Tink" | "Blow" | "Bottle"
+            | "Frog" => "Windows Notify",
+            other => other,
+        };
+        // Texto, no Path::join: en macOS (tests) la `\\` no es separador.
+        let media = windows_media(std::env::var("SystemRoot").ok());
+        return PathBuf::from(format!("{media}\\{windows}.wav"));
     }
     let linux = match name {
         "Glass" => "complete",
@@ -137,9 +161,11 @@ pub(super) fn sounds() -> &'static [String] {
     static SOUND_NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
     SOUND_NAMES.get_or_init(|| {
         let (dir, ext) = if cfg!(target_os = "macos") {
-            (SOUNDS, "aiff")
+            (SOUNDS.to_string(), "aiff")
+        } else if cfg!(windows) {
+            (windows_media(std::env::var("SystemRoot").ok()), "wav")
         } else {
-            (LINUX_SOUNDS, "oga")
+            (LINUX_SOUNDS.to_string(), "oga")
         };
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .into_iter()
@@ -156,15 +182,37 @@ pub(super) fn sounds() -> &'static [String] {
 }
 
 /// Suena sin esperar: afplay en macOS, paplay (PulseAudio/PipeWire, también en WSLg) en
-/// Linux; los dos respetan el volumen. La notificación va muda.
+/// Linux (los dos respetan el volumen) y PlaySound en Windows. La notificación va muda.
+// ponytail: en Windows suena al volumen del sistema (PlaySound no tiene volumen propio).
 pub(super) fn play(sound: &str, volume: f32) {
-    let path = sound_path(sound, cfg!(target_os = "macos"));
+    let path = sound_path(sound, std::env::consts::OS);
     let volume = volume.clamp(0.0, 1.0);
     std::thread::spawn(move || {
         let mut cmd = if cfg!(target_os = "macos") {
             let mut c = std::process::Command::new("/usr/bin/afplay");
             c.arg("-v").arg(format!("{volume:.2}"));
             c
+        } else if cfg!(windows) {
+            #[cfg(windows)]
+            {
+                use windows_sys::Win32::Media::Audio::{
+                    PlaySoundW, SND_FILENAME, SND_NODEFAULT, SND_SYNC,
+                };
+                let wide: Vec<u16> = path
+                    .to_string_lossy()
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                // SAFETY: `wide` termina en 0 y vive hasta que PlaySound vuelve (SND_SYNC).
+                unsafe {
+                    PlaySoundW(
+                        wide.as_ptr(),
+                        std::ptr::null_mut(),
+                        SND_FILENAME | SND_SYNC | SND_NODEFAULT,
+                    )
+                };
+            }
+            return;
         } else {
             let mut c = std::process::Command::new("paplay");
             c.arg(format!("--volume={}", (volume * 65536.0) as u32));
@@ -320,9 +368,10 @@ fn notify(
     });
 }
 
-/// WSL: aviso nativo de Windows con powershell.exe (las notificaciones de Linux no llegan
-/// a Windows). El texto va en variables (WSLENV las pasa a Windows), nunca en el script.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Aviso nativo de Windows con powershell.exe, en Windows y desde WSL (donde las
+/// notificaciones de Linux no llegan a Windows). El texto va en variables (WSLENV las pasa a
+/// Windows desde WSL), nunca en el script.
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 fn windows_toast(project: &str, text: &str) -> std::process::Command {
     // ponytail: con el id de app de PowerShell (Windows descarta los de apps sin registrar);
     // sin clic que abra el proyecto.
@@ -345,7 +394,7 @@ $m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::
 }
 
 /// WSLENV con las variables del aviso añadidas.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 fn with_toast_vars(wslenv: &str) -> String {
     let vars = "FORGE_TOAST_TITLE:FORGE_TOAST_BODY";
     if wslenv.is_empty() {
@@ -355,7 +404,26 @@ fn with_toast_vars(wslenv: &str) -> String {
     }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Windows: el mismo aviso nativo que desde WSL (powershell.exe: PowerShell 7 no carga las
+/// clases de notificación de Windows). Sin clic que abra el proyecto.
+#[cfg(windows)]
+fn notify(
+    project: String,
+    _path: PathBuf,
+    text: String,
+    _clicked: Arc<Mutex<Option<PathBuf>>>,
+    _ctx: egui::Context,
+) {
+    // status() espera a PowerShell: sin procesos colgando y sin frenar la interfaz.
+    std::thread::spawn(move || {
+        let _ = windows_toast(&project, &text)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
 fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: egui::Context) {}
 
 #[cfg(test)]
@@ -365,17 +433,32 @@ mod tests {
     #[test]
     fn linux_plays_the_freedesktop_sound_closest_to_each_macos_one() {
         let linux = Path::new("/usr/share/sounds/freedesktop/stereo");
-        assert_eq!(sound_path("Glass", false), linux.join("complete.oga"));
+        assert_eq!(sound_path("Glass", "linux"), linux.join("complete.oga"));
         assert_eq!(
-            sound_path("Ping", false),
+            sound_path("Ping", "linux"),
             linux.join("message-new-instant.oga")
         );
         // Un sonido de Linux elegido en Ajustes se usa tal cual.
-        assert_eq!(sound_path("bell", false), linux.join("bell.oga"));
+        assert_eq!(sound_path("bell", "linux"), linux.join("bell.oga"));
         assert_eq!(
-            sound_path("Glass", true),
+            sound_path("Glass", "macos"),
             Path::new("/System/Library/Sounds/Glass.aiff")
         );
+        // Windows: los .wav de C:\\Windows\\Media.
+        assert_eq!(
+            sound_path("Ping", "windows"),
+            Path::new(r"C:\Windows\Media\Windows Notify Messaging.wav")
+        );
+        assert_eq!(
+            sound_path("Basso", "windows"),
+            Path::new(r"C:\Windows\Media\Windows Critical Stop.wav")
+        );
+        assert_eq!(
+            sound_path("tada", "windows"),
+            Path::new(r"C:\Windows\Media\tada.wav")
+        );
+        // Windows instalado en otra unidad.
+        assert_eq!(windows_media(Some(r"D:\Win".into())), r"D:\Win\Media");
     }
 
     #[test]
