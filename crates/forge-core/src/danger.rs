@@ -324,7 +324,6 @@ fn ask_tty(request: &Request) -> Result<bool, String> {
     ))
 }
 
-/// El programa real: el primero del PATH que no es un enlace de Forge.
 /// Nombre del comando vigilado con el que se ejecutó Forge (`git`, `C:\\…\\GIT.EXE` → `git`).
 pub fn shim_name(argv0: &str) -> Option<String> {
     let file = argv0.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
@@ -510,6 +509,17 @@ fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
     #[cfg(not(unix))]
     let err = {
         let _ = name;
+        // Ctrl+C llega a toda la consola: el shim lo ignora y espera a que el programa real
+        // termine a su manera (si no, el prompt volvería antes y su salida saldría encima).
+        // Con una función propia, no con NULL: ignorar con NULL lo heredaría el hijo.
+        #[cfg(windows)]
+        {
+            unsafe extern "system" fn ignore(_: u32) -> windows_sys::core::BOOL {
+                1
+            }
+            // SAFETY: registra una función estática que no toca estado.
+            unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(ignore), 1) };
+        }
         match std::process::Command::new(real).args(args).status() {
             Ok(status) => std::process::exit(status.code().unwrap_or(1)),
             Err(e) => e,
