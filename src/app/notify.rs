@@ -196,24 +196,14 @@ impl App {
                 Attention::Blocked => tr!("Guard bloqueó la validación").to_string(),
                 Attention::Event(_, text) => text.clone(),
             };
-            let (project, path) = (ws.project.name(), ws.project.path.clone());
             let (clicked, ctx) = (self.notification_click.clone(), ctx.clone());
-            std::thread::spawn(move || {
-                let _ = mac_notification_sys::set_application("dev.forge.app");
-                let response = mac_notification_sys::Notification::new()
-                    .title("Forge")
-                    .subtitle(&project)
-                    .message(&text)
-                    .wait_for_click(true)
-                    .send();
-                if matches!(
-                    response,
-                    Ok(mac_notification_sys::NotificationResponse::Click)
-                ) {
-                    *clicked.lock().unwrap() = Some(path);
-                    ctx.request_repaint();
-                }
-            });
+            notify(
+                ws.project.name(),
+                ws.project.path.clone(),
+                text,
+                clicked,
+                ctx,
+            );
         }
     }
 
@@ -231,6 +221,37 @@ impl App {
         }
     }
 }
+
+/// Notificación del sistema; un clic deja el proyecto en `clicked` y redibuja.
+#[cfg(target_os = "macos")]
+fn notify(
+    project: String,
+    path: PathBuf,
+    text: String,
+    clicked: Arc<Mutex<Option<PathBuf>>>,
+    ctx: egui::Context,
+) {
+    std::thread::spawn(move || {
+        let _ = mac_notification_sys::set_application("dev.forge.app");
+        let response = mac_notification_sys::Notification::new()
+            .title("Forge")
+            .subtitle(&project)
+            .message(&text)
+            .wait_for_click(true)
+            .send();
+        if matches!(
+            response,
+            Ok(mac_notification_sys::NotificationResponse::Click)
+        ) {
+            *clicked.lock().unwrap() = Some(path);
+            ctx.request_repaint();
+        }
+    });
+}
+
+// ponytail: fuera de macOS aún sin notificaciones (vendrán con notify-rust).
+#[cfg(not(target_os = "macos"))]
+fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: egui::Context) {}
 
 #[cfg(test)]
 mod tests {
@@ -259,6 +280,9 @@ mod tests {
         assert_eq!(loaded, alerts);
         assert!(!loaded.get(Alert::Done).notify);
         assert_eq!(loaded.get(Alert::Failed).sound, "Basso");
-        assert!(sounds().iter().any(|s| s == "Glass"));
+        // Los sonidos son los de macOS (/System/Library/Sounds).
+        if cfg!(target_os = "macos") {
+            assert!(sounds().iter().any(|s| s == "Glass"));
+        }
     }
 }

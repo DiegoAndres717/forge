@@ -1,3 +1,4 @@
+#![cfg(target_os = "macos")]
 // Cada terminal es responsable de sí misma ante macOS (permisos de Fotos, Música…):
 // `forge --disclaim` se convierte en el programa sin que Forge sea su responsable.
 use std::process::{Command, Stdio};

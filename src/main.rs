@@ -10,7 +10,7 @@ mod theme;
 mod traffic_lights;
 mod workspace;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use eframe::egui::{self, FontData, FontDefinitions, FontFamily, FontId, Vec2};
@@ -90,6 +90,42 @@ fn load_settings() -> (Settings, Option<String>) {
     }
 }
 
+/// Archivo e índice de la regular, negrita, cursiva y negrita cursiva de la terminal.
+fn term_variants(
+    s: &Settings,
+    menlo: &Path,
+    sf_mono: &Path,
+    sf_mono_italic: &Path,
+) -> Option<[(PathBuf, u32); 4]> {
+    let p = Path::to_path_buf;
+    // Por defecto SF Mono (la de Terminal.app). Solo existe con peso variable y egui no
+    // puede elegir peso, así que la negrita usa Menlo Bold (Menlo.ttc: 1 negrita, 3 negrita
+    // cursiva). Sin SF Mono, todo Menlo. Con fuente propia, las variantes que falten usan la regular.
+    Some(match &s.font {
+        None if sf_mono.exists() && sf_mono_italic.exists() => [
+            (p(sf_mono), 0),
+            (p(menlo), 1),
+            (p(sf_mono_italic), 0),
+            (p(menlo), 3),
+        ],
+        None if menlo.exists() => [(p(menlo), 0), (p(menlo), 1), (p(menlo), 2), (p(menlo), 3)],
+        // ponytail: fuera de macOS, la monoespaciada de egui (Hack), sin negrita ni cursiva;
+        // la fuente propia de Ajustes sí las tiene.
+        None => return None,
+        Some(regular) => [
+            (regular.clone(), 0),
+            (s.font_bold.clone().unwrap_or_else(|| regular.clone()), 0),
+            (s.font_italic.clone().unwrap_or_else(|| regular.clone()), 0),
+            (
+                s.font_bold_italic
+                    .clone()
+                    .unwrap_or_else(|| regular.clone()),
+                0,
+            ),
+        ],
+    })
+}
+
 pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
     let load = |path: &PathBuf, index: u32| {
         std::fs::read(path)
@@ -101,27 +137,12 @@ pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
             })
             .map_err(|e| format!("no se pudo leer la fuente {}: {e}", path.display()))
     };
-    let menlo = PathBuf::from(MENLO);
-    let (sf_mono, sf_mono_italic) = (PathBuf::from(SF_MONO), PathBuf::from(SF_MONO_ITALIC));
-    // Por defecto SF Mono (la de Terminal.app). Solo existe con peso variable y egui no
-    // puede elegir peso, así que la negrita usa Menlo Bold (Menlo.ttc: 1 negrita, 3 negrita
-    // cursiva). Sin SF Mono, todo Menlo. Con fuente propia, las variantes que falten usan la regular.
-    let variants = match &s.font {
-        None if sf_mono.exists() && sf_mono_italic.exists() => [
-            (&sf_mono, 0),
-            (&menlo, 1),
-            (&sf_mono_italic, 0),
-            (&menlo, 3),
-        ],
-        None => [(&menlo, 0), (&menlo, 1), (&menlo, 2), (&menlo, 3)],
-        Some(regular) => [
-            (regular, 0),
-            (s.font_bold.as_ref().unwrap_or(regular), 0),
-            (s.font_italic.as_ref().unwrap_or(regular), 0),
-            (s.font_bold_italic.as_ref().unwrap_or(regular), 0),
-        ],
-    };
-
+    let variants = term_variants(
+        s,
+        Path::new(MENLO),
+        Path::new(SF_MONO),
+        Path::new(SF_MONO_ITALIC),
+    );
     let mut defs = FontDefinitions::default();
     let fallbacks = defs.families[&FontFamily::Monospace].clone();
     let symbols = PathBuf::from(SYMBOLS);
@@ -135,10 +156,14 @@ pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
         FontFamily::Name("italic".into()),
         FontFamily::Name("bold_italic".into()),
     ];
-    for (i, (family, (path, index))) in families.into_iter().zip(variants).enumerate() {
-        let name = format!("term-{i}");
-        defs.font_data.insert(name.clone(), load(path, index)?);
-        let mut chain = vec![name];
+    for (i, family) in families.into_iter().enumerate() {
+        let mut chain = Vec::new();
+        if let Some(variants) = &variants {
+            let (path, index) = &variants[i];
+            let name = format!("term-{i}");
+            defs.font_data.insert(name.clone(), load(path, *index)?);
+            chain.push(name);
+        }
         if defs.font_data.contains_key("symbols") {
             chain.push("symbols".into());
         }
@@ -305,6 +330,13 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn without_menlo_the_terminal_uses_eguis_monospace() {
+        let missing = std::path::Path::new("/no/such/font.ttf");
+        let s = super::Settings::default();
+        assert!(super::term_variants(&s, missing, missing, missing).is_none());
+    }
+
     use super::*;
 
     #[test]

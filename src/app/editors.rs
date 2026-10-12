@@ -1,13 +1,13 @@
 // Abrir el proyecto en un editor instalado (VS Code, Cursor, Antigravity…): clic derecho
 // en el proyecto, ⌘K y Archivo → Abrir en el editor (⌘⇧E). Sin navegador: `open -b`.
 use std::path::Path;
-use std::sync::OnceLock;
 
 use eframe::egui;
 use forge_core::store::Store;
 
 /// Editores conocidos: (nombre, bundle id). Launch Services los encuentra estén donde
 /// estén (/Applications, ~/Applications, otro disco).
+#[cfg(target_os = "macos")]
 const EDITORS: &[(&str, &str)] = &[
     ("Visual Studio Code", "com.microsoft.VSCode"),
     ("VS Code Insiders", "com.microsoft.VSCodeInsiders"),
@@ -33,7 +33,9 @@ pub(super) type Editor = (&'static str, &'static str);
 
 /// Editores instalados, en el orden de la lista.
 // ponytail: se miran una vez por sesión; uno instalado con Forge abierto sale al reiniciar.
+#[cfg(target_os = "macos")]
 pub(super) fn installed() -> &'static [Editor] {
+    use std::sync::OnceLock;
     static FOUND: OnceLock<Vec<Editor>> = OnceLock::new();
     FOUND.get_or_init(|| {
         use objc2_app_kit::NSWorkspace;
@@ -51,6 +53,12 @@ pub(super) fn installed() -> &'static [Editor] {
     })
 }
 
+// ponytail: fuera de macOS aún no se buscan editores (vendrá por el PATH).
+#[cfg(not(target_os = "macos"))]
+pub(super) fn installed() -> &'static [Editor] {
+    &[]
+}
+
 /// Icono de la app tal como lo muestra macOS (64 px), como textura; se hace una vez.
 pub(super) fn icon(ctx: &egui::Context, bundle: &str) -> Option<egui::TextureHandle> {
     let id = egui::Id::new(("editor-icon", bundle));
@@ -63,6 +71,12 @@ pub(super) fn icon(ctx: &egui::Context, bundle: &str) -> Option<egui::TextureHan
     texture
 }
 
+#[cfg(not(target_os = "macos"))]
+fn render_icon(_bundle: &str) -> Option<egui::ColorImage> {
+    None
+}
+
+#[cfg(target_os = "macos")]
 fn render_icon(bundle: &str) -> Option<egui::ColorImage> {
     use objc2::AnyThread;
     use objc2_app_kit::{NSBitmapImageRep, NSDeviceRGBColorSpace, NSGraphicsContext, NSWorkspace};

@@ -33,7 +33,33 @@ mod guard_form;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
+#[cfg(target_os = "macos")]
 mod menu;
+/// Fuera de macOS no hay barra de menús nativa: los atajos siguen en `shortcut()`.
+#[cfg(not(target_os = "macos"))]
+mod menu {
+    use super::*;
+
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    #[allow(dead_code)]
+    pub(super) enum MenuCmd {
+        Action(Action),
+        CheckUpdates,
+        Welcome,
+    }
+
+    pub(super) struct MenuBar;
+
+    impl MenuBar {
+        pub(super) fn install(_ctx: &egui::Context) -> Option<Self> {
+            None
+        }
+
+        pub(super) fn poll(&self) -> Vec<MenuCmd> {
+            Vec::new()
+        }
+    }
+}
 mod notify;
 mod palette;
 mod project_forms;
@@ -1298,6 +1324,8 @@ impl eframe::App for App {
             None => {}
         }
         // Semáforos de macOS centrados en la barra superior (como Warp).
+        #[cfg(not(target_os = "macos"))]
+        let _ = frame;
         #[cfg(target_os = "macos")]
         if let Some(end) = crate::traffic_lights::center(frame, theme::TOOLBAR_HEIGHT as f64) {
             self.traffic_end = end;
