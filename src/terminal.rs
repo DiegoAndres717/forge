@@ -212,6 +212,8 @@ pub struct Terminal {
     pub title: Option<String>,
     /// URLs locales vistas en la salida (p. ej. "http://localhost:5173/" de Vite).
     urls: Arc<Mutex<Vec<String>>>,
+    /// Última carpeta que avisó el shell con OSC 7 (Windows no deja leerla del proceso).
+    osc_cwd: Arc<Mutex<Option<PathBuf>>>,
     exit_code: Option<u32>,
     /// Última vez que el programa escribió algo (avisos de actividad en segundo plano).
     last_output: Arc<Mutex<Option<std::time::Instant>>>,
@@ -232,6 +234,32 @@ fn bash_rcfile(shell: &str) -> Option<String> {
     SHELL_ENV.get()?.get("FORGE_BASHRC").cloned()
 }
 
+/// Lo que PowerShell ejecuta tras el perfil del usuario: el prompt de siempre, con delante la
+/// carpeta actual como OSC 7 (Forge la necesita para abrir terminales en el mismo sitio).
+const PWSH_INIT: &str = r#"$global:__ForgePrompt = $function:prompt
+function global:prompt {
+  $l = $executionContext.SessionState.Path.CurrentLocation
+  $o = ''
+  if ($l.Provider.Name -eq 'FileSystem') {
+    $p = $l.ProviderPath -replace '%', '%25' -replace '\\', '/'
+    $o = "$([char]27)]7;file://localhost/$p$([char]7)"
+  }
+  $o + (& $global:__ForgePrompt)
+}
+"#;
+
+/// Argumentos para un PowerShell interactivo que ejecuta `script` al arrancar. Va en
+/// `-EncodedCommand` (UTF-16LE en Base64): así no hay comillas ni saltos de línea que Windows
+/// tenga que reinterpretar al pasar los argumentos.
+fn pwsh_args(script: &str) -> Vec<String> {
+    use base64::Engine;
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(utf16);
+    ["-NoLogo", "-NoExit", "-EncodedCommand", &encoded]
+        .map(String::from)
+        .to_vec()
+}
+
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
 
 impl Terminal {
@@ -244,7 +272,11 @@ impl Terminal {
         env: &HashMap<String, String>,
     ) -> SpawnResult {
         let mut cmd = CommandBuilder::new_default_prog();
-        if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
+        if cfg!(windows) {
+            // PowerShell 7 si está (si no, Windows PowerShell), con su perfil y el de Forge.
+            cmd = CommandBuilder::new(forge_core::powershell());
+            cmd.args(pwsh_args(PWSH_INIT));
+        } else if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
             cmd = CommandBuilder::new(cmd.get_shell());
             cmd.args(["--rcfile", &rc, "-i"]);
         }
@@ -316,6 +348,9 @@ impl Terminal {
         // ponytail: un hilo bloqueante por PTY; tokio si los paneles se cuentan por cientos.
         let mut reader = pair.master.try_clone_reader()?;
         let urls = Arc::new(Mutex::new(Vec::new()));
+        // Hasta que el shell avise (OSC 7), sigue en la carpeta donde se abrió.
+        let osc_cwd = Arc::new(Mutex::new(Some(cwd.to_path_buf())));
+        let shell_cwd = osc_cwd.clone();
         let last_output = Arc::new(Mutex::new(None));
         let (t, e, c, u) = (term.clone(), exited.clone(), ctx.clone(), urls.clone());
         let activity = last_output.clone();
@@ -326,10 +361,14 @@ impl Terminal {
             let mut buf = [0u8; 64 * 1024];
             let mut scanner = UrlScanner::default();
             let mut prompt = crate::suggest::LineScanner::default();
+            let mut folder = Osc7Scanner::default();
             while let Ok(n @ 1..) = reader.read(&mut buf) {
                 parser.advance(&mut *t.lock().unwrap(), &buf[..n]);
                 for line in prompt.feed(&buf[..n]) {
                     let _ = lines.send(UiEvent::Line(line));
+                }
+                if let Some(dir) = folder.feed(&buf[..n]).pop() {
+                    *shell_cwd.lock().unwrap() = Some(dir);
                 }
                 *activity.lock().unwrap() = Some(std::time::Instant::now());
                 bytes.fetch_add(n as u64, Ordering::Relaxed);
@@ -388,6 +427,7 @@ impl Terminal {
             search: None,
             title: None,
             urls,
+            osc_cwd,
             exit_code: None,
             last_output,
             output_bytes,
@@ -498,7 +538,10 @@ impl Terminal {
 
     /// Directorio actual del shell (para abrir terminales nuevas en el mismo sitio).
     pub fn cwd(&self) -> Option<PathBuf> {
-        process_cwd(self.child.process_id()?)
+        self.child
+            .process_id()
+            .and_then(process_cwd)
+            .or_else(|| self.osc_cwd.lock().unwrap().clone())
     }
 
     fn send(&self, bytes: &[u8]) {
@@ -1297,6 +1340,92 @@ impl Drop for Terminal {
     }
 }
 
+/// Carpeta actual que avisa el shell con OSC 7 (`ESC ] 7 ; file://host/ruta BEL|ST`): en
+/// Windows es la única forma de saberla (no hay /proc ni proc_pidinfo).
+#[derive(Default)]
+struct Osc7Scanner {
+    matched: usize,
+    inside: bool,
+    buf: Vec<u8>,
+}
+
+const OSC7: &[u8] = b"\x1b]7;";
+
+impl Osc7Scanner {
+    fn feed(&mut self, bytes: &[u8]) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for &b in bytes {
+            if self.inside {
+                // Termina en BEL o en ST (ESC \); el ESC queda al final del búfer.
+                if b == 0x07 || (b == b'\\' && self.buf.last() == Some(&0x1b)) {
+                    self.inside = false;
+                    let mut payload = std::mem::take(&mut self.buf);
+                    if payload.last() == Some(&0x1b) {
+                        payload.pop();
+                    }
+                    out.extend(osc7_path(&String::from_utf8_lossy(&payload)));
+                } else if self.buf.len() < 4096 {
+                    self.buf.push(b);
+                }
+                continue;
+            }
+            if b == OSC7[self.matched] {
+                self.matched += 1;
+                if self.matched == OSC7.len() {
+                    self.matched = 0;
+                    self.inside = true;
+                }
+            } else {
+                self.matched = usize::from(b == OSC7[0]);
+            }
+        }
+        out
+    }
+}
+
+/// `file://host/ruta` → ruta: decodifica `%XX` y, en Windows, `/C:/a/b` → `C:\\a\\b`.
+/// Solo vale la de este equipo: un `ssh` a otra máquina no cambia la carpeta de Forge.
+// ponytail: un programa que imprima a propósito una OSC 7 de `localhost` sí la cambia; lo peor
+// es que «Nueva terminal» se abra en otra carpeta (y solo en Windows: en macOS y Linux manda
+// la carpeta que da el sistema).
+fn osc7_path(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("file://")?;
+    let slash = rest.find('/')?;
+    let host = &rest[..slash];
+    let local = ["COMPUTERNAME", "HOSTNAME"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .any(|name| name.eq_ignore_ascii_case(host));
+    if !(host.is_empty() || host.eq_ignore_ascii_case("localhost") || local) {
+        return None;
+    }
+    let path = &rest[slash..];
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut it = path.bytes();
+    while let Some(b) = it.next() {
+        let hex = |c: Option<u8>| (c? as char).to_digit(16);
+        if b == b'%' {
+            let mut ahead = it.clone();
+            if let (Some(h), Some(l)) = (hex(ahead.next()), hex(ahead.next())) {
+                bytes.push((h * 16 + l) as u8);
+                it = ahead;
+                continue;
+            }
+        }
+        bytes.push(b);
+    }
+    let path = String::from_utf8_lossy(&bytes).into_owned();
+    let drive = path
+        .as_bytes()
+        .get(1..3)
+        .is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
+    Some(PathBuf::from(if drive {
+        path[1..].replace('/', "\\")
+    } else {
+        path
+    }))
+}
+
 /// Busca URLs locales en la salida cruda, ignorando secuencias de escape y tolerando
 /// que una URL llegue partida entre dos lecturas.
 #[derive(Default)]
@@ -1826,6 +1955,48 @@ impl Search {
 mod tests {
     use super::*;
 
+    #[test]
+    fn powershell_gets_the_startup_script_encoded() {
+        use base64::Engine;
+        let args = pwsh_args("cd 'C:\\a b'\n\"x\"");
+        assert_eq!(&args[..3], ["-NoLogo", "-NoExit", "-EncodedCommand"]);
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(&args[3])
+            .unwrap();
+        let units: Vec<u16> = bytes
+            .chunks(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        assert_eq!(String::from_utf16(&units).unwrap(), "cd 'C:\\a b'\n\"x\"");
+    }
+
+    #[test]
+    fn osc7_reports_the_shell_folder_even_split_across_reads() {
+        let mut scan = Osc7Scanner::default();
+        // PowerShell en Windows, partida en dos lecturas y terminada en BEL.
+        assert!(
+            scan.feed(b"PS> \x1b]7;file://localhost/C:/Users/ana/my%20app")
+                .is_empty()
+        );
+        // Con barras de Windows: igual que la carpeta que da el sistema, también como texto.
+        assert_eq!(
+            scan.feed(b"\x07PS C:\\> "),
+            vec![PathBuf::from("C:\\Users\\ana\\my app")]
+        );
+        // Unix, terminada en ST (ESC \\), como oh-my-posh.
+        assert_eq!(
+            scan.feed(b"\x1b]7;file://localhost/Users/ana\x1b\\"),
+            vec![PathBuf::from("/Users/ana")]
+        );
+        // Texto normal y otras OSC no cuentan.
+        assert!(scan.feed(b"7;file://x/y \x1b]0;titulo\x07").is_empty());
+        // La de otro equipo (un ssh) tampoco: no es una carpeta de aquí.
+        assert!(
+            scan.feed(b"\x1b]7;file://servidor-remoto/home/ana\x07")
+                .is_empty()
+        );
+    }
+
     fn keys(key: Key, m: Modifiers) -> Option<Vec<u8>> {
         key_bytes(key, m, TermMode::empty(), true)
     }
@@ -1957,16 +2128,21 @@ mod tests {
 
     /// zsh real en un PTY: el comando inicial se ejecuta y Forge ve el nuevo directorio.
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-    )]
     fn shell_cwd_follows_cd() {
         let ctx = egui::Context::default();
-        let term =
-            Terminal::spawn(&ctx, Path::new("/tmp"), Some("cd /usr"), &HashMap::new()).unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        while term.cwd().as_deref() != Some(Path::new("/usr")) {
+        // En Windows la carpeta llega del prompt de PowerShell (OSC 7).
+        let (start, cd, target) = if cfg!(windows) {
+            (
+                std::env::temp_dir(),
+                "cd C:\\Windows",
+                PathBuf::from("C:\\Windows"),
+            )
+        } else {
+            (PathBuf::from("/tmp"), "cd /usr", PathBuf::from("/usr"))
+        };
+        let term = Terminal::spawn(&ctx, &start, Some(cd), &HashMap::new()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while term.cwd().as_deref() != Some(target.as_path()) {
             assert!(
                 std::time::Instant::now() < deadline,
                 "cwd = {:?}",
@@ -2073,19 +2249,14 @@ mod tests {
     /// Busca en pantalla e historial (un marcador propio: la salida del shell del usuario,
     /// como fastfetch, puede contener cualquier otra cosa).
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-    )]
     fn search_finds_matches_in_scrollback() {
         let ctx = egui::Context::default();
-        let term = Terminal::exec(
-            &ctx,
-            Path::new("/tmp"),
-            "for i in 1 2 3; do seq 1 100; echo marca-xq; done; sleep 5",
-            &HashMap::new(),
-        )
-        .unwrap();
+        let script = if cfg!(windows) {
+            "foreach ($i in 1..3) { 1..100; 'marca-xq' }; Start-Sleep 5"
+        } else {
+            "for i in 1 2 3; do seq 1 100; echo marca-xq; done; sleep 5"
+        };
+        let term = Terminal::exec(&ctx, &std::env::temp_dir(), script, &HashMap::new()).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut search = Search {
             query: "MARCA-XQ".into(), // sin distinguir mayúsculas
@@ -2142,7 +2313,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+        ignore = "Windows can't read another process's folder; Forge uses the shell's OSC 7 there"
     )]
     fn cwd_of_own_process() {
         assert_eq!(

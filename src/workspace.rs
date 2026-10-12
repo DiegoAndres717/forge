@@ -2811,16 +2811,13 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-    )]
     fn layout_survives_restart() {
         let dir = std::env::temp_dir().join(format!("forge-ws-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".forge")).unwrap();
         std::fs::create_dir_all(dir.join("web")).unwrap();
-        let dir = dir.canonicalize().unwrap();
+        // Sin `\\?\` en Windows: la carpeta del shell llega sin él (OSC 7).
+        let dir = forge_core::canonical(&dir);
         std::fs::write(
             dir.join(".forge/project.toml"),
             "[workspace]\ndefault_layout = \"dev\"\n\
@@ -2882,7 +2879,7 @@ mod agent_tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+        ignore = "its agent command is `true`, which PowerShell doesn't have"
     )]
     fn agent_panel_resumes_on_restore() {
         let dir = std::env::temp_dir().join(format!("forge-agent-ws-{}", std::process::id()));
