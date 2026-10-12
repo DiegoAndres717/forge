@@ -126,10 +126,21 @@ fn term_variants(
     })
 }
 
-/// Abre archivos y URLs con la app predeterminada: `open` en macOS, `xdg-open` en Linux.
+/// ¿Corre dentro de WSL? (WSL fija WSL_DISTRO_NAME en todos sus procesos).
+pub fn is_wsl() -> bool {
+    std::env::var_os("WSL_DISTRO_NAME").is_some()
+}
+
+/// Abre archivos y URLs con la app predeterminada: `open` en macOS, `xdg-open` en Linux y,
+/// en WSL, `wslview` (de wslu: abre con la app de Windows) si está.
 pub fn open_command() -> std::process::Command {
+    let wslview = is_wsl()
+        && std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .any(|d| d.join("wslview").is_file());
     std::process::Command::new(if cfg!(target_os = "macos") {
         "open"
+    } else if wslview {
+        "wslview"
     } else {
         "xdg-open"
     })
