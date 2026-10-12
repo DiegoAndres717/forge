@@ -569,7 +569,7 @@ fn background_process_failure_lights_the_project() {
 #[test]
 #[cfg_attr(
     windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    ignore = "its agent uses `seq`, which PowerShell doesn't have"
 )]
 fn agent_that_finishes_in_the_background_lights_the_project() {
     let _serial = serial();
@@ -849,10 +849,6 @@ fn update_pill_shows_in_the_toolbar_and_follows_the_download() {
 /// Lo que se escribe en un campo de un panel (nota, idea, commit…) no llega a la terminal;
 /// al salir del campo, o tras pulsar un botón, la terminal vuelve a recibir el teclado.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
 fn typing_in_a_panel_field_does_not_reach_the_terminal() {
     let _serial = serial();
     let mut h = app(project("focus"));
@@ -890,10 +886,7 @@ fn typing_in_a_panel_field_does_not_reach_the_terminal() {
 /// Seleccionar arrastrando por encima del borde desplaza la terminal hacia el historial y
 /// la selección sigue creciendo; al soltar aparece "Copiar".
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
+#[cfg_attr(windows, ignore = "types `seq`, which PowerShell doesn't have")]
 fn dragging_a_selection_past_the_edge_scrolls_and_offers_copy() {
     let _serial = serial();
     let mut h = app(project("select"));
@@ -953,7 +946,7 @@ fn dragging_a_selection_past_the_edge_scrolls_and_offers_copy() {
 #[test]
 #[cfg_attr(
     windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    ignore = "folder suggestions while typing come from Forge's zsh (OSC 7777)"
 )]
 fn typing_a_path_suggests_folders_and_tab_completes() {
     let _serial = serial();
@@ -1001,10 +994,6 @@ fn typing_a_path_suggests_folders_and_tab_completes() {
 /// Al dividir (⌘D) el foco pasa a la terminal nueva y es ella la que recibe el teclado
 /// (la anterior suelta el foco).
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
 fn a_new_split_terminal_receives_the_keyboard() {
     let _serial = serial();
     let mut h = app(project("split-focus"));
@@ -1053,10 +1042,6 @@ fn maximized_panel_lists_the_hidden_ones() {
 /// "Planificar con…": sin el agente abierto se abre con la petición como primer mensaje;
 /// con él abierto, se le escribe en su panel (sin abrir otro).
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
 fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
     let _serial = serial();
     let dir = project("ask-agent");
@@ -1117,7 +1102,7 @@ fn a_split_can_be_rotated_from_the_panel_header() {
 #[test]
 #[cfg_attr(
     windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    ignore = "folder suggestions while typing come from Forge's zsh (OSC 7777)"
 )]
 fn enter_accepts_the_suggestion_chosen_with_the_arrows() {
     let _serial = serial();
@@ -1296,10 +1281,6 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
 /// Con otra cuenta elegida en el proyecto, un `claude` escrito a mano en una terminal
 /// nueva usa su carpeta (CLAUDE_CONFIG_DIR).
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
 fn a_chosen_account_reaches_new_terminals_of_the_project() {
     let _serial = serial();
     let dir = project("accounts");
@@ -1495,10 +1476,6 @@ fn usage() -> (u64, u64, usize) {
 /// abiertos vuelven a su nivel y la memoria no crece con cada vuelta. Corre en un proceso
 /// propio (`memory_stays_flat_inner`): los demás tests abren hilos y archivos a la vez.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
-)]
 fn opening_and_closing_terminals_does_not_leak() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
         .args([

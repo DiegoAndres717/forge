@@ -710,7 +710,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+        ignore = "starts its process with sh syntax; port to PowerShell (plan #11, phase 2)"
     )]
     fn health_checks_against_real_socket() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -773,7 +773,7 @@ mod tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+        ignore = "starts its process with sh `exec`; port to PowerShell (plan #11, phase 2)"
     )]
     fn lifecycle_with_real_process() {
         let ctx = egui::Context::default();
@@ -835,7 +835,7 @@ mod orphan_tests {
     #[test]
     #[cfg_attr(
         windows,
-        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+        ignore = "sh background jobs and pgrep; Windows needs Job Objects (plan #11, phase 2)"
     )]
     fn drop_kills_background_children() {
         let ctx = egui::Context::default();
