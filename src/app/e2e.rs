@@ -632,6 +632,30 @@ fn cmd_comma_opens_settings() {
     assert!(!gear_selected(&h));
 }
 
+/// Sin barra de menús nativa (Linux, Windows): el botón ☰ junto a la barra lateral abre los
+/// mismos menús que la barra de menús de macOS.
+#[test]
+fn the_menu_button_opens_the_app_menus() {
+    let _serial = serial();
+    let mut h = app(project("menu"));
+    // Fuera de macOS ya viene encendido; aquí se enciende para probarlo en cualquier sistema.
+    h.state_mut().menu_button = true;
+    h.run_steps(2);
+    let open = h.state().sidebar;
+    h.get_by_label("Menú").click();
+    h.run_steps(3);
+    // Los submenús llevan la flecha ⏵ en su nombre.
+    h.get_by_label_contains("Ver").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Barra lateral").click();
+    h.run_steps(3);
+    assert_ne!(
+        h.state().sidebar,
+        open,
+        "Ver → Barra lateral la muestra u oculta"
+    );
+}
+
 #[test]
 fn clickable_controls_show_the_pointing_hand() {
     let _serial = serial();

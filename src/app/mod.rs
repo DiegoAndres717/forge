@@ -33,33 +33,7 @@ mod guard_form;
 mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
-#[cfg(target_os = "macos")]
 mod menu;
-/// Fuera de macOS no hay barra de menús nativa: los atajos siguen en `shortcut()`.
-#[cfg(not(target_os = "macos"))]
-mod menu {
-    use super::*;
-
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    #[allow(dead_code)]
-    pub(super) enum MenuCmd {
-        Action(Action),
-        CheckUpdates,
-        Welcome,
-    }
-
-    pub(super) struct MenuBar;
-
-    impl MenuBar {
-        pub(super) fn install(_ctx: &egui::Context) -> Option<Self> {
-            None
-        }
-
-        pub(super) fn poll(&self) -> Vec<MenuCmd> {
-            Vec::new()
-        }
-    }
-}
 mod notify;
 mod palette;
 mod project_forms;
@@ -349,6 +323,10 @@ pub struct App {
     toolbar_right: f32,
     /// Dónde acaban los semáforos de macOS (x); ahí empiezan los botones de la ventana.
     traffic_end: f32,
+    /// Botón ☰ con los menús: fuera de macOS, que no tiene barra de menús nativa.
+    menu_button: bool,
+    /// Opciones elegidas en el botón ☰, para el próximo fotograma.
+    menu_chosen: Vec<menu::MenuCmd>,
     /// Última lectura de la carpeta de eventos de los agentes.
     events_checked: Option<Instant>,
     /// Versión nueva publicada: (etiqueta, página para descargarla).
@@ -405,7 +383,8 @@ impl App {
             welcome: None,
             update: Arc::default(),
             events_checked: None,
-            traffic_end: 72.0,
+            // Fuera de macOS no hay semáforos: los botones van pegados al borde.
+            traffic_end: if cfg!(target_os = "macos") { 72.0 } else { 0.0 },
             toolbar_right: 0.0,
             settings_open: false,
             guard_form: None,
@@ -416,6 +395,8 @@ impl App {
             notifications: false,
             next_update_check: None,
             menu: None,
+            menu_button: !cfg!(target_os = "macos"),
+            menu_chosen: Vec::new(),
             notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
@@ -1318,12 +1299,15 @@ impl eframe::App for App {
         for action in actions {
             self.handle_action(action, &mut cmds, &mut ws_actions);
         }
-        // Barra de menús de macOS: sus opciones (y atajos) hacen lo mismo que el teclado.
+        // Barra de menús de macOS (o botón ☰): sus opciones hacen lo mismo que el teclado.
         let chosen = self
             .menu
             .as_ref()
             .map(menu::MenuBar::poll)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .chain(std::mem::take(&mut self.menu_chosen))
+            .collect::<Vec<_>>();
         for cmd in chosen {
             match cmd {
                 menu::MenuCmd::Action(action) => {
