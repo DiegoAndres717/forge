@@ -1382,10 +1382,23 @@ impl Osc7Scanner {
     }
 }
 
-/// `file://host/ruta` → ruta: decodifica `%XX` y quita la `/` de delante de `C:/` en Windows.
+/// `file://host/ruta` → ruta: decodifica `%XX` y, en Windows, `/C:/a/b` → `C:\\a\\b`.
+/// Solo vale la de este equipo: un `ssh` a otra máquina no cambia la carpeta de Forge.
+// ponytail: un programa que imprima a propósito una OSC 7 de `localhost` sí la cambia; lo peor
+// es que «Nueva terminal» se abra en otra carpeta (y solo en Windows: en macOS y Linux manda
+// la carpeta que da el sistema).
 fn osc7_path(url: &str) -> Option<PathBuf> {
     let rest = url.strip_prefix("file://")?;
-    let path = &rest[rest.find('/')?..];
+    let slash = rest.find('/')?;
+    let host = &rest[..slash];
+    let local = ["COMPUTERNAME", "HOSTNAME"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .any(|name| name.eq_ignore_ascii_case(host));
+    if !(host.is_empty() || host.eq_ignore_ascii_case("localhost") || local) {
+        return None;
+    }
+    let path = &rest[slash..];
     let mut bytes = Vec::with_capacity(path.len());
     let mut it = path.bytes();
     while let Some(b) = it.next() {
@@ -1405,7 +1418,11 @@ fn osc7_path(url: &str) -> Option<PathBuf> {
         .as_bytes()
         .get(1..3)
         .is_some_and(|d| d[0].is_ascii_alphabetic() && d[1] == b':');
-    Some(PathBuf::from(if drive { &path[1..] } else { &path[..] }))
+    Some(PathBuf::from(if drive {
+        path[1..].replace('/', "\\")
+    } else {
+        path
+    }))
 }
 
 /// Busca URLs locales en la salida cruda, ignorando secuencias de escape y tolerando
@@ -1960,17 +1977,23 @@ mod tests {
             scan.feed(b"PS> \x1b]7;file://localhost/C:/Users/ana/my%20app")
                 .is_empty()
         );
+        // Con barras de Windows: igual que la carpeta que da el sistema, también como texto.
         assert_eq!(
             scan.feed(b"\x07PS C:\\> "),
-            vec![PathBuf::from("C:/Users/ana/my app")]
+            vec![PathBuf::from("C:\\Users\\ana\\my app")]
         );
         // Unix, terminada en ST (ESC \\), como oh-my-posh.
         assert_eq!(
-            scan.feed(b"\x1b]7;file://mac/Users/ana\x1b\\"),
+            scan.feed(b"\x1b]7;file://localhost/Users/ana\x1b\\"),
             vec![PathBuf::from("/Users/ana")]
         );
         // Texto normal y otras OSC no cuentan.
         assert!(scan.feed(b"7;file://x/y \x1b]0;titulo\x07").is_empty());
+        // La de otro equipo (un ssh) tampoco: no es una carpeta de aquí.
+        assert!(
+            scan.feed(b"\x1b]7;file://servidor-remoto/home/ana\x07")
+                .is_empty()
+        );
     }
 
     fn keys(key: Key, m: Modifiers) -> Option<Vec<u8>> {
