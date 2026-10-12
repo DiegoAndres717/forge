@@ -41,10 +41,23 @@ pub fn now() -> i64 {
 }
 
 /// macOS: `~/Library/Application Support/Forge`. Linux: `$XDG_DATA_HOME/forge`
-/// (o `~/.local/share/forge`).
-fn db_path(home: &Path, xdg_data_home: Option<std::ffi::OsString>, macos: bool) -> PathBuf {
-    if macos {
+/// (o `~/.local/share/forge`). Windows: `%LOCALAPPDATA%\\Forge`, no la carpeta Roaming:
+/// el historial de las terminales no debe copiarse al servidor en cada inicio de sesión.
+fn db_path(
+    home: &Path,
+    xdg_data_home: Option<std::ffi::OsString>,
+    local_appdata: Option<std::ffi::OsString>,
+    os: &str,
+) -> PathBuf {
+    if os == "macos" {
         return home.join("Library/Application Support/Forge/forge.db");
+    }
+    if os == "windows" {
+        return local_appdata
+            .filter(|d| !d.is_empty())
+            .map_or_else(|| home.join("AppData").join("Local"), PathBuf::from)
+            .join("Forge")
+            .join("forge.db");
     }
     xdg_data_home
         .filter(|d| !d.is_empty())
@@ -63,11 +76,12 @@ impl Store {
         if let Some(path) = std::env::var_os("FORGE_DB") {
             return Some(PathBuf::from(path));
         }
-        let home = PathBuf::from(std::env::var_os("HOME")?);
+        let home = crate::home_dir()?;
         Some(db_path(
             &home,
             std::env::var_os("XDG_DATA_HOME"),
-            cfg!(target_os = "macos"),
+            std::env::var_os("LOCALAPPDATA"),
+            std::env::consts::OS,
         ))
     }
 
@@ -152,7 +166,7 @@ impl Store {
             conn,
             keys: Mutex::default(),
             accounts_root: None,
-            home: std::env::var_os("HOME").map(PathBuf::from),
+            home: crate::home_dir(),
         })
     }
 
@@ -545,16 +559,29 @@ mod tests {
     fn the_database_lives_where_each_system_keeps_app_data() {
         let home = Path::new("/home/ana");
         assert_eq!(
-            db_path(home, None, true),
+            db_path(home, None, None, "macos"),
             home.join("Library/Application Support/Forge/forge.db")
         );
         assert_eq!(
-            db_path(home, None, false),
+            db_path(home, None, None, "linux"),
             home.join(".local/share/forge/forge.db")
         );
         assert_eq!(
-            db_path(home, Some("/data".into()), false),
+            db_path(home, Some("/data".into()), None, "linux"),
             Path::new("/data/forge/forge.db")
+        );
+        // Windows: %LOCALAPPDATA%\\Forge (o AppData\\Local de la carpeta personal).
+        let local = Path::new(r"C:\Users\ana\AppData\Local");
+        assert_eq!(
+            db_path(home, None, Some(local.into()), "windows"),
+            local.join("Forge").join("forge.db")
+        );
+        assert_eq!(
+            db_path(home, None, None, "windows"),
+            home.join("AppData")
+                .join("Local")
+                .join("Forge")
+                .join("forge.db")
         );
     }
 

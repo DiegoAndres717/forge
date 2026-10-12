@@ -299,8 +299,8 @@ impl App {
         if installed("codex") {
             theme::section(ui, "Codex");
             theme::card(ui, |ui| self.launch_ui(ui, "codex"));
-            if let Some(home) = std::env::var_os("HOME") {
-                let codex = std::path::PathBuf::from(home).join(".codex");
+            if let Some(home) = forge_core::home_dir() {
+                let codex = home.join(".codex");
                 theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
             }
             let codex = detected.get("codex").and_then(|d| d.path.clone());
@@ -406,7 +406,7 @@ impl App {
         codex: Option<&std::path::Path>,
     ) {
         use forge_core::subagents;
-        let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) else {
+        let Some(home) = forge_core::home_dir() else {
             return;
         };
         let installed = subagents::installed(agent, &home);
@@ -1051,9 +1051,8 @@ impl App {
         // Lo que significa «Tu configuración» en Codex: lo de su config.toml.
         let codex = (program == "codex")
             .then(|| {
-                std::env::var_os("HOME").map(|h| {
-                    forge_core::launch::codex_defaults(&std::path::PathBuf::from(h).join(".codex"))
-                })
+                forge_core::home_dir()
+                    .map(|h| forge_core::launch::codex_defaults(&h.join(".codex")))
             })
             .flatten()
             .unwrap_or_default();

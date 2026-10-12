@@ -44,7 +44,7 @@ fn config_dir(program: &str, account: Option<&Path>) -> Option<PathBuf> {
         "codex" => ("CODEX_HOME", ".codex"),
         _ => return None,
     };
-    let home = PathBuf::from(std::env::var_os("HOME")?);
+    let home = crate::home_dir()?;
     Some(std::env::var_os(var).map_or_else(|| home.join(default), PathBuf::from))
 }
 
