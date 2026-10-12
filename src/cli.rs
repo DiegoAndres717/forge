@@ -792,7 +792,7 @@ fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, Str
     };
     // Windows no tiene exec: se ejecuta el agente en PowerShell y se sale con su código.
     #[cfg(not(unix))]
-    let err = match std::process::Command::new("powershell.exe")
+    let err = match std::process::Command::new(forge_core::powershell())
         .args(["-NoLogo", "-Command", &command])
         .current_dir(root)
         .envs(&agent.environment)

@@ -708,6 +708,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn health_checks_against_real_socket() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -767,6 +771,10 @@ mod tests {
 
     /// Proceso real: arranca, detecta su puerto, se detiene con Ctrl+C y se reinicia solo al fallar.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn lifecycle_with_real_process() {
         let ctx = egui::Context::default();
         let def = |id: &str, command: &str, auto_restart| ProcessDef {
@@ -825,6 +833,10 @@ mod orphan_tests {
 
     /// Al soltar el gestor (cerrar proyecto o app) no deben quedar nietos vivos.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn drop_kills_background_children() {
         let ctx = egui::Context::default();
         // Duraciones únicas por ejecución: un huérfano de otra corrida no confunde a pgrep.

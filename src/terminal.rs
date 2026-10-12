@@ -269,7 +269,7 @@ impl Terminal {
         match bash_rcfile(&shell) {
             // Windows: PowerShell, con el perfil del usuario (PATH de nvm, etc.).
             _ if cfg!(windows) => {
-                cmd = CommandBuilder::new("powershell.exe");
+                cmd = CommandBuilder::new(forge_core::powershell());
                 cmd.args(["-NoLogo", "-Command", command]);
             }
             Some(rc) => cmd.args(["--rcfile", &rc, "-i", "-c", command]),
@@ -1957,6 +1957,10 @@ mod tests {
 
     /// zsh real en un PTY: el comando inicial se ejecuta y Forge ve el nuevo directorio.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn shell_cwd_follows_cd() {
         let ctx = egui::Context::default();
         let term =
@@ -2069,6 +2073,10 @@ mod tests {
     /// Busca en pantalla e historial (un marcador propio: la salida del shell del usuario,
     /// como fastfetch, puede contener cualquier otra cosa).
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn search_finds_matches_in_scrollback() {
         let ctx = egui::Context::default();
         let term = Terminal::exec(
@@ -2132,6 +2140,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "needs the PowerShell shell integration (plan #11, phase 2)"
+    )]
     fn cwd_of_own_process() {
         assert_eq!(
             process_cwd(std::process::id()),
