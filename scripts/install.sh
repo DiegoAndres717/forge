@@ -1,5 +1,5 @@
 #!/bin/sh
-# Instala (o actualiza) Forge desde la última versión de GitHub Releases:
+# Instala (o actualiza) Forge desde la última versión de GitHub Releases (macOS y Linux):
 #   curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
 # macOS: descarga el DMG, comprueba su SHA-256, copia Forge.app a /Applications (o a
 # ~/Applications si no hay permiso) y enlaza el comando `forge` en el PATH.

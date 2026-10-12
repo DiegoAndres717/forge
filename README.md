@@ -88,7 +88,7 @@ What happens between `git commit` (or push, or a pull request) and your change l
 
 ## Install
 
-> **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app).
+> **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app). Linux is in preview: see [Linux](#linux-preview).
 
 ### One command (recommended)
 
@@ -131,6 +131,23 @@ git clone https://github.com/DiegoAndres717/forge.git && cd forge
 ln -sf /Applications/Forge.app/Contents/MacOS/forge /opt/homebrew/bin/forge
 forge help
 ```
+
+### Linux (preview)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+```
+
+The same command works on Linux (x86_64 or aarch64): it checks the SHA-256 and installs `forge` in `~/.local/bin`. Open it with `forge` or `forge <folder>`. Run it again to update.
+
+| Works | Not yet |
+|---|---|
+| Terminals, agents, processes, Forge Memory, plans, MCP | Alert sounds |
+| Project Guard in zsh and bash | Native menu bar and editor icons |
+| Desktop notifications, `xdg-open`, editors on PATH (`code`, `cursor`, `zed`…) | Automatic updates (run the installer again) |
+| Folder picker with `zenity` or `kdialog` | Folder suggestions while typing in bash (zsh only) |
+
+Data goes in `~/.local/share/forge` (or `$XDG_DATA_HOME/forge`); settings in `~/.config/forge/config.toml`.
 
 ## Quick start
 
@@ -220,7 +237,7 @@ Run `forge help` for every option.
 No. Forge runs locally; its only network call is the update check against GitHub Releases (plus the optional AI review, if you enable it in `routing.toml`). Agents you launch talk to their own providers as usual.
 
 **Intel Macs? Windows?**
-Intel Macs: yes, the app is universal. Windows and Linux: not for now.
+Intel Macs: yes, the app is universal. Linux: in preview (see [Linux](#linux-preview)). Windows: not yet; WSL support is coming.
 
 **Do I need Claude Code?**
 No. Terminals, processes, Guard, Git and plans work without any agent. Forge detects Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Pi if they're installed.
