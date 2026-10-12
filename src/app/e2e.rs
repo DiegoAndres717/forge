@@ -1045,9 +1045,13 @@ fn maximized_panel_lists_the_hidden_ones() {
 fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
     let _serial = serial();
     let dir = project("ask-agent");
+    // PowerShell: echo saca cada argumento en su línea; Write-Host los junta.
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
     std::fs::write(
         dir.join(".forge/agents.toml"),
-        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"echo pedido:\"\n",
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} pedido:\"\n"
+        ),
     )
     .unwrap();
     let mut h = app(dir);
@@ -1060,7 +1064,12 @@ fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
     wait_until(&mut h, "se abre el agente con la petición", |a| {
         ws(a).panel_count() == 2 && ws(a).shell_text().contains("pedido: planifica la idea 7")
     });
-    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "echo zzsegunda$((40+2))", area);
+    let second = if cfg!(windows) {
+        "Write-Host zzsegunda$(40+2)"
+    } else {
+        "echo zzsegunda$((40+2))"
+    };
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", second, area);
     wait_until(&mut h, "se escribe en el panel abierto", |a| {
         ws(a).shell_text().contains("zzsegunda42")
     });
@@ -1304,9 +1313,12 @@ fn a_chosen_account_reaches_new_terminals_of_the_project() {
     wait_until(&mut h, "shell listo", |a| {
         ws(a).is_quiet(Duration::from_millis(500))
     });
-    h.event(egui::Event::Text(
-        "echo \"${CLAUDE_CONFIG_DIR##*/}\"zz".into(),
-    ));
+    let show = if cfg!(windows) {
+        "\"$(Split-Path -Leaf $env:CLAUDE_CONFIG_DIR)zz\""
+    } else {
+        "echo \"${CLAUDE_CONFIG_DIR##*/}\"zz"
+    };
+    h.event(egui::Event::Text(show.into()));
     h.key_press(Key::Enter);
     wait_until(&mut h, "la terminal ve la cuenta", |a| {
         ws(a).shell_text().contains("claude-1zz")
@@ -1476,6 +1488,10 @@ fn usage() -> (u64, u64, usize) {
 /// abiertos vuelven a su nivel y la memoria no crece con cada vuelta. Corre en un proceso
 /// propio (`memory_stays_flat_inner`): los demás tests abren hilos y archivos a la vez.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "measures with /proc and /dev/fd; Windows needs GetProcessMemoryInfo and handle counts"
+)]
 fn opening_and_closing_terminals_does_not_leak() {
     let out = std::process::Command::new(std::env::current_exe().unwrap())
         .args([

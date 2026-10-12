@@ -2816,7 +2816,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join(".forge")).unwrap();
         std::fs::create_dir_all(dir.join("web")).unwrap();
-        let dir = dir.canonicalize().unwrap();
+        // Sin `\\?\` en Windows: la carpeta del shell llega sin él (OSC 7).
+        let dir = forge_core::canonical(&dir);
         std::fs::write(
             dir.join(".forge/project.toml"),
             "[workspace]\ndefault_layout = \"dev\"\n\
