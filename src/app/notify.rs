@@ -264,10 +264,13 @@ fn notify(
     ctx: egui::Context,
 ) {
     if crate::is_wsl() {
-        let _ = windows_toast(&project, &text)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        // status() espera a PowerShell: sin procesos zombi y sin frenar la interfaz.
+        std::thread::spawn(move || {
+            let _ = windows_toast(&project, &text)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        });
         return;
     }
     std::thread::spawn(move || {
@@ -304,16 +307,24 @@ $n.Item(1).AppendChild($t.CreateTextNode($env:FORGE_TOAST_BODY)) > $null
 $id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
 $m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($t))
 "#;
-    let wslenv = std::env::var("WSLENV").unwrap_or_default();
+    let wslenv = with_toast_vars(&std::env::var("WSLENV").unwrap_or_default());
     let mut cmd = std::process::Command::new("powershell.exe");
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
         .env("FORGE_TOAST_TITLE", format!("Forge · {project}"))
         .env("FORGE_TOAST_BODY", text)
-        .env(
-            "WSLENV",
-            format!("{wslenv}:FORGE_TOAST_TITLE:FORGE_TOAST_BODY"),
-        );
+        .env("WSLENV", wslenv);
     cmd
+}
+
+/// WSLENV con las variables del aviso añadidas.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn with_toast_vars(wslenv: &str) -> String {
+    let vars = "FORGE_TOAST_TITLE:FORGE_TOAST_BODY";
+    if wslenv.is_empty() {
+        vars.to_string()
+    } else {
+        format!("{wslenv}:{vars}")
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -322,6 +333,15 @@ fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: e
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wslenv_gets_the_toast_variables_without_a_stray_colon() {
+        assert_eq!(with_toast_vars(""), "FORGE_TOAST_TITLE:FORGE_TOAST_BODY");
+        assert_eq!(
+            with_toast_vars("USERPROFILE/p"),
+            "USERPROFILE/p:FORGE_TOAST_TITLE:FORGE_TOAST_BODY"
+        );
+    }
 
     #[test]
     fn wsl_toasts_pass_the_text_outside_the_script() {
