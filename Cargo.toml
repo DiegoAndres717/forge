@@ -34,6 +34,9 @@ portable-pty = "0.9.0"
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+
+# Integración nativa de macOS: menú, semáforos, notificaciones y editores.
+[target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6"
 objc2 = "0.6"
 raw-window-handle = "0.6"

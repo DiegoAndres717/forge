@@ -32,7 +32,11 @@ pub const DISCLAIM: &str = "--disclaim";
 /// responsable de sí mismo (ver `disclaim_exec`).
 fn disclaimed(cmd: CommandBuilder) -> CommandBuilder {
     // En los tests el ejecutable no es `forge`: sin trampolín.
-    let Some(exe) = std::env::current_exe().ok().filter(|_| !cfg!(test)) else {
+    // Fuera de macOS no hay «responsable» del que renunciar: sin trampolín.
+    let Some(exe) = std::env::current_exe()
+        .ok()
+        .filter(|_| !cfg!(test) && cfg!(target_os = "macos"))
+    else {
         return cmd;
     };
     let mut argv: Vec<std::ffi::OsString> = vec![DISCLAIM.into()];
@@ -56,6 +60,7 @@ fn disclaimed(cmd: CommandBuilder) -> CommandBuilder {
 /// `forge --disclaim <programa> <argv0> [args…]`: se convierte en el programa (mismo
 /// proceso: pid, terminal de control y descriptores) con `posix_spawn` + SETEXEC,
 /// renunciando a la responsabilidad. Solo vuelve si no pudo: sale con 127.
+#[cfg(target_os = "macos")]
 pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
@@ -105,6 +110,21 @@ pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
         std::io::Error::from_raw_os_error(err)
     );
     std::process::exit(127)
+}
+
+/// Fuera de macOS Forge no usa el trampolín; si alguien lo llama, corre el programa
+/// (`args[1]` es argv0) y sale con su código.
+#[cfg(not(target_os = "macos"))]
+pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
+    let status = args.first().map(|program| {
+        std::process::Command::new(program)
+            .args(args.iter().skip(2))
+            .status()
+    });
+    std::process::exit(match status {
+        Some(Ok(status)) => status.code().unwrap_or(1),
+        _ => 127,
+    })
 }
 
 /// Eventos del terminal que la UI debe atender en su hilo.
