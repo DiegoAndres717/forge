@@ -239,7 +239,7 @@ impl App {
 
     fn window_buttons_width(&self) -> f32 {
         WINDOW_BUTTONS_WIDTH
-            + if self.menu.is_none() {
+            + if self.menu_button {
                 MENU_BUTTON_WIDTH
             } else {
                 0.0
