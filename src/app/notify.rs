@@ -1,4 +1,4 @@
-// Notificaciones de macOS para los avisos de actividad, solo con Forge en segundo plano
+// Notificaciones del sistema (macOS y Linux) para los avisos de actividad, solo con Forge en segundo plano
 // (dentro de la app basta el punto de la barra lateral). Una por aviso hasta que se entra
 // al proyecto: un agente que espera y redibuja su pantalla no vuelve a notificar. Un clic
 // en la notificación abre ese proyecto.
@@ -249,8 +249,36 @@ fn notify(
     });
 }
 
-// ponytail: fuera de macOS aún sin notificaciones (vendrán con notify-rust).
-#[cfg(not(target_os = "macos"))]
+/// Linux: notificación de escritorio (D-Bus); un clic en ella abre el proyecto.
+// ponytail: sin sonido propio en Linux (la lista de sonidos sale vacía).
+#[cfg(target_os = "linux")]
+fn notify(
+    project: String,
+    path: PathBuf,
+    text: String,
+    clicked: Arc<Mutex<Option<PathBuf>>>,
+    ctx: egui::Context,
+) {
+    std::thread::spawn(move || {
+        let Ok(handle) = notify_rust::Notification::new()
+            .appname("Forge")
+            .summary(&format!("Forge · {project}"))
+            .body(&text)
+            .action("default", tr!("Abrir"))
+            .show()
+        else {
+            return;
+        };
+        handle.wait_for_action(|action| {
+            if action == "default" {
+                *clicked.lock().unwrap() = Some(path);
+                ctx.request_repaint();
+            }
+        });
+    });
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: egui::Context) {}
 
 #[cfg(test)]
