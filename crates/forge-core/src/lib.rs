@@ -93,6 +93,19 @@ pub fn which(program: &str) -> Option<std::path::PathBuf> {
     find_in_path(program, &std::env::var_os("PATH")?, &exts)
 }
 
+/// La ruta real, sin el prefijo `\\?\` que `canonicalize` añade en Windows: con él la
+/// misma carpeta se escribe de dos formas (las excepciones de Guard, guardadas por ruta, no
+/// se encontrarían) y Git no lo acepta.
+pub fn canonical(path: &std::path::Path) -> std::path::PathBuf {
+    let Ok(real) = path.canonicalize() else {
+        return path.to_path_buf();
+    };
+    match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(plain) => std::path::PathBuf::from(plain),
+        None => real,
+    }
+}
+
 /// Carpeta personal: HOME (macOS, Linux) o, en Windows, USERPROFILE.
 pub fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME")
@@ -197,6 +210,20 @@ mod platform_tests {
         let path = std::env::join_paths([dir.clone()]).unwrap();
         assert_eq!(super::pick_powershell(&path, &[]), dir.join("pwsh.exe"));
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn canonical_paths_have_no_verbatim_prefix() {
+        let dir = std::env::temp_dir();
+        let real = super::canonical(&dir);
+        assert!(
+            !real.to_string_lossy().starts_with(r"\\?\"),
+            "{}",
+            real.display()
+        );
+        assert!(real.is_absolute());
+        let missing = std::path::Path::new("no/existe");
+        assert_eq!(super::canonical(missing), missing);
     }
 
     #[test]

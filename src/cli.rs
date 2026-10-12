@@ -1252,10 +1252,9 @@ fn ai_usage(out: &Out, project: &Path) -> Result<i32, String> {
 
 fn hooks_install(out: &Out, project: &Path) -> Result<i32, String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let exe = exe.canonicalize().unwrap_or(exe);
-    let project = project
-        .canonicalize()
-        .unwrap_or_else(|_| project.to_path_buf());
+    let exe = forge_core::canonical(&exe);
+    // Sin `\\?\` en Windows: la ruta del hook tiene que coincidir con la de `guard allow`.
+    let project = forge_core::canonical(project);
     for line in hooks::install(&project, &exe)? {
         out.line(&line);
     }
