@@ -374,6 +374,24 @@ test('shell searches count as exploring, other commands reset the streak', async
   expect(await bash('cat README.md')).toBe(0)
 })
 
+test('the main loop running a whole suite or build itself is nudged once to forge:reviewer', async ($, on) => {
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  const bash = async (command: string, agentId?: string) => {
+    const r = (await $.tool.call({ tool: 'Bash', command, agentId } as never)) as { context?: readonly string[] }
+    return (r.context ?? []).filter(c => c.includes('forge:reviewer')).length
+  }
+  expect(await bash('git status')).toBe(0)
+  expect(await bash('cargo test --workspace --no-fail-fast')).toBe(1)
+  // Once per message of yours: the second run isn't nagged.
+  expect(await bash('npx tsc --noEmit')).toBe(0)
+  await $.prompt.submit({ text: 'next' } as never)
+  expect(await bash('cd web && npm run build')).toBe(1)
+  // The reviewer itself runs suites: that is its job.
+  await $.prompt.submit({ text: 'again' } as never)
+  expect(await bash('pytest', 'a1')).toBe(0)
+})
+
 test('the band warns when the context is getting full', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed }))
   await $.session.measure({

@@ -64,7 +64,7 @@ pub const TESTS_FIRST: &str = "Tests-first mode: for every behavior change or bu
 
 /// Medido en sesiones reales: buscar y leer código es el 8–13 % de toda la entrada, porque
 /// cada resultado se relee en cada turno. Un subagente lo deja fuera del contexto.
-pub const DELEGATE: &str = "Saving tokens: when understanding something will take more than two searches or file reads (shell ones included: rg, grep, find, cat, sed -n), hand the exploration to a subagent on a cheaper model if your tool has one, and keep only its short answer with paths. Everything you read stays in your context and is re-read on every later turn.";
+pub const DELEGATE: &str = "Saving tokens: when understanding something will take more than two searches or file reads (shell ones included: rg, grep, find, cat, sed -n), hand the exploration to a subagent on a cheaper model if your tool has one, and keep only its short answer with paths. Everything you read stays in your context and is re-read on every later turn. Likewise, hand full test suites, builds and type checks to such a subagent and keep only what failed and why; run yourself only the single test you are fixing.";
 
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
@@ -1063,6 +1063,7 @@ mod tests {
     fn modes_add_their_instructions() {
         let plain = instructions(Modes::default());
         assert!(plain.contains("subagent on a cheaper model"));
+        assert!(plain.contains("full test suites"));
         assert!(!plain.contains("up to three questions") && !plain.contains("Tests-first"));
         let ask = Modes {
             ask_first: true,
