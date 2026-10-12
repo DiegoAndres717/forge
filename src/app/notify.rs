@@ -263,6 +263,13 @@ fn notify(
     clicked: Arc<Mutex<Option<PathBuf>>>,
     ctx: egui::Context,
 ) {
+    if crate::is_wsl() {
+        let _ = windows_toast(&project, &text)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        return;
+    }
     std::thread::spawn(move || {
         let Ok(handle) = notify_rust::Notification::new()
             .appname("Forge")
@@ -282,12 +289,72 @@ fn notify(
     });
 }
 
+/// WSL: aviso nativo de Windows con powershell.exe (las notificaciones de Linux no llegan
+/// a Windows). El texto va en variables (WSLENV las pasa a Windows), nunca en el script.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn windows_toast(project: &str, text: &str) -> std::process::Command {
+    // ponytail: con el id de app de PowerShell (Windows descarta los de apps sin registrar);
+    // sin clic que abra el proyecto.
+    const SCRIPT: &str = r#"
+$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+$t = $m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
+$n = $t.GetElementsByTagName('text')
+$n.Item(0).AppendChild($t.CreateTextNode($env:FORGE_TOAST_TITLE)) > $null
+$n.Item(1).AppendChild($t.CreateTextNode($env:FORGE_TOAST_BODY)) > $null
+$id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+$m::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($t))
+"#;
+    let wslenv = std::env::var("WSLENV").unwrap_or_default();
+    let mut cmd = std::process::Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .env("FORGE_TOAST_TITLE", format!("Forge · {project}"))
+        .env("FORGE_TOAST_BODY", text)
+        .env(
+            "WSLENV",
+            format!("{wslenv}:FORGE_TOAST_TITLE:FORGE_TOAST_BODY"),
+        );
+    cmd
+}
+
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: egui::Context) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wsl_toasts_pass_the_text_outside_the_script() {
+        let cmd = windows_toast("app'; rm -rf ~", "listo $(whoami)");
+        let args: Vec<_> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter()
+                .all(|a| !a.contains("whoami") && !a.contains("rm -rf"))
+        );
+        let env: HashMap<_, _> = cmd
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        assert_eq!(
+            env["FORGE_TOAST_TITLE"].as_deref(),
+            Some("Forge · app'; rm -rf ~")
+        );
+        assert_eq!(env["FORGE_TOAST_BODY"].as_deref(), Some("listo $(whoami)"));
+        assert!(
+            env["WSLENV"]
+                .as_deref()
+                .unwrap()
+                .contains("FORGE_TOAST_TITLE")
+        );
+    }
 
     #[test]
     fn alerts_keep_defaults_and_old_switch() {

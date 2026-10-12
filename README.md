@@ -154,14 +154,15 @@ Data goes in `~/.local/share/forge` (or `$XDG_DATA_HOME/forge`); settings in `~/
 Forge runs inside WSL2 as a Linux app. Windows 11 shows its window through WSLg. Not tested on real hardware yet: tell us what breaks.
 
 1. In PowerShell: `wsl --install` (or `wsl --update`), then open **Ubuntu**.
-2. Inside Ubuntu, run the Linux install command above, then `forge`.
+2. Inside Ubuntu: `sudo apt install wslu zenity` (open links with Windows apps, pick folders), run the Linux install command above, then `forge`.
 
 Keep in mind:
 
 - **Projects inside WSL** (`~/projects`), not under `/mnt/c/...`: there Git and tests are much slower, and Forge warns you.
 - **Agents inside WSL:** `~/.claude` and `~/.codex` in WSL are separate from the Windows ones. Install and log in to Claude Code, Codex… inside Ubuntu; Forge doesn't see the Windows copies.
 - **Editors:** `code` opens VS Code for Windows connected to WSL. Cursor and other editors work if their command is on the WSL PATH.
-- **Not yet:** desktop notifications may not reach Windows, and HiDPI scaling and the clipboard with Windows still need testing.
+- **Notifications** show up as Windows notifications (through `powershell.exe`); clicking one doesn't open the project yet.
+- **Still to test:** HiDPI scaling and the clipboard with Windows.
 
 ## Quick start
 

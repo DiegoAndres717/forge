@@ -551,8 +551,7 @@ impl App {
             self.workspaces.push(ws);
             return;
         }
-        // WSL fija WSL_DISTRO_NAME en todos sus procesos.
-        if slow_on_wsl(&path, std::env::var_os("WSL_DISTRO_NAME").is_some()) {
+        if slow_on_wsl(&path, crate::is_wsl()) {
             self.error = Some(tr!(
                 "{p0} está en un disco de Windows: Git y los tests irán lentos. Mejor dentro de WSL (p. ej. ~/proyectos).",
                 p0 = path.display()
