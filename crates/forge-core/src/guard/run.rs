@@ -871,10 +871,17 @@ pub(crate) fn run_check(
     env: &std::collections::HashMap<String, String>,
     cancel: &AtomicBool,
 ) -> (CheckState, String) {
-    use std::os::unix::process::CommandExt;
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let child = Command::new(shell)
-        .args(["-l", "-c", &format!("{{ {}\n}} 2>&1", check.command)])
+    // stderr junto a stdout, para mostrar el error del comando.
+    let script = if cfg!(windows) {
+        format!("& {{ {} }} 2>&1", check.command)
+    } else {
+        format!("{{ {}\n}} 2>&1", check.command)
+    };
+    let mut cmd = crate::shell_command(&script);
+    // Grupo de procesos propio: al cancelar se para también lo que lance el comando.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    let child = cmd
         .current_dir(workdir)
         .envs(env)
         // Variables de los hooks: dentro de la copia aislada apuntarían al repositorio real.
@@ -887,7 +894,6 @@ pub(crate) fn run_check(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .process_group(0)
         .spawn();
     let mut child = match child {
         Ok(c) => c,
@@ -901,7 +907,6 @@ pub(crate) fn run_check(
     });
 
     let deadline = Instant::now() + Duration::from_secs(check.timeout_seconds.max(1));
-    let pgid = child.id() as libc::pid_t;
     let state = loop {
         match child.try_wait() {
             Ok(Some(status)) if status.success() => break CheckState::Passed,
@@ -917,10 +922,17 @@ pub(crate) fn run_check(
             None
         };
         if let Some(stop) = stop {
-            // SAFETY: killpg solo envía señales al grupo creado con process_group(0).
-            unsafe { libc::killpg(pgid, libc::SIGTERM) };
-            std::thread::sleep(Duration::from_millis(500));
-            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            #[cfg(unix)]
+            {
+                let pgid = child.id() as libc::pid_t;
+                // SAFETY: killpg solo envía señales al grupo creado con process_group(0).
+                unsafe { libc::killpg(pgid, libc::SIGTERM) };
+                std::thread::sleep(Duration::from_millis(500));
+                unsafe { libc::killpg(pgid, libc::SIGKILL) };
+            }
+            // ponytail: en Windows solo el proceso principal (Job Objects si deja hijos vivos).
+            #[cfg(not(unix))]
+            let _ = child.kill();
             let _ = child.wait();
             break stop;
         }

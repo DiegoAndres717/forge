@@ -10,7 +10,6 @@
 use crate::tr;
 use std::collections::HashMap;
 use std::io::Write;
-use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -208,8 +207,29 @@ pub struct Request {
 }
 
 fn alive(pid: u32) -> bool {
-    // SAFETY: kill con señal 0 solo comprueba que el proceso existe.
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    #[cfg(unix)]
+    {
+        // SAFETY: kill con señal 0 solo comprueba que el proceso existe.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+        use windows_sys::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: se abre solo para consultar y se cierra antes de salir.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut code = 0;
+            let ok = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            ok && code == STILL_ACTIVE as u32
+        }
+    }
 }
 
 /// Solicitudes cuyo proceso sigue esperando.
@@ -313,7 +333,13 @@ fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
         .find(|p| {
             p.is_file()
                 && std::fs::metadata(p).is_ok_and(|m| {
-                    std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0
+                    // ponytail: en Windows basta con que exista (Guard en Windows: fase 4).
+                    #[cfg(unix)]
+                    let executable =
+                        std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0;
+                    #[cfg(not(unix))]
+                    let executable = m.is_file();
+                    executable
                 })
                 && p.canonicalize().ok()
                     != std::env::current_exe()
@@ -440,10 +466,23 @@ fn authorize(name: &str, args: &[String], reason: String, cwd: PathBuf, project:
 }
 
 fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
-    let err = std::process::Command::new(real)
-        .arg0(name)
-        .args(args)
-        .exec();
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        std::process::Command::new(real)
+            .arg0(name)
+            .args(args)
+            .exec()
+    };
+    // Windows no tiene exec: se ejecuta el programa y se sale con su código.
+    #[cfg(not(unix))]
+    let err = {
+        let _ = name;
+        match std::process::Command::new(real).args(args).status() {
+            Ok(status) => std::process::exit(status.code().unwrap_or(1)),
+            Err(e) => e,
+        }
+    };
     eprintln!(
         "{}",
         tr!(
@@ -565,13 +604,14 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     for name in SHIMMED {
         let link = shims.join(name);
         let _ = std::fs::remove_file(&link);
-        std::os::unix::fs::symlink(exe, &link)?;
+        crate::symlink(exe, &link)?;
     }
     let readers = base.join("shims-read");
     std::fs::create_dir_all(&readers)?;
     for name in READERS {
         let file = readers.join(name);
         std::fs::write(&file, read_shim(name))?;
+        #[cfg(unix)]
         std::fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
     }
     for (name, tail) in ZSH_FILES {

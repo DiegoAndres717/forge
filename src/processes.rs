@@ -326,7 +326,7 @@ impl Processes {
                     } else if now >= deadline
                         && let Some(t) = m.terminal.as_mut()
                     {
-                        t.kill(libc::SIGKILL);
+                        t.kill(true);
                     }
                 }
                 Status::Waiting { until } if now >= until => to_start.push(m.def.id.clone()),

@@ -112,7 +112,7 @@ fn prepare(account: &Account, home: Option<&Path>) -> Result<(), String> {
     for name in agent.3 {
         let (from, to) = (main.join(name), dir.join(name));
         if from.exists() && to.symlink_metadata().is_err() {
-            std::os::unix::fs::symlink(&from, &to).map_err(|e| e.to_string())?;
+            crate::symlink(&from, &to).map_err(|e| e.to_string())?;
         }
     }
     Ok(())

@@ -209,7 +209,7 @@ impl Snapshot {
             if let Some(parent) = target.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
-            std::os::unix::fs::symlink(self.repo.join(rel), &target)
+            crate::symlink(&self.repo.join(rel), &target)
                 .map_err(|e| format!("{}: {e}", target.display()))?;
         }
         Ok(())

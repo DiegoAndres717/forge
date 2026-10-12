@@ -766,7 +766,6 @@ fn agent_list(out: &Out, project: &Path) -> Result<i32, String> {
 
 /// Sustituye este proceso por el agente, en la raíz del proyecto y con su entorno.
 fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, String> {
-    use std::os::unix::process::CommandExt;
     let id = id.ok_or(tr!("uso: forge agent open <id> [--resume]"))?;
     let agents = forge_core::agents::load(project)?;
     let agent = agents
@@ -781,12 +780,27 @@ fn agent_open(project: &Path, id: Option<&str>, resume: bool) -> Result<i32, Str
     let root = Project::load(project)
         .map(|p| p.root())
         .unwrap_or_else(|_| project.to_path_buf());
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
-    let err = std::process::Command::new(shell)
-        .args(["-l", "-i", "-c", &format!("exec {command}")])
+    #[cfg(unix)]
+    let err = {
+        use std::os::unix::process::CommandExt;
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        std::process::Command::new(shell)
+            .args(["-l", "-i", "-c", &format!("exec {command}")])
+            .current_dir(root)
+            .envs(&agent.environment)
+            .exec()
+    };
+    // Windows no tiene exec: se ejecuta el agente en PowerShell y se sale con su código.
+    #[cfg(not(unix))]
+    let err = match std::process::Command::new("powershell.exe")
+        .args(["-NoLogo", "-Command", &command])
         .current_dir(root)
         .envs(&agent.environment)
-        .exec();
+        .status()
+    {
+        Ok(status) => return Ok(status.code().unwrap_or(1)),
+        Err(e) => e,
+    };
     Err(tr!(
         "no se pudo abrir {p0}: {err}",
         p0 = agent.name,
