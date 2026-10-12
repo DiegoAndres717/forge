@@ -382,7 +382,7 @@ mod unit {
         let r = rules(
             "[commit]\nrequire_lint = true\nrequire_tests = true\n\
              [[checks]]\nid = \"lint\"\ncommand = \"echo lint ok\"\n\
-             [[checks]]\nid = \"tests\"\ncommand = \"echo fallo de prueba; exit 4\"\n\
+             [[checks]]\nid = \"tests\"\ncommand = \"echo 'fallo de prueba'; exit 4\"\n\
              [[checks]]\nid = \"lento\"\ncommand = \"sleep 30\"\ntimeout_seconds = 1\nseverity = \"warning\"\nstages = [\"commit\"]\n",
         );
         let diff = collect_diff(&dir, Stage::Commit, &r, None).unwrap();

@@ -94,7 +94,7 @@ fn commit_blocked_outside_forge_and_exception_is_scoped() {
     let repo = Repo::new("commit");
     repo.write(
         ".forge/rules.toml",
-        "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = \"test -f ok.txt\"\n",
+        "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = \"ls ok.txt\"\n",
     );
     // Hook previo del usuario: debe conservarse y ejecutarse antes.
     std::fs::create_dir_all(repo.dir.join(".git/hooks")).unwrap();
