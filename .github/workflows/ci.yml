@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  build:
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +29,14 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+
+  # La protección de main exige un check llamado «check»: pasa solo si pasan todos los sistemas.
+  check:
+    needs: build
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.build.result }}" = success
 
   audit:
     runs-on: ubuntu-latest
