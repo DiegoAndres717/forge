@@ -1,5 +1,6 @@
 // Abrir el proyecto en un editor instalado (VS Code, Cursor, Antigravity…): clic derecho
-// en el proyecto, ⌘K y Archivo → Abrir en el editor (⌘⇧E). Sin navegador: `open -b`.
+// en el proyecto, ⌘K y Archivo → Abrir en el editor (⌘⇧E). Sin navegador: `open -b` en
+// macOS; en Linux, el comando del editor.
 use std::path::Path;
 
 use eframe::egui;
@@ -53,10 +54,43 @@ pub(super) fn installed() -> &'static [Editor] {
     })
 }
 
-// ponytail: fuera de macOS aún no se buscan editores (vendrá por el PATH).
+/// Fuera de macOS: (nombre, comando que abre una carpeta), buscados en el PATH.
+#[cfg(not(target_os = "macos"))]
+const EDITORS: &[(&str, &str)] = &[
+    ("Visual Studio Code", "code"),
+    ("VS Code Insiders", "code-insiders"),
+    ("Cursor", "cursor"),
+    ("Antigravity", "antigravity"),
+    ("Windsurf", "windsurf"),
+    ("Zed", "zed"),
+    ("Zed", "zeditor"),
+    ("Kiro", "kiro"),
+    ("Sublime Text", "subl"),
+    ("IntelliJ IDEA", "idea"),
+    ("WebStorm", "webstorm"),
+    ("PyCharm", "pycharm"),
+    ("RustRover", "rustrover"),
+];
+
+// ponytail: el PATH con el que arrancó Forge; uno instalado después sale al reiniciar.
 #[cfg(not(target_os = "macos"))]
 pub(super) fn installed() -> &'static [Editor] {
-    &[]
+    use std::sync::OnceLock;
+    static FOUND: OnceLock<Vec<Editor>> = OnceLock::new();
+    FOUND.get_or_init(|| {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        EDITORS
+            .iter()
+            .copied()
+            .filter(|(_, cmd)| on_path(cmd, &path))
+            .collect()
+    })
+}
+
+/// ¿Hay un ejecutable `cmd` en alguna carpeta de `path` (formato de $PATH)?
+#[cfg(any(test, not(target_os = "macos")))]
+fn on_path(cmd: &str, path: &std::ffi::OsStr) -> bool {
+    std::env::split_paths(path).any(|dir| dir.join(cmd).is_file())
 }
 
 /// Icono de la app tal como lo muestra macOS (64 px), como textura; se hace una vez.
@@ -143,11 +177,15 @@ fn pick(saved: Option<&str>, editors: &[Editor]) -> Option<Editor> {
 
 /// Abre la carpeta con el editor y lo recuerda como preferido.
 pub(super) fn open(store: Option<&Store>, bundle: &str, folder: &Path) -> Result<(), String> {
-    std::process::Command::new("open")
-        .args(["-b", bundle])
-        .arg(folder)
-        .spawn()
-        .map_err(|e| e.to_string())?;
+    // En macOS `bundle` es el bundle id; en Linux, el comando del editor.
+    let mut cmd = if cfg!(target_os = "macos") {
+        let mut open = std::process::Command::new("open");
+        open.args(["-b", bundle]);
+        open
+    } else {
+        std::process::Command::new(bundle)
+    };
+    cmd.arg(folder).spawn().map_err(|e| e.to_string())?;
     if let Some(store) = store {
         store.set_setting("editor", bundle)?;
     }
@@ -165,5 +203,16 @@ mod tests {
         assert_eq!(pick(Some("desinstalado"), &editors), Some(("Cursor", "c")));
         assert_eq!(pick(None, &editors), Some(("Cursor", "c")));
         assert_eq!(pick(Some("z"), &[]), None);
+    }
+
+    #[test]
+    fn linux_editors_are_found_by_command_on_path() {
+        let dir = std::env::temp_dir().join(format!("forge-editors-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("zed"), "").unwrap();
+        let path = std::env::join_paths(["/no/such/dir".into(), dir.clone()]).unwrap();
+        assert!(on_path("zed", &path));
+        assert!(!on_path("cursor", &path));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

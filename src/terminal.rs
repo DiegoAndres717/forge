@@ -112,21 +112,6 @@ pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
     std::process::exit(127)
 }
 
-/// Fuera de macOS Forge no usa el trampolín; si alguien lo llama, corre el programa
-/// (`args[1]` es argv0) y sale con su código.
-#[cfg(not(target_os = "macos"))]
-pub fn disclaim_exec(args: &[std::ffi::OsString]) -> ! {
-    let status = args.first().map(|program| {
-        std::process::Command::new(program)
-            .args(args.iter().skip(2))
-            .status()
-    });
-    std::process::exit(match status {
-        Some(Ok(status)) => status.code().unwrap_or(1),
-        _ => 127,
-    })
-}
-
 /// Eventos del terminal que la UI debe atender en su hilo.
 enum UiEvent {
     Title(String),
@@ -260,7 +245,12 @@ impl Terminal {
         command: &str,
         env: &HashMap<String, String>,
     ) -> SpawnResult {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
+        let fallback = if cfg!(target_os = "macos") {
+            "/bin/zsh"
+        } else {
+            "/bin/bash"
+        };
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| fallback.into());
         let mut cmd = CommandBuilder::new(shell);
         cmd.args(["-l", "-i", "-c", command]);
         Self::start(ctx, cwd, env, cmd, None)
@@ -1180,7 +1170,7 @@ impl Terminal {
                         // ⌘+clic abre la URL en el navegador predeterminado.
                         if let Some(url) = hover_url.clone().or_else(|| url_at_point(&term, point))
                         {
-                            let _ = std::process::Command::new("open").arg(url).spawn();
+                            let _ = crate::open_command().arg(url).spawn();
                         }
                     } else {
                         term.selection = Some(Selection::new(SelectionType::Simple, point, side));

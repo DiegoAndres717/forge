@@ -44,6 +44,9 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["NSWind
 objc2-foundation = { version = "0.3", default-features = false, features = ["NSGeometry", "NSString", "NSURL"] }
 muda = { version = "0.17", default-features = false }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = "4.18.2"
+
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot", "eframe"] }
 rusqlite.workspace = true

@@ -126,6 +126,15 @@ fn term_variants(
     })
 }
 
+/// Abre archivos y URLs con la app predeterminada: `open` en macOS, `xdg-open` en Linux.
+pub fn open_command() -> std::process::Command {
+    std::process::Command::new(if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    })
+}
+
 pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
     let load = |path: &PathBuf, index: u32| {
         std::fs::read(path)
@@ -212,8 +221,9 @@ fn main() -> eframe::Result {
     {
         forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
     }
-    // Trampolín de cada terminal: se convierte en su shell (antes de cargar nada).
+    // Trampolín de cada terminal en macOS: se convierte en su shell (antes de cargar nada).
     let raw: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    #[cfg(target_os = "macos")]
     if raw.first().is_some_and(|a| a == terminal::DISCLAIM) {
         terminal::disclaim_exec(&raw[1..]);
     }

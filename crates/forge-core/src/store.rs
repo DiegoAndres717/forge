@@ -40,19 +40,35 @@ pub fn now() -> i64 {
         .map_or(0, |d| d.as_secs() as i64)
 }
 
+/// macOS: `~/Library/Application Support/Forge`. Linux: `$XDG_DATA_HOME/forge`
+/// (o `~/.local/share/forge`).
+fn db_path(home: &Path, xdg_data_home: Option<std::ffi::OsString>, macos: bool) -> PathBuf {
+    if macos {
+        return home.join("Library/Application Support/Forge/forge.db");
+    }
+    xdg_data_home
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| home.join(".local/share"), PathBuf::from)
+        .join("forge/forge.db")
+}
+
 fn path_key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
 impl Store {
-    /// `~/Library/Application Support/Forge/forge.db`
+    /// `~/Library/Application Support/Forge/forge.db` (en Linux, ver `db_path`).
     /// `FORGE_DB` permite otra base (tests, varias instalaciones).
     pub fn default_path() -> Option<PathBuf> {
         if let Some(path) = std::env::var_os("FORGE_DB") {
             return Some(PathBuf::from(path));
         }
         let home = PathBuf::from(std::env::var_os("HOME")?);
-        Some(home.join("Library/Application Support/Forge/forge.db"))
+        Some(db_path(
+            &home,
+            std::env::var_os("XDG_DATA_HOME"),
+            cfg!(target_os = "macos"),
+        ))
     }
 
     pub fn open(path: &Path) -> Result<Self> {
@@ -524,6 +540,23 @@ pub fn ago(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_database_lives_where_each_system_keeps_app_data() {
+        let home = Path::new("/home/ana");
+        assert_eq!(
+            db_path(home, None, true),
+            home.join("Library/Application Support/Forge/forge.db")
+        );
+        assert_eq!(
+            db_path(home, None, false),
+            home.join(".local/share/forge/forge.db")
+        );
+        assert_eq!(
+            db_path(home, Some("/data".into()), false),
+            Path::new("/data/forge/forge.db")
+        );
+    }
 
     #[test]
     fn workspace_round_trip_and_recents() {
