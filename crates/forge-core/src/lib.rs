@@ -70,6 +70,37 @@ pub fn powershell() -> &'static std::path::Path {
     })
 }
 
+/// Busca `program` en las carpetas de `path` (formato de $PATH) probando cada extensión de
+/// `exts` (en Windows, las de PATHEXT: `claude` → `claude.exe`, `code` → `code.cmd`).
+pub fn find_in_path(
+    program: &str,
+    path: &std::ffi::OsStr,
+    exts: &[&str],
+) -> Option<std::path::PathBuf> {
+    std::env::split_paths(path)
+        .flat_map(|dir| {
+            exts.iter()
+                .map(move |ext| dir.join(format!("{program}{ext}")))
+        })
+        .find(|p| p.is_file())
+}
+
+/// Un programa en el PATH de Windows, con las extensiones de PATHEXT.
+#[cfg(windows)]
+pub fn which(program: &str) -> Option<std::path::PathBuf> {
+    let exts = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    let exts: Vec<&str> = std::iter::once("").chain(exts.split(';')).collect();
+    find_in_path(program, &std::env::var_os("PATH")?, &exts)
+}
+
+/// Carpeta personal: HOME (macOS, Linux) o, en Windows, USERPROFILE.
+pub fn home_dir() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .filter(|h| !h.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
 /// Enlace simbólico a un archivo o carpeta. En Windows los symlinks piden Modo de
 /// desarrollador o administrador (error 1314); sin ellos, una carpeta se enlaza con un
 /// junction (no pide permisos) y un archivo se copia.
@@ -166,6 +197,26 @@ mod platform_tests {
         // En el PATH.
         let path = std::env::join_paths([dir.clone()]).unwrap();
         assert_eq!(super::pick_powershell(&path, &[]), dir.join("pwsh.exe"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn programs_are_found_with_their_windows_extension() {
+        let dir = std::env::temp_dir().join(format!("forge-which-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("code.cmd"), "").unwrap();
+        std::fs::write(dir.join("git.exe"), "").unwrap();
+        let path = std::env::join_paths(["/no/such/dir".into(), dir.clone()]).unwrap();
+        let exts = [".exe", ".cmd"];
+        assert_eq!(
+            super::find_in_path("code", &path, &exts),
+            Some(dir.join("code.cmd"))
+        );
+        assert_eq!(
+            super::find_in_path("git", &path, &exts),
+            Some(dir.join("git.exe"))
+        );
+        assert_eq!(super::find_in_path("claude", &path, &exts), None);
         std::fs::remove_dir_all(dir).unwrap();
     }
 

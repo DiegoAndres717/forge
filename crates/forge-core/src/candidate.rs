@@ -245,7 +245,9 @@ mod tests {
                 "{c}"
             )
         };
-        sh("git init -q -b main && git config user.email t@t && git config user.name t");
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
         sh(
             "printf 'node_modules/\\n.env\\n' > .gitignore && echo v0 > a.txt && git add . && git commit -qm inicio",
         );

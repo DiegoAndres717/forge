@@ -871,9 +871,13 @@ pub(crate) fn run_check(
     env: &std::collections::HashMap<String, String>,
     cancel: &AtomicBool,
 ) -> (CheckState, String) {
-    // stderr junto a stdout, para mostrar el error del comando.
+    // stderr junto a stdout, para mostrar el error del comando. En PowerShell, el código de
+    // salida: el del último programa si falló (npm, tsc…) o 1 si falló un comando suyo.
     let script = if cfg!(windows) {
-        format!("& {{ {} }} 2>&1", check.command)
+        format!(
+            "$global:LASTEXITCODE = 0\n{}\n$ok = $?; $code = $LASTEXITCODE\nif ($code) {{ exit $code }}\nif (-not $ok) {{ exit 1 }}",
+            check.command
+        )
     } else {
         format!("{{ {}\n}} 2>&1", check.command)
     };
@@ -893,16 +897,30 @@ pub(crate) fn run_check(
         .env("FORCE_COLOR", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        // Windows: los errores de PowerShell y de los programas van a stderr (sin `2>&1`, que
+        // en PowerShell cambia cómo se ven y el código de salida); se juntan tras la salida.
+        .stderr(if cfg!(windows) {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .spawn();
     let mut child = match child {
         Ok(c) => c,
         Err(e) => return (CheckState::Error(e.to_string()), String::new()),
     };
     let mut stdout = child.stdout.take().expect("stdout con pipe");
+    let mut stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.read_to_end(&mut buf);
+        buf
+    });
+    let errors = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(stderr) = stderr.as_mut() {
+            let _ = stderr.read_to_end(&mut buf);
+        }
         buf
     });
 
@@ -938,7 +956,8 @@ pub(crate) fn run_check(
         }
         std::thread::sleep(Duration::from_millis(50));
     };
-    let output = reader.join().unwrap_or_default();
+    let mut output = reader.join().unwrap_or_default();
+    output.extend(errors.join().unwrap_or_default());
     (
         state,
         tail(&crate::strip_ansi(&String::from_utf8_lossy(&output)), 80),

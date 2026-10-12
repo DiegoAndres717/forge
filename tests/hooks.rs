@@ -16,7 +16,7 @@ impl Repo {
         let dir = base.join("repo");
         std::fs::create_dir_all(dir.join(".forge")).unwrap();
         let repo = Self {
-            dir: dir.canonicalize().unwrap(),
+            dir: real(&dir),
             db: base.join("forge.db"),
         };
         repo.ok("git", &["init", "-q", "-b", "main"]);
@@ -219,6 +219,10 @@ fn secrets_and_push_are_blocked() {
 /// Fase 7: validar una vez y hacer commit reutiliza la evidencia del mismo candidato,
 /// y los checks prueban lo que se commitea aunque haya cambios sin preparar.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "its checks are sh commands (grep, single quotes); port to Windows: plan #11"
+)]
 fn hook_reuses_evidence_of_same_candidate() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -267,6 +271,10 @@ fn hook_reuses_evidence_of_same_candidate() {
 
 /// Fase 9: revisión con IA en el hook, con proveedores simulados (sin gastar).
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+)]
 fn ai_review_in_hook_with_fake_providers() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -321,6 +329,10 @@ fn ai_review_in_hook_with_fake_providers() {
 
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+)]
 fn specialist_reviewers_by_path() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -411,4 +423,12 @@ fn specialist_reviewers_by_path() {
             && passed.contains("Comparación de revisores: coinciden"),
         "{passed}"
     );
+}
+
+/// La ruta real, sin el prefijo `\\?\` que `canonicalize` añade en Windows (git no lo acepta).
+fn real(path: &std::path::Path) -> std::path::PathBuf {
+    let path = path.canonicalize().unwrap();
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\")
+        .map_or_else(|| path.clone(), std::path::PathBuf::from)
 }

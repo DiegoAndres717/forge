@@ -545,9 +545,10 @@ pub struct Detection {
     pub version: Option<String>,
 }
 
-/// Busca los programas en el PATH del shell de login interactivo del usuario (la app
-/// abierta desde el Finder no tiene ese PATH) y obtiene sus versiones en paralelo.
-pub fn detect(programs: &[String]) -> HashMap<String, Detection> {
+/// Dónde está cada programa: en el PATH del shell de login interactivo del usuario (la app
+/// abierta desde el Finder no tiene ese PATH).
+#[cfg(unix)]
+fn lookup(programs: &[String]) -> HashMap<String, PathBuf> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".into());
     let list = programs
         .iter()
@@ -561,8 +562,21 @@ pub fn detect(programs: &[String]) -> HashMap<String, Detection> {
         Command::new(&shell).args(["-l", "-i", "-c", &script]),
         Duration::from_secs(10),
     );
-    let paths = parse_lookup(&output.unwrap_or_default());
+    parse_lookup(&output.unwrap_or_default())
+}
 
+/// Windows: en el PATH, con las extensiones de PATHEXT (`claude.exe`, `codex.cmd`…).
+#[cfg(windows)]
+fn lookup(programs: &[String]) -> HashMap<String, PathBuf> {
+    programs
+        .iter()
+        .filter_map(|p| Some((p.clone(), crate::which(p)?)))
+        .collect()
+}
+
+/// Busca los programas y obtiene sus versiones en paralelo.
+pub fn detect(programs: &[String]) -> HashMap<String, Detection> {
+    let paths = lookup(programs);
     let threads: Vec<_> = programs
         .iter()
         .map(|program| {
@@ -589,6 +603,8 @@ pub(crate) fn shell_quote(s: &str) -> String {
 
 /// Líneas `FORGE_AGENT\t<programa>\t<ruta>` entre el resto de la salida del shell
 /// (que puede incluir mensajes del perfil del usuario).
+// En Windows se busca sin shell (`which`).
+#[cfg_attr(windows, allow(dead_code))]
 fn parse_lookup(output: &str) -> HashMap<String, PathBuf> {
     output
         .lines()
@@ -848,8 +864,9 @@ mod tests {
     /// Detección real en esta máquina (sh siempre existe; un nombre inventado no).
     #[test]
     fn detects_real_programs() {
-        let found = detect(&["sh".into(), "forge-no-existe-xyz".into()]);
-        assert!(found["sh"].path.is_some());
+        // git está en el PATH de los tres sistemas (y del CI).
+        let found = detect(&["git".into(), "forge-no-existe-xyz".into()]);
+        assert!(found["git"].path.is_some());
         assert!(found["forge-no-existe-xyz"].path.is_none());
     }
 

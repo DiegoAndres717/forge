@@ -32,8 +32,8 @@ const SECRET_CASE: &str = "*.env|*.env.*|*/.ssh/*|*.pem|*.key|*.p12|*.pfx|*id_rs
 /// Si `arg` (relativo a `cwd`, con `~`) es un archivo con secretos, cuál.
 pub fn secret_file(arg: &str, cwd: &Path) -> Option<String> {
     let arg = arg.trim_matches(|c| c == '\'' || c == '"');
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    let path = match (arg.strip_prefix("~/"), &home) {
+    let home = crate::home_dir();
+    let path = match (arg.strip_prefix("~/").or(arg.strip_prefix("~\\")), &home) {
         (Some(rest), Some(h)) => h.join(rest),
         _ => cwd.join(arg),
     };
