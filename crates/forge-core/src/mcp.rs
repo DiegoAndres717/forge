@@ -70,7 +70,7 @@ pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to thre
 
 fn instructions(modes: Modes) -> String {
     let mut out = String::from(
-        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress, tick tasks as you finish them and mark the phase done at the end.",
+        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress, tick tasks as you finish them and mark the phase done at the end.",
     );
     out.push_str("\n\n");
     out.push_str(DELEGATE);
