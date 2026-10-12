@@ -869,8 +869,8 @@ mod orphan_tests {
         }
     }
 
-    /// Windows: lo que lanza el proceso (un `ping` largo con Start-Process) también se cierra
-    /// con él, aunque no sea hijo directo del shell.
+    /// Windows: lo que lanza el proceso también se cierra con él, aunque tenga su propia
+    /// consola (un `ping` oculto con Start-Process): a ese no lo para cerrar la de la terminal.
     #[cfg(windows)]
     #[test]
     fn drop_kills_child_processes_on_windows() {
@@ -880,7 +880,7 @@ mod orphan_tests {
         let def = ProcessDef {
             id: "bg".into(),
             name: None,
-            command: "$p = Start-Process ping -ArgumentList '-n','300','127.0.0.1' -NoNewWindow -PassThru; \
+            command: "$p = Start-Process ping -ArgumentList '-n','300','127.0.0.1' -WindowStyle Hidden -PassThru; \
                       Set-Content $env:FORGE_TEST_PID_FILE $p.Id; Start-Sleep 300"
                 .into(),
             working_directory: None,
