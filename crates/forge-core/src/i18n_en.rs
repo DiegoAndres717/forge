@@ -1911,6 +1911,7 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Quitar agente", "Remove agent"),
     ("Abrir", "Open"),
+    ("Elige la carpeta del proyecto", "Choose the project folder"),
     ("p. ej. aider --model sonnet", "e.g. aider --model sonnet"),
     (
         "Cómo se abre en la terminal; puedes añadir opciones, p. ej. claude --model opus",

@@ -130,7 +130,11 @@ pub(super) fn sounds() -> &'static [String] {
 }
 
 /// Suena sin esperar (afplay respeta el volumen; la notificación va muda).
+// ponytail: solo macOS; en Linux la lista de sonidos sale vacía y no se llega aquí.
 pub(super) fn play(sound: &str, volume: f32) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
     let path = Path::new(SOUNDS).join(format!("{sound}.aiff"));
     let volume = format!("{:.2}", volume.clamp(0.0, 1.0));
     std::thread::spawn(move || {

@@ -631,13 +631,26 @@ impl App {
         let (tx, rx) = channel();
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            // ponytail: diálogo de macOS vía osascript; Windows (Fase 12) usará otro.
-            let output = std::process::Command::new("osascript")
-                .args([
-                    "-e",
-                    "POSIX path of (choose folder with prompt \"Elige la carpeta del proyecto\")",
-                ])
-                .output();
+            // ponytail: diálogo de macOS vía osascript; en Linux zenity (GNOME) o kdialog (KDE),
+            // si no hay ninguno se escribe la ruta. Windows (Fase 12) usará otro.
+            let prompt = tr!("Elige la carpeta del proyecto");
+            let output = if cfg!(target_os = "macos") {
+                std::process::Command::new("osascript")
+                    .args([
+                        "-e",
+                        &format!("POSIX path of (choose folder with prompt \"{prompt}\")"),
+                    ])
+                    .output()
+            } else {
+                std::process::Command::new("zenity")
+                    .args(["--file-selection", "--directory", "--title", prompt])
+                    .output()
+                    .or_else(|_| {
+                        std::process::Command::new("kdialog")
+                            .args(["--getexistingdirectory", ".", "--title", prompt])
+                            .output()
+                    })
+            };
             let path = output
                 .ok()
                 .filter(|o| o.status.success())
