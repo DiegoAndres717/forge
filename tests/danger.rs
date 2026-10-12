@@ -26,8 +26,12 @@ fn setup(name: &str) -> Env {
     vars.insert("FORGE_APP_PID".into(), std::process::id().to_string());
     vars.insert("FORGE_PROJECT".into(), repo.to_string_lossy().into_owned());
     vars.insert("FORGE_ORIGIN".into(), "Claude Code".into());
-    let path = format!("{}:{}", vars["FORGE_SHIMS"], std::env::var("PATH").unwrap());
-    vars.insert("PATH".into(), path);
+    let path = std::env::join_paths(
+        std::iter::once(std::path::PathBuf::from(&vars["FORGE_SHIMS"]))
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    vars.insert("PATH".into(), path.to_string_lossy().into_owned());
     vars.remove("ZDOTDIR");
     let e = Env { base, repo, vars };
     assert!(sh(&e, "git init -q -b main && git config user.email t@t && git config user.name t && echo v1 > a.txt && git add . && git commit -qm inicio").status.success());
@@ -70,10 +74,6 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
-)]
 fn dangerous_commands_wait_for_authorization() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -114,10 +114,6 @@ fn dangerous_commands_wait_for_authorization() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
-)]
 fn without_forge_open_and_no_terminal_it_is_blocked() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
