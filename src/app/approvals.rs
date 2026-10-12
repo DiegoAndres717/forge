@@ -77,15 +77,30 @@ impl App {
             .origin
             .as_deref()
             .unwrap_or(tr!("Una terminal de Forge"));
-        ui.label(
-            RichText::new(tr!(
+        // Un lector (`cat`, `grep`…) solo pide permiso por un archivo con secretos.
+        let reading = request
+            .command
+            .split_whitespace()
+            .next()
+            .is_some_and(|p| forge_core::danger::READERS.contains(&p));
+        let title = if reading {
+            tr!(
+                "{p0}  {who} quiere leer un archivo con secretos",
+                p0 = icon::KEY,
+                who = who
+            )
+        } else {
+            tr!(
                 "{p0}  {who} quiere ejecutar un comando peligroso",
                 p0 = icon::WARNING,
                 who = who
-            ))
-            .size(15.0)
-            .strong()
-            .color(theme::ORANGE),
+            )
+        };
+        ui.label(
+            RichText::new(title)
+                .size(15.0)
+                .strong()
+                .color(theme::ORANGE),
         );
         ui.add_space(6.0);
         egui::Frame::new()

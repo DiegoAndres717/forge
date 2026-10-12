@@ -19,6 +19,54 @@ use serde::{Deserialize, Serialize};
 /// Programas interceptados.
 pub const SHIMMED: [&str; 7] = ["rm", "git", "docker", "psql", "mysql", "mariadb", "dropdb"];
 
+/// Lectores de archivos que, en las terminales de agente, piden permiso antes de leer
+/// secretos. Son guiones de `sh` mínimos (ver `read_shim`): arrancar Forge en cada
+/// `grep` de un script costaría ~10 ms; así solo se llama a Forge si un argumento lo pide.
+pub const READERS: [&str; 10] = [
+    "cat", "head", "tail", "less", "more", "bat", "grep", "rg", "sed", "awk",
+];
+
+/// Patrones de `case` (sh) de los argumentos que pueden ser archivos con secretos: un
+/// filtro rápido; quien decide es `secret_file`.
+const SECRET_CASE: &str = "*.env|*.env.*|*/.ssh/*|*.pem|*.key|*.p12|*.pfx|*id_rsa*|*id_ed25519*|*id_ecdsa*|*.netrc|*.pgpass|*.npmrc|*.pypirc|*credentials*|*/.aws/*|*/.gnupg/*|*/.kube/*|*/.docker/config.json|*/gh/hosts.yml|*/gcloud/*|*.keychain-db|*.kdbx";
+
+/// Si `arg` (relativo a `cwd`, con `~`) es un archivo con secretos, cuál.
+pub fn secret_file(arg: &str, cwd: &Path) -> Option<String> {
+    let arg = arg.trim_matches(|c| c == '\'' || c == '"');
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let path = match (arg.strip_prefix("~/"), &home) {
+        (Some(rest), Some(h)) => h.join(rest),
+        _ => cwd.join(arg),
+    };
+    let name = path.file_name()?.to_str()?;
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    let under = |dir: &str| home.as_ref().is_some_and(|h| path.starts_with(h.join(dir)));
+    let secret = ((name == ".env" || name.starts_with(".env.")) && !crate::guard::env_allowed(name))
+        || ["pem", "key", "p12", "pfx", "keychain-db", "kdbx"].contains(&ext)
+        || [
+            "id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", ".netrc", ".pgpass", ".npmrc",
+            ".pypirc", "credentials", "credentials.json",
+        ]
+        .contains(&name)
+        // ~/.ssh salvo lo público (claves .pub, known_hosts, config).
+        || (under(".ssh") && ext != "pub" && !["known_hosts", "config"].contains(&name))
+        || [".aws", ".gnupg", ".kube", ".config/gcloud"].iter().any(|d| under(d))
+        || under(".docker/config.json")
+        || under(".config/gh/hosts.yml");
+    secret.then(|| tr!("lee un archivo con secretos ({p0})", p0 = arg))
+}
+
+/// Un comando de shell que menciona un archivo con secretos (para el mod de Claude Code).
+pub fn secret_in_command(command: &str, cwd: &Path) -> Option<String> {
+    command
+        .split(|c: char| c.is_whitespace() || ";|&<>()=".contains(c))
+        .filter(|w| !w.is_empty() && !w.starts_with('-'))
+        .find_map(|w| secret_file(w, cwd))
+}
+
 /// Lo que espera un comando a que el usuario responda (menos que el límite de 2 min de
 /// las herramientas de shell de los agentes, para que vean el rechazo y no un tiempo agotado).
 const WAIT: Duration = Duration::from_secs(110);
@@ -296,6 +344,52 @@ pub fn shim_main(name: &str, args: Vec<String>) -> ! {
         .then(|| classify(name, &args, &cwd, project.as_deref()))
         .flatten()
     {
+        authorize(name, &args, reason, cwd, project);
+    }
+    exec_real(&real, name, &args)
+}
+
+/// Un lector (`cat`, `grep`…) de una terminal de agente vio un argumento sospechoso
+/// (`forge --secret-read <programa> [args…]`): si de verdad es un archivo con secretos,
+/// pide permiso; luego ejecuta el programa real.
+pub fn secret_read_main(args: Vec<String>) -> ! {
+    let Some((name, args)) = args.split_first() else {
+        std::process::exit(127);
+    };
+    let shims = std::env::var_os("FORGE_READ_SHIMS").map(PathBuf::from);
+    let Some(real) = real_program(name, shims.as_deref()) else {
+        eprintln!(
+            "{}",
+            tr!("Forge: no se encontró `{name}` en el PATH", name = name)
+        );
+        std::process::exit(127);
+    };
+    let cwd = std::env::current_dir().unwrap_or_default();
+    // Solo lo que lanza un agente; lo que escribe la persona en su terminal no se frena.
+    let agent = std::env::var_os("FORGE_ORIGIN").is_some();
+    let found = agent
+        .then(|| {
+            args.iter()
+                .filter(|a| !a.starts_with('-'))
+                .find_map(|a| secret_file(a, &cwd))
+        })
+        .flatten();
+    if found.is_some() {
+        crate::i18n::init_from_store();
+        let reason = args
+            .iter()
+            .filter(|a| !a.starts_with('-'))
+            .find_map(|a| secret_file(a, &cwd))
+            .unwrap_or_default();
+        let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+        authorize(name, args, reason, cwd, project);
+    }
+    exec_real(&real, name, args)
+}
+
+/// Pide autorización a Forge (o en la terminal) y sale si se rechaza.
+fn authorize(name: &str, args: &[String], reason: String, cwd: PathBuf, project: Option<PathBuf>) {
+    {
         let mut command = vec![name.to_string()];
         command.extend(args.iter().cloned());
         let request = Request {
@@ -343,9 +437,12 @@ pub fn shim_main(name: &str, args: Vec<String>) -> ! {
             }
         }
     }
-    let err = std::process::Command::new(&real)
+}
+
+fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
+    let err = std::process::Command::new(real)
         .arg0(name)
-        .args(&args)
+        .args(args)
         .exec();
     eprintln!(
         "{}",
@@ -386,6 +483,33 @@ const ZSH_PROMPT: &str = r#"if [[ -o interactive && -n $TTY ]]; then
 fi
 "#;
 
+/// Lector de una terminal de agente: solo si algún argumento parece un archivo con
+/// secretos llama a Forge; si no, ejecuta el programa de siempre (sin estos guiones en
+/// el PATH, para no volver a entrar).
+fn read_shim(name: &str) -> String {
+    // Solo sh y sus órdenes internas: `sed` o `dirname` también podrían ser lectores.
+    format!(
+        r#"#!/bin/sh
+# Generado por Forge: pide permiso antes de que un agente lea secretos.
+if [ -n "$FORGE_BIN" ]; then
+  for a in "$@"; do
+    case "$a" in
+      {SECRET_CASE}) exec "$FORGE_BIN" --secret-read {name} "$@" ;;
+    esac
+  done
+fi
+here=${{0%/*}}
+IFS=:
+for d in $PATH; do
+  [ "$d" = "$here" ] && continue
+  [ -x "$d/{name}" ] && exec "$d/{name}" "$@"
+done
+echo "forge: {name} not found" >&2
+exit 127
+"#
+    )
+}
+
 fn zsh_file(name: &str, tail: &str) -> String {
     let mut s = format!(
         "# Generado por Forge: carga el {name} del usuario.\n\
@@ -399,6 +523,8 @@ fn zsh_file(name: &str, tail: &str) -> String {
     );
     if tail == "forge_path" {
         s += "path=($FORGE_SHIMS ${path:#$FORGE_SHIMS})\n";
+        // Terminales de agente: los lectores que piden permiso antes de leer secretos.
+        s += "[[ -n $FORGE_ORIGIN ]] && path=($FORGE_READ_SHIMS ${path:#$FORGE_READ_SHIMS})\n";
     }
     if name == ".zshrc" {
         s += ZSH_PROMPT;
@@ -425,11 +551,22 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         let _ = std::fs::remove_file(&link);
         std::os::unix::fs::symlink(exe, &link)?;
     }
+    let readers = base.join("shims-read");
+    std::fs::create_dir_all(&readers)?;
+    for name in READERS {
+        let file = readers.join(name);
+        std::fs::write(&file, read_shim(name))?;
+        std::fs::set_permissions(&file, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+    }
     for (name, tail) in ZSH_FILES {
         std::fs::write(zsh.join(name), zsh_file(name, tail))?;
     }
     let mut env = HashMap::from([
         ("FORGE_SHIMS".into(), shims.to_string_lossy().into_owned()),
+        (
+            "FORGE_READ_SHIMS".into(),
+            readers.to_string_lossy().into_owned(),
+        ),
         (
             "FORGE_APPROVALS".into(),
             approvals.to_string_lossy().into_owned(),
@@ -462,6 +599,41 @@ mod tests {
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn knows_which_files_hold_secrets() {
+        let cwd = Path::new("/p/app");
+        let secret = |a: &str| secret_file(a, cwd).is_some();
+        for yes in [
+            ".env",
+            ".env.local",
+            "config/.env.production",
+            "'.env'",
+            "certs/server.key",
+            "id_ed25519",
+            "~/.ssh/id_rsa",
+            "~/.aws/credentials",
+            "~/.config/gh/hosts.yml",
+            "~/.npmrc",
+        ] {
+            assert!(secret(yes), "{yes} tiene secretos");
+        }
+        for no in [
+            ".env.example",
+            ".env.template",
+            "src/env.rs",
+            "~/.ssh/id_ed25519.pub",
+            "~/.ssh/known_hosts",
+            "keys.md",
+            "README.md",
+        ] {
+            assert!(!secret(no), "{no} no tiene secretos");
+        }
+        assert!(secret_in_command("cat .env | grep TOKEN", cwd).is_some());
+        assert!(secret_in_command("source ./.env.local && npm run dev", cwd).is_some());
+        assert!(secret_in_command("cat .env.example", cwd).is_none());
+        assert!(secret_in_command("cargo test --features env", cwd).is_none());
     }
 
     #[test]

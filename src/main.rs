@@ -192,6 +192,14 @@ fn main() -> eframe::Result {
     if raw.first().is_some_and(|a| a == terminal::DISCLAIM) {
         terminal::disclaim_exec(&raw[1..]);
     }
+    // Un lector (`cat`, `grep`…) de una terminal de agente con un posible secreto.
+    if raw.first().is_some_and(|a| a == "--secret-read") {
+        let args = raw[1..]
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        forge_core::danger::secret_read_main(args);
+    }
     // Idioma: el guardado por el usuario; si no, inglés.
     forge_core::i18n::init_from_store();
     // `forge [carpeta]` abre (o activa) ese proyecto.
@@ -216,10 +224,7 @@ fn main() -> eframe::Result {
             );
             return Ok(());
         }
-        Some(
-            "guard" | "hooks" | "agent" | "doctor" | "ai" | "mcp" | "memory" | "ideas" | "plans"
-            | "handoff" | "status" | "context",
-        ) => std::process::exit(cli::run(&args)),
+        Some(command) if cli::COMMANDS.contains(&command) => std::process::exit(cli::run(&args)),
         Some("help" | "--help" | "-h") => {
             print!("{}", cli::usage());
             return Ok(());

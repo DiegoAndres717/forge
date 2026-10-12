@@ -2378,4 +2378,12 @@ pub const EN: &[(&str, &str)] = &[
         "Abre una sesión nueva de {p0} que empieza con un resumen de la última (lo hecho, lo pendiente y los archivos tocados). Con conversaciones largas el agente se pierde en lo del medio; así arranca con poco contexto y lo importante delante.",
         "Opens a new {p0} session that starts with a summary of the last one (what was done, what's left and the files touched). In long conversations the agent loses track of what's in the middle; this way it starts with little context and the important part up front.",
     ),
+    (
+        "{p0}  {who} quiere leer un archivo con secretos",
+        "{p0}  {who} wants to read a file with secrets",
+    ),
+    (
+        "lee un archivo con secretos ({p0})",
+        "reads a file with secrets ({p0})",
+    ),
 ];

@@ -388,3 +388,24 @@ test('the band warns when the context is getting full', async ($, on) => {
   expect(drawn).toContain('context 78%')
   expect(drawn).toContain('/compact')
 })
+
+test('reading a file with secrets asks first; other files keep their verdict', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    const secret = e.argv.some(a => a.includes('.env') && !a.includes('.example'))
+    return { value: { exitCode: secret ? 0 : 1, stdout: secret ? 'lee un archivo con secretos (.env)' : '', stderr: '' } } as never
+  })
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  const check = (tool: string, input: object) => $.tool.check({ tool, input } as never)
+  const env = await check('Read', { file_path: '/p/.env' })
+  expect(env.decision).toBe('ask')
+  expect(env.reason).toContain('.env')
+  expect((await check('Bash', { command: 'grep KEY .env' })).decision).toBe('ask')
+  expect((await check('Read', { file_path: '/p/.env.example' })).decision).toBe('allow')
+  // No hint in the path: Forge isn't even asked.
+  const before = asked.length
+  expect((await check('Read', { file_path: '/p/src/main.rs' })).decision).toBe('allow')
+  expect(asked.length).toBe(before)
+})
