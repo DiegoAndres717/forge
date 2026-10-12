@@ -868,4 +868,55 @@ mod orphan_tests {
             std::thread::sleep(Duration::from_millis(50));
         }
     }
+
+    /// Windows: lo que lanza el proceso (un `ping` largo con Start-Process) también se cierra
+    /// con él, aunque no sea hijo directo del shell.
+    #[cfg(windows)]
+    #[test]
+    fn drop_kills_child_processes_on_windows() {
+        let ctx = egui::Context::default();
+        let pid_file = std::env::temp_dir().join(format!("forge-job-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let def = ProcessDef {
+            id: "bg".into(),
+            name: None,
+            command: "$p = Start-Process ping -ArgumentList '-n','300','127.0.0.1' -NoNewWindow -PassThru; \
+                      Set-Content $env:FORGE_TEST_PID_FILE $p.Id; Start-Sleep 300"
+                .into(),
+            working_directory: None,
+            environment: HashMap::from([(
+                "FORGE_TEST_PID_FILE".into(),
+                pid_file.to_string_lossy().into_owned(),
+            )]),
+            restart: Default::default(),
+            auto_restart: AutoRestart::Never,
+            health_check: None,
+        };
+        let alive = |pid: &str| {
+            let out = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).contains(pid)
+        };
+        let mut p = Processes::new(&[def], std::env::temp_dir(), HashMap::new());
+        p.start(&ctx, "bg");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let pid = loop {
+            if let Ok(pid) = std::fs::read_to_string(&pid_file)
+                && !pid.trim().is_empty()
+            {
+                break pid.trim().to_string();
+            }
+            assert!(Instant::now() < deadline, "no arrancó");
+            std::thread::sleep(Duration::from_millis(100));
+        };
+        assert!(alive(&pid), "el ping {pid} no está vivo");
+        drop(p);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while alive(&pid) {
+            assert!(Instant::now() < deadline, "el ping {pid} quedó huérfano");
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
 }
