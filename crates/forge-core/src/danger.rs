@@ -636,7 +636,8 @@ fn zsh_file(name: &str, tail: &str) -> String {
 /// Windows: `<nombre>.exe` como enlace duro de `exe` (ni symlinks, que piden Modo de
 /// desarrollador, ni copias de 50 MB). Uno igual se deja; uno en uso se aparta con otro
 /// nombre (Windows deja renombrar un .exe abierto, no borrarlo) y se borra en otro arranque.
-/// Si no se puede enlazar (otro disco), ese comando queda sin vigilar y se avisa.
+/// Un enlace duro no cruza discos (Forge en D:, el perfil en C:): entonces se hace una sola
+/// copia de Forge en `shims/` y los comandos se enlazan a ella. Si ni así, se avisa.
 #[cfg(windows)]
 fn windows_shims(shims: &Path, exe: &Path) {
     for entry in std::fs::read_dir(shims).into_iter().flatten().flatten() {
@@ -650,24 +651,47 @@ fn windows_shims(shims: &Path, exe: &Path) {
             .map(|m| (m.len(), m.modified().ok()))
     };
     let forge = stamp(exe);
+    // Copia local para otro disco (CopyFile conserva la fecha: el sello coincide con `exe`).
+    let local = shims.join("forge-shim.exe");
+    let mut source = exe.to_path_buf();
     for name in SHIMMED {
         let link = shims.join(format!("{name}.exe"));
         if link.exists() && stamp(&link) == forge {
             continue;
         }
-        if link.exists() && std::fs::remove_file(&link).is_err() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis());
-            let _ = std::fs::rename(&link, shims.join(format!("{name}.exe.old-{now}")));
+        let mut linked = make_room(&link).and_then(|()| std::fs::hard_link(&source, &link));
+        if linked.is_err() && source == exe {
+            let copied = if stamp(&local) == forge {
+                Ok(())
+            } else {
+                make_room(&local).and_then(|()| std::fs::copy(exe, &local).map(|_| ()))
+            };
+            if copied.is_ok() {
+                source = local.clone();
+                linked = std::fs::hard_link(&source, &link);
+            }
         }
-        if let Err(e) = std::fs::hard_link(exe, &link) {
+        if let Err(e) = linked {
             eprintln!(
                 "forge: sin control de `{name}` (no se pudo enlazar {}): {e}",
                 link.display()
             );
         }
     }
+}
+
+/// Deja libre `path`: lo borra o, si está en uso, lo aparta como `<nombre>.old-<ms>`.
+#[cfg(windows)]
+fn make_room(path: &Path) -> std::io::Result<()> {
+    if !path.exists() || std::fs::remove_file(path).is_ok() {
+        return Ok(());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let mut old = path.as_os_str().to_owned();
+    old.push(format!(".old-{now}"));
+    std::fs::rename(path, old)
 }
 
 /// Crea `shims/` (enlaces a `exe`), `zsh/` y `bash/` dentro de `base` y devuelve las variables para
