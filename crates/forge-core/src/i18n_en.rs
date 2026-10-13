@@ -1101,6 +1101,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Terminal", "Terminal"),
     ("Tamaño de letra", "Font size"),
     ("Tecla Option", "Option key"),
+    ("Tecla Alt", "Alt key"),
+    ("Restaurar (⌘Enter)", "Restore (⌘Enter)"),
+    ("Maximizar (⌘Enter)", "Maximize (⌘Enter)"),
     (
         "Como Meta (atajos de terminal: ⌥B, ⌥F…)",
         "As Meta (terminal shortcuts: ⌥B, ⌥F…)",

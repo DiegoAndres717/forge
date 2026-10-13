@@ -2356,9 +2356,9 @@ impl Workspace {
         }
         if self.panels.len() > 1 {
             let (glyph, hint) = if self.maximized == Some(id) {
-                (icon::ARROWS_IN, "Restaurar (⌘Enter)")
+                (icon::ARROWS_IN, tr!("Restaurar (⌘Enter)"))
             } else {
-                (icon::ARROWS_OUT, "Maximizar (⌘Enter)")
+                (icon::ARROWS_OUT, tr!("Maximizar (⌘Enter)"))
             };
             if button(glyph, hint, "maximize") {
                 actions.push(HeaderAction::Maximize);

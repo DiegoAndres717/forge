@@ -145,6 +145,7 @@ impl App {
     fn palette_entries(&self) -> Vec<Entry> {
         let mut out = Vec::new();
         let mut add = |icon, label: String, hint: &str, run| {
+            let hint = &*forge_core::i18n::keys(hint);
             // Detalles largos (rutas) se recortan por la izquierda para no tapar el nombre.
             let chars: Vec<char> = hint.chars().collect();
             let hint = if chars.len() > 36 {

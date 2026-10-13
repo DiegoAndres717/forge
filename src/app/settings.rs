@@ -247,7 +247,11 @@ impl App {
             );
             row(
                 ui,
-                tr!("Tecla Option"),
+                if cfg!(target_os = "macos") {
+                    tr!("Tecla Option")
+                } else {
+                    tr!("Tecla Alt")
+                },
                 tr!(
                     "Actívalo para usar ⌥ como Meta en la terminal (⌥B y ⌥F saltan palabras). Desactívalo si usas ⌥ para escribir caracteres como @ o #."
                 ),

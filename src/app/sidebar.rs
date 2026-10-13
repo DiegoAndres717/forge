@@ -50,7 +50,7 @@ impl App {
                     icon::HOUSE,
                     theme::TEXT_2,
                     tr!("Inicio"),
-                    "⌘⇧H",
+                    &forge_core::i18n::keys("⌘⇧H"),
                     self.active.is_none(),
                 )
                 .clicked()
@@ -71,7 +71,9 @@ impl App {
                         _ if attention[i].is_some() => String::new(),
                         _ if dormant => tr!("dormido").to_string(),
                         (n, _) if n > 0 => tr!("{n} en marcha", n = n),
-                        (_, i) if i < 9 => format!("⌘{}", i + 1),
+                        (_, i) if i < 9 => {
+                            forge_core::i18n::keys(&format!("⌘{}", i + 1)).into_owned()
+                        }
                         _ => String::new(),
                     };
                     let (glyph, color) = match (selected, dormant) {
@@ -141,9 +143,16 @@ impl App {
                     } else {
                         tr!("{hidden} más…", hidden = hidden)
                     };
-                    if theme::row(ui, icon::DOTS_THREE, theme::TEXT_3, &label, "⌘K", false)
-                        .on_hover_text(tr!("Todos los proyectos abiertos (o búscalos con ⌘K)"))
-                        .clicked()
+                    if theme::row(
+                        ui,
+                        icon::DOTS_THREE,
+                        theme::TEXT_3,
+                        &label,
+                        &forge_core::i18n::keys("⌘K"),
+                        false,
+                    )
+                    .on_hover_text(tr!("Todos los proyectos abiertos (o búscalos con ⌘K)"))
+                    .clicked()
                     {
                         self.show_all = !self.show_all;
                     }
@@ -153,7 +162,7 @@ impl App {
                     icon::PLUS,
                     theme::TEXT_3,
                     tr!("Abrir carpeta…"),
-                    "⌘O",
+                    &forge_core::i18n::keys("⌘O"),
                     false,
                 )
                 .clicked()
@@ -195,7 +204,7 @@ impl App {
                     &guard_text,
                     ws.guard.open,
                 )
-                .on_hover_text("⌘G")
+                .on_hover_text(forge_core::i18n::keys("⌘G").into_owned())
                 .clicked()
                 {
                     cmds.push(UiCmd::ToggleGuard);
@@ -221,7 +230,7 @@ impl App {
                     &changes,
                     ws.git.open,
                 )
-                .on_hover_text("⌘⇧G")
+                .on_hover_text(forge_core::i18n::keys("⌘⇧G").into_owned())
                 .clicked()
                 {
                     cmds.push(UiCmd::ToggleGit);
@@ -239,7 +248,7 @@ impl App {
                     &open,
                     ws.ideas.open,
                 )
-                .on_hover_text("⌘⇧I")
+                .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
                 .clicked()
                 {
                     cmds.push(UiCmd::ToggleIdeas);
@@ -252,7 +261,7 @@ impl App {
                     &notes,
                     ws.memory.open,
                 )
-                .on_hover_text("⌘⇧M")
+                .on_hover_text(forge_core::i18n::keys("⌘⇧M").into_owned())
                 .clicked()
                 {
                     cmds.push(UiCmd::ToggleMemory);
