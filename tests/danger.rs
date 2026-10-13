@@ -39,22 +39,28 @@ fn setup(name: &str) -> Env {
     e
 }
 
+/// `sh -c script` con el entorno de una terminal de agente de Forge.
+fn shell(e: &Env, script: &str) -> Command {
+    // Windows: el sh de Git for Windows pone sus carpetas (y su git.exe) delante del PATH al
+    // arrancar; los enlaces de Forge vuelven a ir primero, como hace Forge con bash.
+    let script = if cfg!(windows) {
+        format!("PATH=\"$(cygpath -u \"$FORGE_SHIMS\"):$PATH\"; {script}")
+    } else {
+        script.to_string()
+    };
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", &script]).current_dir(&e.repo).envs(&e.vars);
+    cmd
+}
+
 fn sh(e: &Env, script: &str) -> Output {
-    Command::new("sh")
-        .args(["-c", script])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
-        .output()
-        .unwrap()
+    shell(e, script).output().unwrap()
 }
 
 /// Lanza el comando, espera su solicitud y la responde.
 fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
     let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
-    let child = Command::new("sh")
-        .args(["-c", script])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
+    let child = shell(e, script)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -64,10 +70,13 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
         if let Some(r) = danger::pending(&dir).into_iter().next() {
             break r;
         }
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "no llegó la solicitud"
-        );
+        if start.elapsed() > Duration::from_secs(10) {
+            let which = sh(e, "command -v git rm; echo \"$PATH\"");
+            panic!(
+                "no llegó la solicitud. git y rm, y PATH:\n{}",
+                String::from_utf8_lossy(&which.stdout)
+            );
+        }
         std::thread::sleep(Duration::from_millis(20));
     };
     danger::answer(&dir, &request.id, allow).unwrap();
@@ -120,10 +129,7 @@ fn without_forge_open_and_no_terminal_it_is_blocked() {
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let mut e = setup("closed");
     e.vars.insert("FORGE_APP_PID".into(), "999999".into());
-    let out = Command::new("sh")
-        .args(["-c", "git reset --hard"])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
+    let out = shell(&e, "git reset --hard")
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
