@@ -237,6 +237,23 @@ pub fn metrics(ctx: &egui::Context, s: &Settings) -> Metrics {
     }
 }
 
+/// Windows: forge.exe es de consola (los enlaces de Guard y la CLI necesitan que el shell
+/// espere su salida y su código), así que abierto desde el menú Inicio Windows le crea una
+/// consola propia. Si la consola es solo nuestra, se suelta y queda la ventana; abierto desde
+/// una terminal, la consola es de esa terminal y no se toca.
+// ponytail: la consola llega a verse un instante; un lanzador sin consola lo evitaría.
+#[cfg(windows)]
+fn leave_own_console() {
+    use windows_sys::Win32::System::Console::{FreeConsole, GetConsoleProcessList};
+    let mut ids = [0u32; 2];
+    // SAFETY: búfer de 2 elementos; la función devuelve cuántos procesos comparten la consola.
+    unsafe {
+        if GetConsoleProcessList(ids.as_mut_ptr(), ids.len() as u32) == 1 {
+            FreeConsole();
+        }
+    }
+}
+
 fn main() -> eframe::Result {
     // Ejecutado como `rm`, `git`… desde `shims/`: control de comandos peligrosos.
     if let Some(name) = std::env::args()
@@ -324,6 +341,8 @@ fn main() -> eframe::Result {
             )),
         ..Default::default()
     };
+    #[cfg(windows)]
+    leave_own_console();
     eframe::run_native(
         "Forge",
         options,
