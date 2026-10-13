@@ -1013,7 +1013,7 @@ fn plans_cli(
                 })
                 .collect();
             if !lines.is_empty() {
-                lines.push(tr!("Si este trabajo avanza un plan: tacha cada tarea al terminarla y marca la fase done al acabarla (plan_update), sin esperar a que te lo pidan.").into());
+                lines.push(tr!("Si este trabajo avanza un plan: tacha cada tarea al terminarla (plan_update), sin esperar a que te lo pidan; Forge da la fase por hecha cuando su rama llega a main.").into());
             }
             lines.push(tr!("Si decides algo importante o resuelves un error, guárdalo en la memoria del proyecto (memory_save).").into());
             out.line(&format!("Forge: {}", lines.join(" ")));

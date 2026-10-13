@@ -70,7 +70,7 @@ pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to thre
 
 fn instructions(modes: Modes) -> String {
     let mut out = String::from(
-        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress, tick tasks as you finish them and mark the phase done at the end.",
+        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch).",
     );
     out.push_str("\n\n");
     out.push_str(DELEGATE);
@@ -276,7 +276,7 @@ fn tools() -> Value {
                             "properties": {
                                 "title": {"type": "string"},
                                 "notes": {"type": "string"},
-                                "branch": {"type": "string", "description": tr!("Rama de Git, p. ej. feat/export-csv (opcional)")},
+                                "branch": {"type": "string", "description": tr!("Rama de Git, p. ej. feat/export-csv (opcional). Forge da la fase por hecha cuando esa rama llega a main")},
                                 "tasks": {"type": "array", "items": {"type": "string"}}
                             },
                             "required": ["title"]
@@ -289,7 +289,7 @@ fn tools() -> Value {
         },
         {
             "name": "plan_update",
-            "description": tr!("Avanza un plan: al empezar una fase márcala in_progress (y crea su rama si la tiene), tacha tareas al terminarlas y marca la fase done al acabar; el plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado."),
+            "description": tr!("Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas; Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -300,7 +300,7 @@ fn tools() -> Value {
                     "phases": {"type": "array", "description": tr!("Reemplaza todas las fases (mismo formato que en plan_add)"), "items": {"type": "object"}},
                     "phase": {"type": "integer", "description": tr!("Número de fase a cambiar (desde 1)")},
                     "phase_status": {"type": "string", "enum": ["backlog", "in_progress", "done"]},
-                    "branch": {"type": "string", "description": tr!("Rama de la fase (vacío la quita)")},
+                    "branch": {"type": "string", "description": tr!("Rama de la fase (vacío la quita). Forge da la fase por hecha cuando esa rama llega a main")},
                     "phase_notes": {"type": "string"},
                     "task": {"type": "integer", "description": tr!("Número de tarea de la fase (desde 1)")},
                     "task_done": {"type": "boolean", "description": tr!("Por defecto true: tachar la tarea")},

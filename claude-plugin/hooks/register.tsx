@@ -153,8 +153,8 @@ Forge plans: the user's plans and backlog live in Forge, reachable through the f
 tools (plans_list, plan_add, plan_update). When the user asks to save or put a plan "in
 Forge" / "en planes de Forge", call plan_add with its phases (a branch only where it
 deserves one, and tasks); never look for or write plan files. Ideas for later: plan_add
-without phases (backlog). While working a plan, mark the phase in_progress, tick tasks
-and mark it done.`
+without phases (backlog). While working a plan, mark the phase in_progress, set its branch
+and tick tasks; Forge marks the phase done once its branch reaches main.`
 
 /** "claude-opus-5-5" → "opus"; unknown ids are kept. */
 const alias = (model: string) =>

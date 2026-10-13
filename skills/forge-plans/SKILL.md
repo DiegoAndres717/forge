@@ -15,10 +15,10 @@ Plans and the backlog live in Forge (not in the repo) and are read and changed o
 
 ## Working a phase
 1. `plans_list` and read the whole phase.
-2. Mark it `in_progress` and create its branch (`forge-branch-pr` skill).
+2. Mark it `in_progress`, create its branch (`forge-branch-pr` skill) and set it on the phase (`plan_update` with `branch`) if the plan didn't already have it. Forge marks the phase done by itself once that branch reaches main.
 3. Tick each task as soon as it's done, not all at the end.
 4. If something unplanned comes up, add it as a task or to the backlog instead of forgetting it.
-5. When opening the PR, mark the phase `done` only if all its tasks are done; if something depends on the person (a manual test, for example), leave it unticked and say so.
+5. Don't mark the phase `done` when opening the PR: Forge does it when the branch is merged, and ticks its tasks. Mark it yourself only for a phase without a branch. If something depends on the person (a manual test, for example), say so in the PR.
 
 ## When someone describes something they want built
 Ask the few questions that matter, then create the plan with `plan_add`: small phases that each end in a PR, with their branch and tasks. Summarize the plan for the person in a few lines.

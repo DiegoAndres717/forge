@@ -319,6 +319,10 @@ pub struct App {
     /// ⌃Tab con Ctrl aún pulsado: (orden de proyectos al empezar, posición actual).
     /// Al soltar Ctrl se olvida: el siguiente ⌃Tab vuelve a alternar con el anterior.
     mru_cycle: Option<(Vec<PathBuf>, usize)>,
+    /// Última vez que se buscaron fases ya fusionadas, y si esa búsqueda sigue en marcha
+    /// (ver `ideas_tick`).
+    merged_check: Instant,
+    merging: Arc<AtomicBool>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
     /// Notificaciones de macOS (desactivadas en tests).
@@ -419,6 +423,8 @@ impl App {
             notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
+            merged_check: Instant::now(),
+            merging: Arc::default(),
             show_all: false,
             general: crate::workspace::IdeasView {
                 dirty: true,

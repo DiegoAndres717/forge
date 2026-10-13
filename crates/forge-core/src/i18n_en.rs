@@ -1251,8 +1251,8 @@ pub const EN: &[(&str, &str)] = &[
         "Added to the backlog as #{id}.",
     ),
     (
-        "Avanza un plan: al empezar una fase márcala in_progress (y crea su rama si la tiene), tacha tareas al terminarlas y marca la fase done al acabar; el plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado.",
-        "Moves a plan forward: when starting a phase mark it in_progress (and create its branch if it has one), tick tasks as you finish them and mark the phase done when it's over; the plan completes on its own when all phases are done. Also plans a backlog idea (phases), changes the status of an idea without phases, or fixes title and note. Returns the updated plan.",
+        "Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas; Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado.",
+        "Moves a plan forward: when starting a phase mark it in_progress (and create its branch and set it), tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it done yourself only if it has no branch). The plan completes on its own when all phases are done. Also plans a backlog idea (phases), changes the status of an idea without phases, or fixes title and note. Returns the updated plan.",
     ),
     ("Añade una tarea a la fase", "Adds a task to the phase"),
     ("Backlog:", "Backlog:"),
@@ -1320,12 +1320,12 @@ pub const EN: &[(&str, &str)] = &[
         "Defaults to true: tick the task",
     ),
     (
-        "Rama de Git, p. ej. feat/export-csv (opcional)",
-        "Git branch, e.g. feat/export-csv (optional)",
+        "Rama de Git, p. ej. feat/export-csv (opcional). Forge da la fase por hecha cuando esa rama llega a main",
+        "Git branch, e.g. feat/export-csv (optional). Forge marks the phase done when this branch reaches main",
     ),
     (
-        "Rama de la fase (vacío la quita)",
-        "The phase's branch (empty removes it)",
+        "Rama de la fase (vacío la quita). Forge da la fase por hecha cuando esa rama llega a main",
+        "The phase's branch (empty removes it). Forge marks the phase done when this branch reaches main",
     ),
     (
         "Reemplaza todas las fases (mismo formato que en plan_add)",
@@ -1441,8 +1441,8 @@ pub const EN: &[(&str, &str)] = &[
         "Plan #{id} “{title}” in progress.",
     ),
     (
-        "Si este trabajo avanza un plan: tacha cada tarea al terminarla y marca la fase done al acabarla (plan_update), sin esperar a que te lo pidan.",
-        "If this work advances a plan: tick each task as you finish it and mark the phase done when it's over (plan_update), without waiting to be asked.",
+        "Si este trabajo avanza un plan: tacha cada tarea al terminarla (plan_update), sin esperar a que te lo pidan; Forge da la fase por hecha cuando su rama llega a main.",
+        "If this work advances a plan: tick each task as you finish it (plan_update), without waiting to be asked; Forge marks the phase done once its branch reaches main.",
     ),
     (
         "Si decides algo importante o resuelves un error, guárdalo en la memoria del proyecto (memory_save).",
