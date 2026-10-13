@@ -351,7 +351,25 @@ pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_
 /// PowerShell: `rm`, `del`, `rd`, `ri` y `erase` son alias de Remove-Item (ganan a cualquier
 /// programa del PATH). Una función global con los mismos parámetros que el cmdlet pregunta
 /// a Forge antes de un borrado recursivo y, si se permite, llama al cmdlet de verdad.
-pub const PWSH_REMOVE: &str = "";
+pub const PWSH_REMOVE: &str = r#"$forgeMeta = [System.Management.Automation.CommandMetadata]::new((Get-Command Microsoft.PowerShell.Management\Remove-Item -CommandType Cmdlet))
+$forgeBody = @'
+begin { $forgePath = [System.Collections.Generic.List[string]]::new(); $forgeLiteral = [System.Collections.Generic.List[string]]::new() }
+process { if ($Path) { $forgePath.AddRange([string[]]$Path) }; if ($LiteralPath) { $forgeLiteral.AddRange([string[]]$LiteralPath) } }
+end {
+  if ($Recurse -and -not $WhatIf -and $env:FORGE_BIN) {
+    $forgeTargets = @(@($forgePath) + @($forgeLiteral) | ForEach-Object { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($_) })
+    & $env:FORGE_BIN --guard-check rm -rf -- @forgeTargets
+    if ($LASTEXITCODE -ne 0) { return }
+  }
+  $forgeRest = @{} + $PSBoundParameters
+  [void]$forgeRest.Remove('Path'); [void]$forgeRest.Remove('LiteralPath')
+  if ($forgePath.Count) { Microsoft.PowerShell.Management\Remove-Item -Path $forgePath @forgeRest }
+  if ($forgeLiteral.Count) { Microsoft.PowerShell.Management\Remove-Item -LiteralPath $forgeLiteral @forgeRest }
+}
+'@
+Set-Item function:global:Remove-Item ([scriptblock]::Create([System.Management.Automation.ProxyCommand]::GetCmdletBindingAttribute($forgeMeta) + "`nparam(" + [System.Management.Automation.ProxyCommand]::GetParamBlock($forgeMeta) + ")`n" + $forgeBody))
+Remove-Variable forgeMeta, forgeBody
+"#;
 
 /// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
 /// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
@@ -402,6 +420,31 @@ fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// Punto de entrada cuando Forge se ejecuta como `rm`, `git`… (enlace en `shims/`).
+/// `forge --guard-check <comando> <args…>`: solo el control (sin ejecutar nada). Sale con 0 si
+/// se puede seguir y con 126 si se denegó; lo usa el Remove-Item de PowerShell.
+pub fn guard_check_main(name: &str, args: Vec<String>) -> ! {
+    guard(name, &args);
+    std::process::exit(0)
+}
+
+/// Si el comando es peligroso, pide autorización (y sale con 126 si se deniega).
+fn guard(name: &str, args: &[String]) {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+    let dangerous = classify(name, args, &cwd, project.as_deref()).is_some();
+    // Solo en este camino poco frecuente se lee el idioma (`git status` no paga la base) y
+    // se vuelve a clasificar para que el motivo salga en ese idioma.
+    if dangerous {
+        crate::i18n::init_from_store();
+    }
+    if let Some(reason) = dangerous
+        .then(|| classify(name, args, &cwd, project.as_deref()))
+        .flatten()
+    {
+        authorize(name, args, reason, cwd, project);
+    }
+}
+
 pub fn shim_main(name: &str, args: Vec<String>) -> ! {
     let shims = std::env::var_os("FORGE_SHIMS").map(PathBuf::from);
     let Some(real) = real_program(name, shims.as_deref()) else {
@@ -411,20 +454,7 @@ pub fn shim_main(name: &str, args: Vec<String>) -> ! {
         );
         std::process::exit(127);
     };
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
-    let dangerous = classify(name, &args, &cwd, project.as_deref()).is_some();
-    // Solo en este camino poco frecuente se lee el idioma (`git status` no paga la base) y
-    // se vuelve a clasificar para que el motivo salga en ese idioma.
-    if dangerous {
-        crate::i18n::init_from_store();
-    }
-    if let Some(reason) = dangerous
-        .then(|| classify(name, &args, &cwd, project.as_deref()))
-        .flatten()
-    {
-        authorize(name, &args, reason, cwd, project);
-    }
+    guard(name, &args);
     exec_real(&real, name, &args)
 }
 

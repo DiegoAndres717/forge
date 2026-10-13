@@ -253,6 +253,16 @@ fn main() -> eframe::Result {
         terminal::disclaim_exec(&raw[1..]);
     }
     // Un lector (`cat`, `grep`…) de una terminal de agente con un posible secreto.
+    // El Remove-Item de PowerShell (Windows) pregunta aquí antes de un borrado recursivo.
+    if raw.first().is_some_and(|a| a == "--guard-check")
+        && let Some(name) = raw.get(1)
+    {
+        let args = raw[2..]
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        forge_core::danger::guard_check_main(&name.to_string_lossy(), args);
+    }
     if raw.first().is_some_and(|a| a == "--secret-read") {
         let args = raw[1..]
             .iter()
