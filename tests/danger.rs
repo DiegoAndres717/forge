@@ -35,7 +35,7 @@ fn setup(name: &str) -> Env {
     vars.insert("PATH".into(), path.to_string_lossy().into_owned());
     vars.remove("ZDOTDIR");
     let e = Env { base, repo, vars };
-    assert!(sh(&e, "git init -q -b main && git config user.email t@t && git config user.name t && echo v1 > a.txt && git add . && git commit -qm inicio").status.success());
+    assert!(sh(&e, "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false && echo v1 > a.txt && git add . && git commit -qm inicio").status.success());
     e
 }
 
