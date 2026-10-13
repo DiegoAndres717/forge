@@ -66,6 +66,27 @@ pub fn secret_in_command(command: &str, cwd: &Path) -> Option<String> {
         .find_map(|w| secret_file(w, cwd))
 }
 
+/// Si una línea de shell (con `;`, `&&`, `||`, `|`) tiene un comando peligroso, el motivo.
+/// Lo usa el mod de Claude Code en Windows, donde su shell puede rehacer el PATH y saltarse
+/// los enlaces de Guard.
+// ponytail: sin un parser de shell: palabras separadas por espacios y sin comillas; basta
+// para `git push --force` y `rm -rf x`, que es lo que este respaldo vigila.
+pub fn dangerous_in_command(command: &str, cwd: &Path, project: Option<&Path>) -> Option<String> {
+    command
+        .replace("&&", ";")
+        .replace("||", ";")
+        .split([';', '|', '\n'])
+        .find_map(|segment| {
+            let words: Vec<String> = segment
+                .split_whitespace()
+                .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
+                .skip_while(|w| w.contains('=') && !w.starts_with('-'))
+                .collect();
+            let (program, args) = words.split_first()?;
+            classify(&shim_name(program)?, args, cwd, project)
+        })
+}
+
 /// Lo que espera un comando a que el usuario responda (menos que el límite de 2 min de
 /// las herramientas de shell de los agentes, para que vean el rechazo y no un tiempo agotado).
 const WAIT: Duration = Duration::from_secs(110);
@@ -824,6 +845,9 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         // Con `/`: Git Bash abre `C:/…` sin convertir nada.
         let file = bash.join("env.sh").to_string_lossy().replace('\\', "/");
         env.insert("BASH_ENV".into(), file);
+        // El mod de Claude Code pregunta a Forge antes de los comandos peligrosos (su shell
+        // puede rehacer el PATH y saltarse los enlaces).
+        env.insert("FORGE_GUARD_COMMANDS".into(), "1".into());
     }
     let shell = std::env::var("SHELL").unwrap_or_default();
     if shell.ends_with("zsh") {
@@ -849,6 +873,19 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dangerous_commands_are_found_inside_a_shell_line() {
+        let (cwd, project) = (Path::new("/p/app"), Some(Path::new("/p/app")));
+        let found = |c: &str| dangerous_in_command(c, cwd, project).is_some();
+        assert!(found("git status && git push --force origin main"));
+        assert!(found("cd sub; FOO=1 git reset --hard"));
+        assert!(found("npm test | tee log && rm -rf /tmp/otra"));
+        assert!(found(r"C:\Git\cmd\GIT.EXE push -f"));
+        assert!(!found("git status && npm test"));
+        assert!(!found("rm -rf dist node_modules"));
+        assert!(!found("echo 'git push --force'"));
+    }
 
     #[test]
     fn windows_project_paths_ignore_case() {
