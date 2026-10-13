@@ -70,8 +70,11 @@ pub fn secret_in_command(command: &str, cwd: &Path) -> Option<String> {
 /// Lo usa el mod de Claude Code en Windows, donde su shell puede rehacer el PATH y saltarse
 /// los enlaces de Guard.
 // ponytail: sin un parser de shell: palabras separadas por espacios y sin comillas; basta
-// para `git push --force` y `rm -rf x`, que es lo que este respaldo vigila.
+// para `git push --force` y `rm -rf x`, que es lo que este respaldo vigila. `bash -c "…"`
+// y `cd ~` o `cd -` no se siguen.
 pub fn dangerous_in_command(command: &str, cwd: &Path, project: Option<&Path>) -> Option<String> {
+    // Los `cd` de la línea mueven la carpeta de lo que sigue (`cd .. && rm -rf x`).
+    let mut cwd = cwd.to_path_buf();
     command
         .replace("&&", ";")
         .replace("||", ";")
@@ -80,10 +83,20 @@ pub fn dangerous_in_command(command: &str, cwd: &Path, project: Option<&Path>) -
             let words: Vec<String> = segment
                 .split_whitespace()
                 .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
-                .skip_while(|w| w.contains('=') && !w.starts_with('-'))
+                // Prefijos `VAR=valor` y envoltorios que ejecutan el comando que les sigue.
+                .skip_while(|w| {
+                    (w.contains('=') && !w.starts_with('-'))
+                        || ["sudo", "env", "command", "exec", "time", "nohup"].contains(&w.as_str())
+                })
                 .collect();
             let (program, args) = words.split_first()?;
-            classify(&shim_name(program)?, args, cwd, project)
+            if program == "cd" {
+                if let Some(dir) = args.first() {
+                    cwd = normalize(&cwd.join(dir));
+                }
+                return None;
+            }
+            classify(&shim_name(program)?, args, &cwd, project)
         })
 }
 
@@ -885,6 +898,14 @@ mod tests {
         assert!(!found("git status && npm test"));
         assert!(!found("rm -rf dist node_modules"));
         assert!(!found("echo 'git push --force'"));
+        // Un `cd` previo cambia dónde borra el rm (Claude Code encadena `cd x && …`).
+        assert!(found("cd .. && rm -rf otro-proyecto"));
+        assert!(found("cd /tmp; rm -rf build"));
+        assert!(!found("cd web && rm -rf dist"));
+        // Los envoltorios no esconden el programa.
+        assert!(found("sudo git push --force"));
+        assert!(found("env FOO=1 git reset --hard"));
+        assert!(found("time nohup git push -f"));
     }
 
     #[test]

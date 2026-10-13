@@ -186,8 +186,8 @@ fn open_store() -> Result<Store, String> {
 /// carpeta que abrir en la app. Una sola lista: una orden nueva que falte aquí abriría
 /// la app en vez de ejecutarse.
 pub const COMMANDS: &[&str] = &[
-    "agent", "ai", "anchor", "context", "doctor", "guard", "handoff", "hooks", "ideas", "mcp",
-    "memory", "plans", "secret", "status", "danger",
+    "agent", "ai", "anchor", "context", "danger", "doctor", "guard", "handoff", "hooks", "ideas",
+    "mcp", "memory", "plans", "secret", "status",
 ];
 
 pub fn run(args: &[String]) -> i32 {

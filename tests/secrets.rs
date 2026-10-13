@@ -66,6 +66,8 @@ fn mod_commands_run_in_the_cli() {
     assert!(out.contains(".env"), "{out}");
     assert_eq!(forge(&["secret", "--path", ".env.example"]).0, 1);
     assert_eq!(forge(&["secret", "--command", "cat src/main.rs"]).0, 1);
+    assert_eq!(forge(&["danger", "--command", "git status"]).0, 1);
+    assert_eq!(forge(&["danger", "--command", "git push --force"]).0, 0);
     assert_eq!(
         forge(&["secret", "--command", "grep KEY .env.local | head"]).0,
         0
