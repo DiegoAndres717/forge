@@ -129,11 +129,7 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
     // Dentro del proyecto (dist, node_modules, .next…) es rutina: no se pregunta.
     let inside = |t: &String| {
         let path = normalize(&cwd.join(t));
-        project.is_some_and(|root| {
-            path.starts_with(root)
-                && path != root
-                && !path.components().any(|c| c.as_os_str() == ".git")
-        })
+        project.is_some_and(|root| inside_project(&path, root, cfg!(windows)))
     };
     let outside: Vec<&String> = targets.into_iter().filter(|t| !inside(t)).collect();
     if outside.is_empty() {
@@ -147,6 +143,22 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
 }
 
 /// `a/./b/../c` → `a/c` sin tocar el disco (el destino puede no existir).
+/// ¿Está `path` dentro de `root` (sin ser la raíz ni su `.git`)? En Windows sin distinguir
+/// mayúsculas: `c:\\users\\ana\\app\\build` está dentro de `C:\\Users\\Ana\\app`.
+fn inside_project(path: &Path, root: &Path, ignore_case: bool) -> bool {
+    let fold = |p: &Path| {
+        let text = p.to_string_lossy();
+        PathBuf::from(if ignore_case {
+            text.to_lowercase()
+        } else {
+            text.into_owned()
+        })
+    };
+    let (path, root) = (fold(path), fold(root));
+    // Con `ignore_case` la ruta ya está en minúsculas: `.GIT` también es `.git`.
+    path.starts_with(&root) && path != root && !path.components().any(|c| c.as_os_str() == ".git")
+}
+
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in path.components() {
@@ -335,6 +347,11 @@ pub fn shim_name(argv0: &str) -> Option<String> {
 /// puede reordenarlo). Va dentro del arranque de Forge y no en un .ps1: con la política de
 /// scripts «Restricted», la de fábrica en Windows, un archivo no se cargaría.
 pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_SHIMS) + @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\\') -ne $env:FORGE_SHIMS.TrimEnd('\\') })) -join ';' }";
+
+/// PowerShell: `rm`, `del`, `rd`, `ri` y `erase` son alias de Remove-Item (ganan a cualquier
+/// programa del PATH). Una función global con los mismos parámetros que el cmdlet pregunta
+/// a Forge antes de un borrado recursivo y, si se permite, llama al cmdlet de verdad.
+pub const PWSH_REMOVE: &str = "";
 
 /// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
 /// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
@@ -774,6 +791,34 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_project_paths_ignore_case() {
+        let root = Path::new("/Users/Ana/app");
+        assert!(inside_project(
+            Path::new("/users/ana/APP/build"),
+            root,
+            true
+        ));
+        assert!(!inside_project(Path::new("/users/ana/app"), root, true));
+        assert!(!inside_project(
+            Path::new("/users/ana/app/.GIT"),
+            root,
+            true
+        ));
+        assert!(!inside_project(Path::new("/users/ana/otro"), root, true));
+        // macOS y Linux siguen distinguiendo.
+        assert!(!inside_project(
+            Path::new("/users/ana/APP/build"),
+            root,
+            false
+        ));
+        assert!(inside_project(
+            Path::new("/Users/Ana/app/build"),
+            root,
+            false
+        ));
+    }
 
     #[test]
     fn shims_are_recognised_by_name_with_or_without_exe() {
