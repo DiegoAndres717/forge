@@ -278,7 +278,11 @@ impl Terminal {
         if cfg!(windows) {
             // PowerShell 7 si está (si no, Windows PowerShell), con su perfil y el de Forge.
             cmd = CommandBuilder::new(forge_core::powershell());
-            cmd.args(pwsh_args(PWSH_INIT));
+            // Tras el perfil: los enlaces de Guard primero y el prompt que avisa la carpeta.
+            cmd.args(pwsh_args(&format!(
+                "{}\n{PWSH_INIT}",
+                forge_core::danger::PWSH_GUARD
+            )));
         } else if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
             cmd = CommandBuilder::new(cmd.get_shell());
             cmd.args(["--rcfile", &rc, "-i"]);
