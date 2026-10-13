@@ -31,5 +31,5 @@ Before starting a task, check the "When" column and read the matching skill (it 
 - `crates/forge-core/`: logic without UI (Guard, memory, plans, accounts, MCP, SQLite, translations).
 - `src/`: the app (egui window, terminals, layout, processes) and the CLI (`src/cli.rs`).
 - `claude-plugin/`: the Claude Code mod (TypeScript hooks, embedded in the binary).
-- `tests/`: integration tests against the real binary (Git hooks, MCP server, terminal trampoline).
+- `tests/`: integration tests against the real binary (Git hooks, MCP server).
 - `scripts/`: app install, DMG build, the `curl | sh` installer and the Homebrew recipe.

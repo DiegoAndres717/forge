@@ -267,7 +267,7 @@ Intel Macs: yes, the app is universal. Linux: in preview (see [Linux](#linux-pre
 No. Terminals, processes, Guard, Git and plans work without any agent. Forge detects Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Pi if they're installed.
 
 **Why does macOS ask for access to Photos, Music or Documents?**
-Because a program in a terminal asked for it — an agent, a script, `find ~`… Each terminal in Forge is responsible for itself, so the prompt names that program (`codex`, `zsh`…), not Forge, and what you allow applies only to it. Forge itself never reads those folders. You can review it in System Settings → Privacy & Security.
+Because a program in a terminal asked for it — an agent, a script, `find ~`… macOS attributes it to Forge, as it does with Terminal or Warp, so the prompt says "Forge" and what you allow applies to what runs in its terminals. Forge itself never reads those folders. You can review it in System Settings → Privacy & Security.
 
 **How do I report a bug?**
 Open an [issue](https://github.com/DiegoAndres717/forge/issues) with what you did, what you expected and a screenshot if possible.
