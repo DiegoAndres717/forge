@@ -226,6 +226,31 @@ impl App {
 
     /// Relee las listas visibles (los agentes escriben desde otros procesos).
     pub(super) fn ideas_tick(&mut self) {
+        // Cada dos minutos, en otro hilo (git puede tardar): cierra las fases cuya rama ya
+        // está en main. El panel lo verá en su próxima relectura.
+        if self.merged_check.elapsed() > Duration::from_secs(120)
+            && let Some(db) = self.store.as_ref().and_then(|s| s.conn.path())
+            && !db.is_empty()
+            // Con git lento y muchos proyectos, no se apila otra búsqueda sobre la anterior.
+            && !self.merging.swap(true, Ordering::AcqRel)
+        {
+            self.merged_check = Instant::now();
+            let db = PathBuf::from(db);
+            let paths: Vec<_> = self
+                .workspaces
+                .iter()
+                .map(|w| w.project.path.clone())
+                .collect();
+            let merging = self.merging.clone();
+            std::thread::spawn(move || {
+                if let Ok(store) = Store::open(&db) {
+                    for path in paths {
+                        let _ = store.close_merged(&path);
+                    }
+                }
+                merging.store(false, Ordering::Release);
+            });
+        }
         let every = |view: &IdeasView, secs| {
             view.dirty
                 || view

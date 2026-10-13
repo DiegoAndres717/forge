@@ -1322,6 +1322,53 @@ fn projects_reorder_by_dragging_their_icon() {
 }
 
 #[test]
+fn the_app_closes_phases_whose_branch_reached_main() {
+    let _serial = serial();
+    let dir = project("merged-app");
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git commit -qm inicio && git switch -qc feat/uno && echo 2 > b.txt && git add -A \
+             && git commit -qm uno && git switch -q main && git merge -q --squash feat/uno \
+             && git commit -qm 'uno (#1)'",
+        ])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    // Base en archivo: la comprobación corre en otro hilo con su propia conexión.
+    let db = dir.join(".forge/test.db");
+    let store = Store::open(&db).unwrap();
+    let id = store
+        .add_idea(Some(&dir), "Plan", "", "claude-code")
+        .unwrap();
+    let phase = forge_core::ideas::Phase {
+        title: "Uno".into(),
+        notes: String::new(),
+        status: "doing".into(),
+        branch: Some("feat/uno".into()),
+        tasks: Vec::new(),
+    };
+    store
+        .set_phases(Some(&dir), id, &[phase], "claude-code")
+        .unwrap();
+    let mut h = app_with(store, Some(dir.clone()));
+    h.run_steps(3);
+    h.state_mut().merged_check = Instant::now() - Duration::from_secs(600);
+    wait_until(&mut h, "la fase se cierra sola", |a| {
+        a.store
+            .as_ref()
+            .unwrap()
+            .get_idea(Some(&dir), id)
+            .unwrap()
+            .unwrap()
+            .status
+            == "done"
+    });
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");
