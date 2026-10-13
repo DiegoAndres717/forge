@@ -254,6 +254,42 @@ impl Store {
             .find(|i| i.id == id))
     }
 
+    /// Cierra las fases abiertas cuya rama ya está en la rama principal del repo `project`
+    /// (squash, merge o rebase): fase hecha, tareas tachadas y una nota. Devuelve cuáles.
+    pub fn close_merged(&self, project: &Path) -> Result<Vec<String>, String> {
+        let mut closed = Vec::new();
+        let mut base = None;
+        for idea in self.list_ideas(Some(project), false)? {
+            let mut phases = idea.phases;
+            let mut changed = false;
+            for (n, phase) in phases.iter_mut().enumerate() {
+                let Some(branch) = phase.branch.clone().filter(|_| phase.status != "done") else {
+                    continue;
+                };
+                // La rama principal se busca una vez, y solo si hay alguna fase con rama.
+                let Some(base) = base
+                    .get_or_insert_with(|| crate::git::main_branch(project))
+                    .as_deref()
+                else {
+                    return Ok(closed);
+                };
+                if crate::git::branch_merged_into(project, base, &branch) != Some(true) {
+                    continue;
+                }
+                phase.status = "done".into();
+                phase.tasks.iter_mut().for_each(|t| t.done = true);
+                let note = format!("Closed by Forge: branch {branch} is in main.");
+                phase.notes = [phase.notes.trim(), &note].join("\n").trim().to_string();
+                closed.push(format!("#{} phase {} ({branch})", idea.id, n + 1));
+                changed = true;
+            }
+            if changed {
+                self.set_phases(Some(project), idea.id, &phases, "forge")?;
+            }
+        }
+        Ok(closed)
+    }
+
     /// Reemplaza las fases del plan (p. ej. al planificar una idea del backlog); el estado
     /// del plan se recalcula. `false` si no es de esa lista.
     pub fn set_phases(
@@ -505,6 +541,49 @@ pub fn render(idea: &Idea) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn phases_whose_branch_reached_main_close_themselves() {
+        let dir = crate::git::test_repo(
+            "close-merged",
+            "git switch -qc feat/uno && echo 2 > b && git add -A && git commit -qm uno \
+             && git switch -q main && git merge -q --squash feat/uno && git commit -qm 'uno (#1)' \
+             && git switch -qc feat/dos && echo 3 > c && git add -A && git commit -qm dos",
+        );
+        let store = Store::in_memory().unwrap();
+        let p = Some(dir.as_path());
+        let id = store.add_idea(p, "Plan", "", "claude-code").unwrap();
+        let phase = |title: &str, branch: &str| Phase {
+            title: title.into(),
+            notes: String::new(),
+            status: "doing".into(),
+            branch: Some(branch.into()),
+            tasks: vec![Task {
+                text: "t".into(),
+                done: false,
+            }],
+        };
+        store
+            .set_phases(
+                p,
+                id,
+                &[phase("Uno", "feat/uno"), phase("Dos", "feat/dos")],
+                "claude-code",
+            )
+            .unwrap();
+
+        let closed = store.close_merged(&dir).unwrap();
+        assert_eq!(closed.len(), 1, "{closed:?}");
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        let (uno, dos) = (&plan.phases[0], &plan.phases[1]);
+        assert!(uno.status == "done" && uno.tasks[0].done && uno.notes.contains("feat/uno"));
+        assert!(
+            dos.status == "doing" && !dos.tasks[0].done,
+            "la que no se fusionó sigue"
+        );
+        assert_eq!(plan.status, "doing");
+        assert!(store.close_merged(&dir).unwrap().is_empty(), "una sola vez");
+    }
 
     #[test]
     fn anchor_names_the_phase_in_progress_and_its_next_tasks() {

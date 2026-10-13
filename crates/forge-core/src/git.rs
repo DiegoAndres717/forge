@@ -245,6 +245,73 @@ pub fn create_branch(repo: &Path, name: &str) -> Result<(), String> {
     git(repo, &["switch", "-c", name]).map(drop)
 }
 
+/// Rama principal: la del remoto (origin/HEAD) si se conoce; si no, main o master local.
+pub fn main_branch(repo: &Path) -> Option<String> {
+    git(
+        repo,
+        &["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"],
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+    .into_iter()
+    .chain(["main".into(), "master".into()])
+    .find(|b| commit(repo, b).is_some())
+}
+
+fn commit(repo: &Path, r: &str) -> Option<String> {
+    git(
+        repo,
+        &["rev-parse", "--verify", "-q", &format!("{r}^{{commit}}")],
+    )
+    .ok()
+    .map(|s| s.trim().to_string())
+}
+
+/// ¿Ya está en la rama principal todo lo de `branch`? Vale con squash, merge o rebase.
+/// `None` si no se sabe (no existe la rama o no hay rama principal).
+pub fn branch_merged(repo: &Path, branch: &str) -> Option<bool> {
+    branch_merged_into(repo, &main_branch(repo)?, branch)
+}
+
+/// Como `branch_merged`, con la rama principal ya resuelta (`main_branch`).
+pub fn branch_merged_into(repo: &Path, base: &str, branch: &str) -> Option<bool> {
+    let tip = commit(repo, branch).or_else(|| commit(repo, &format!("origin/{branch}")))?;
+    if git(repo, &["merge-base", "--is-ancestor", &tip, base]).is_ok() {
+        // Ya alcanzable: fusionada con un merge, salvo que la punta esté en la línea
+        // principal (creada desde main sin commits propios).
+        // ponytail: recorre toda la línea principal; acotarla si el historial pesa.
+        let line = git(repo, &["rev-list", "--first-parent", base]).ok()?;
+        return Some(!line.lines().any(|c| c == tip));
+    }
+    // Sin cambios netos desde donde salió no hay nada que dar por fusionado.
+    let fork = git(repo, &["merge-base", base, &tip]).ok()?;
+    if git(repo, &["diff", "--quiet", fork.trim(), &tip]).is_ok() {
+        return Some(false);
+    }
+    // Squash o rebase: fusionarla ahora no cambiaría nada del árbol de la principal.
+    let merged = git(repo, &["merge-tree", "--write-tree", base, &tip]).ok();
+    let base_tree = git(repo, &["rev-parse", &format!("{base}^{{tree}}")]).ok()?;
+    Some(merged.is_some_and(|out| out.lines().next() == Some(base_tree.trim())))
+}
+
+/// Repo temporal con `script` (sh) ya ejecutado sobre un repo vacío en `main`.
+#[cfg(test)]
+pub(crate) fn test_repo(name: &str, script: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("forge-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let init = "git init -q -b main && git config user.email t@t && git config user.name t \
+                && git config core.autocrlf false && echo 1 > a && git add -A && git commit -qm inicio";
+    let ok = Command::new("sh")
+        .args(["-c", &format!("{init} && {script}")])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok, "{script}");
+    dir
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -317,5 +384,73 @@ mod tests {
         switch(&dir, "main").unwrap();
         assert_eq!(log(&dir, 5).unwrap()[0].subject, "inicio");
         assert!(create_branch(&dir, "con espacio").is_err());
+    }
+
+    #[test]
+    fn detects_branches_merged_by_squash_or_merge_commit() {
+        let dir = std::env::temp_dir().join(format!("forge-git-merged-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let sh = |c: &str| {
+            assert!(
+                Command::new("sh")
+                    .args(["-c", c])
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "{c}"
+            )
+        };
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
+        sh("echo 1 > a.txt && git add -A && git commit -qm inicio");
+        // Recién creada (sin commits propios) y otra con trabajo sin fusionar.
+        sh(
+            "git branch fresh && git switch -qc open && echo b > b.txt && git add -A && git commit -qm b",
+        );
+        // Fusionada con squash (como GitHub), y main sigue avanzando después.
+        sh(
+            "git switch -qc squashed main && echo c > c.txt && git add -A && git commit -qm c1 && echo cc >> c.txt && git commit -qam c2",
+        );
+        sh("git switch -q main && git merge -q --squash squashed && git commit -qm 'c (#1)'");
+        sh("echo 2 > a.txt && git commit -qam despues");
+        // Fusionada con commit de merge.
+        sh("git switch -qc merged main && echo d > d.txt && git add -A && git commit -qm d");
+        sh("git switch -q main && git merge -q --no-ff merged -m 'Merge d'");
+        // Una recién creada queda como padre de un merge cuando otra rama trae main
+        // («sync») y esa rama se fusiona: sigue sin estar fusionada.
+        sh(
+            "git branch fresh2 main && git switch -qc sync main~1 && echo s > s.txt && git add -A && git commit -qm s",
+        );
+        sh(
+            "git merge -q --no-ff fresh2 -m sync && git switch -q main && git merge -q --no-ff sync -m 'Merge sync'",
+        );
+        // Sus commits se anulan entre sí: nada que fusionar, pero tampoco se fusionó.
+        sh(
+            "git switch -qc empty main && echo e > e.txt && git add -A && git commit -qm e && git rm -q e.txt && git commit -qm sin-e",
+        );
+        sh("git switch -q fresh");
+
+        assert_eq!(
+            branch_merged(&dir, "fresh"),
+            Some(false),
+            "sin commits propios"
+        );
+        assert_eq!(branch_merged(&dir, "open"), Some(false));
+        assert_eq!(branch_merged(&dir, "squashed"), Some(true));
+        assert_eq!(branch_merged(&dir, "merged"), Some(true));
+        assert_eq!(branch_merged(&dir, "no-existe"), None);
+        assert_eq!(
+            branch_merged(&dir, "fresh2"),
+            Some(false),
+            "solo padre de un sync"
+        );
+        assert_eq!(
+            branch_merged(&dir, "empty"),
+            Some(false),
+            "diferencia neta vacía"
+        );
     }
 }
