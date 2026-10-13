@@ -1271,6 +1271,57 @@ fn hidden_terminals_show_activity_and_rows_reorder_by_drag() {
 }
 
 #[test]
+fn projects_reorder_by_dragging_their_icon() {
+    let _serial = serial();
+    let (a, b, c) = (project("drag-a"), project("drag-b"), project("drag-c"));
+    let store = Store::in_memory().unwrap();
+    for p in [&a, &b, &c] {
+        store
+            .touch(p, p.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+    }
+    store.set_setting("active", &a.to_string_lossy()).unwrap();
+    let mut h = app_with(store, None);
+    h.run_steps(3);
+    let name = |p: &PathBuf| p.file_name().unwrap().to_str().unwrap().to_string();
+    let rect = |h: &Harness<'_, App>, p: &PathBuf| h.get_by_label(&name(p)).rect();
+    // Se agarra por el icono de carpeta y se suelta encima del primero.
+    let from = egui::pos2(rect(&h, &c).min.x + 14.0, rect(&h, &c).center().y);
+    let to = egui::pos2(from.x, rect(&h, &a).min.y + 4.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(egui::Event::PointerMoved(from));
+    h.event(button(from, true));
+    h.run_steps(2);
+    for k in 1..=6 {
+        let y = from.y + (to.y - from.y) * k as f32 / 6.0;
+        h.event(egui::Event::PointerMoved(egui::pos2(from.x, y)));
+        h.run_steps(1);
+    }
+    h.event(button(to, false));
+    h.run_steps(3);
+    let order: Vec<_> = h
+        .state()
+        .workspaces
+        .iter()
+        .map(|w| w.project.path.clone())
+        .collect();
+    assert_eq!(
+        order,
+        vec![c.clone(), a.clone(), b.clone()],
+        "C pasa arriba"
+    );
+    assert_eq!(h.state().active, Some(1), "sigue activo A");
+    // Y el orden queda guardado para la próxima vez.
+    let saved = h.state().store.as_ref().unwrap().open_projects().unwrap();
+    assert_eq!(saved, order);
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");

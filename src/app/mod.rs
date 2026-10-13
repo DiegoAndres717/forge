@@ -182,6 +182,8 @@ enum UiCmd {
     CheckUpdates,
     Activate(usize),
     Close(usize),
+    /// Mueve el proyecto `from` a la ranura `to` (0..=n, antes del que está ahí).
+    MoveProject(usize, usize),
     /// Abre en el editor un archivo de `.forge/` del proyecto activo.
     EditFile(&'static str),
     /// Abre la ventana de Ajustes.
@@ -586,6 +588,25 @@ impl App {
         });
     }
 
+    /// Reordena la barra lateral; el activo sigue siendo el mismo proyecto.
+    fn move_project(&mut self, from: usize, to: usize) {
+        // Soltarlo después de sí mismo lo deja una posición antes.
+        let to = if to > from { to - 1 } else { to };
+        if to == from || from >= self.workspaces.len() {
+            return;
+        }
+        let active = self.active.map(|a| self.workspaces[a].project.path.clone());
+        let ws = self.workspaces.remove(from);
+        self.workspaces.insert(to.min(self.workspaces.len()), ws);
+        self.active = active.and_then(|p| self.workspaces.iter().position(|w| w.project.path == p));
+        let order: Vec<_> = self
+            .workspaces
+            .iter()
+            .map(|w| w.project.path.clone())
+            .collect();
+        self.db(|s| s.reorder_projects(&order));
+    }
+
     fn close_project(&mut self, i: usize) {
         if i >= self.workspaces.len() {
             return;
@@ -744,6 +765,7 @@ impl App {
             UiCmd::CheckUpdates => self.check_updates(ctx, true),
             UiCmd::Activate(i) => self.active = Some(i),
             UiCmd::Close(i) => self.close_project(i),
+            UiCmd::MoveProject(from, to) => self.move_project(from, to),
             UiCmd::OpenInEditor(i, bundle) => {
                 let Some(ws) = self.workspaces.get(i) else {
                     return;
