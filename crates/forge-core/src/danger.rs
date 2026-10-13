@@ -632,6 +632,21 @@ PATH="$FORGE_SHIMS:${PATH//"$FORGE_SHIMS:"/}"
 [ -n "$FORGE_ORIGIN" ] && PATH="$FORGE_READ_SHIMS:${PATH//"$FORGE_READ_SHIMS:"/}"
 "#;
 
+/// Git Bash en Windows (el shell de Claude Code allí): su /etc/profile pone /mingw64/bin y
+/// /usr/bin, con el git.exe y el rm.exe de Git, delante del PATH. Bash lee BASH_ENV en los
+/// shells no interactivos (`bash -c`, también con `-l`, tras el perfil): ahí los enlaces de
+/// Guard vuelven a ir primero.
+// ponytail: un Git Bash interactivo no lee BASH_ENV; los lectores de secretos, aún sin
+// probar en Git Bash, no se ponen aquí.
+const BASH_ENV: &str = r#"# Generado por Forge: lo lee bash (BASH_ENV) tras el perfil.
+[ -n "$FORGE_USER_BASH_ENV" ] && . "$FORGE_USER_BASH_ENV"
+if [ -n "$FORGE_SHIMS" ]; then
+  forge_shims=$(cygpath -u "$FORGE_SHIMS" 2>/dev/null || printf '%s' "$FORGE_SHIMS")
+  PATH="$forge_shims:${PATH//"$forge_shims:"/}"
+  unset forge_shims
+fi
+"#;
+
 /// Lector de una terminal de agente: solo si algún argumento parece un archivo con
 /// secretos llama a Forge; si no, ejecuta el programa de siempre (sin estos guiones en
 /// el PATH, para no volver a entrar).
@@ -779,6 +794,7 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     let bash = base.join("bash");
     std::fs::create_dir_all(&bash)?;
     std::fs::write(bash.join("bashrc"), BASHRC)?;
+    std::fs::write(bash.join("env.sh"), BASH_ENV)?;
     let mut env = HashMap::from([
         ("FORGE_SHIMS".into(), shims.to_string_lossy().into_owned()),
         (
@@ -797,6 +813,18 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         ),
         ("FORGE_APP_PID".into(), std::process::id().to_string()),
     ]);
+    #[cfg(windows)]
+    {
+        if let Some(user) = std::env::var_os("BASH_ENV") {
+            env.insert(
+                "FORGE_USER_BASH_ENV".into(),
+                user.to_string_lossy().into_owned(),
+            );
+        }
+        // Con `/`: Git Bash abre `C:/…` sin convertir nada.
+        let file = bash.join("env.sh").to_string_lossy().replace('\\', "/");
+        env.insert("BASH_ENV".into(), file);
+    }
     let shell = std::env::var("SHELL").unwrap_or_default();
     if shell.ends_with("zsh") {
         if let Some(user) = std::env::var_os("ZDOTDIR") {
