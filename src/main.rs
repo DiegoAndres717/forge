@@ -268,12 +268,7 @@ fn main() -> eframe::Result {
     {
         forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
     }
-    // Trampolín de cada terminal en macOS: se convierte en su shell (antes de cargar nada).
     let raw: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    #[cfg(target_os = "macos")]
-    if raw.first().is_some_and(|a| a == terminal::DISCLAIM) {
-        terminal::disclaim_exec(&raw[1..]);
-    }
     // El Remove-Item de PowerShell (Windows) pregunta aquí antes de un borrado recursivo.
     if raw.first().is_some_and(|a| a == "--guard-check")
         && let Some(name) = raw.get(1)
