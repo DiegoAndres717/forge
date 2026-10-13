@@ -241,3 +241,91 @@ fn forge_powershell_puts_shims_first() {
         shims.display()
     );
 }
+
+/// PowerShell con el arranque de Forge (enlaces primero y Remove-Item vigilado).
+#[cfg(windows)]
+fn pwsh(e: &Env, script: &str) -> Command {
+    let script = format!("{}; {}; {script}", danger::PWSH_GUARD, danger::PWSH_REMOVE);
+    let mut cmd = Command::new(forge_core::powershell());
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .current_dir(&e.repo)
+        .envs(&e.vars);
+    cmd
+}
+
+/// Lanza el script de PowerShell, espera su solicitud y la responde.
+#[cfg(windows)]
+fn pwsh_answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
+    let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
+    let mut child = pwsh(e, script)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    let request = loop {
+        if let Some(r) = danger::pending(&dir).into_iter().next() {
+            break r;
+        }
+        if start.elapsed() > Duration::from_secs(20) {
+            let _ = child.kill();
+            let out = child.wait_with_output().unwrap();
+            panic!(
+                "no llegó la solicitud:\n{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    danger::answer(&dir, &request.id, allow).unwrap();
+    (child.wait_with_output().unwrap(), request)
+}
+
+/// `rm`/`Remove-Item` recursivo fuera del proyecto espera autorización en PowerShell; con
+/// «Denegar» la carpeta sigue ahí y con «Permitir» se borra (también por la tubería).
+#[cfg(windows)]
+#[test]
+fn powershell_recursive_delete_outside_the_project_waits() {
+    let e = setup("pwsh-rm");
+    let outside = e.base.join("otro");
+    std::fs::create_dir_all(outside.join("dentro")).unwrap();
+    std::fs::write(outside.join("dentro").join("a.txt"), "x").unwrap();
+    let target = outside.to_string_lossy().into_owned();
+
+    let (_, request) = pwsh_answered(&e, &format!("Remove-Item -Recurse '{target}'"), false);
+    assert!(
+        request.reason.contains("fuera de la carpeta del proyecto"),
+        "{}",
+        request.reason
+    );
+    assert!(outside.exists(), "con «Denegar» no se borra");
+
+    // Alias y parámetro abreviado, como se escribe a mano.
+    let (_, _) = pwsh_answered(&e, &format!("rm -r -fo '{target}'"), true);
+    assert!(!outside.exists(), "con «Permitir» se borra");
+
+    std::fs::create_dir_all(&outside).unwrap();
+    let (_, _) = pwsh_answered(
+        &e,
+        &format!("Get-Item '{target}' | Remove-Item -Recurse"),
+        false,
+    );
+    assert!(outside.exists(), "por la tubería también pregunta");
+}
+
+/// Dentro del proyecto (build, node_modules…) es rutina: se borra sin preguntar.
+#[cfg(windows)]
+#[test]
+fn powershell_recursive_delete_inside_the_project_does_not_ask() {
+    let e = setup("pwsh-rm-in");
+    std::fs::create_dir_all(e.repo.join("build").join("x")).unwrap();
+    let out = pwsh(&e, r"rm -r .\build").output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(!e.repo.join("build").exists());
+    assert!(danger::pending(Path::new(&e.vars["FORGE_APPROVALS"])).is_empty());
+}
