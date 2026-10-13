@@ -309,7 +309,9 @@ impl Terminal {
             // Windows: PowerShell, con el perfil del usuario (PATH de nvm, etc.).
             _ if cfg!(windows) => {
                 cmd = CommandBuilder::new(forge_core::powershell());
-                cmd.args(["-NoLogo", "-Command", command]);
+                // También aquí los enlaces de Guard primero (el perfil puede reordenar el PATH).
+                let guarded = format!("{}; {command}", forge_core::danger::PWSH_GUARD);
+                cmd.args(["-NoLogo", "-Command", &guarded]);
             }
             Some(rc) => cmd.args(["--rcfile", &rc, "-i", "-c", command]),
             None => cmd.args(["-l", "-i", "-c", command]),

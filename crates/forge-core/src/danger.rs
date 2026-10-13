@@ -334,7 +334,7 @@ pub fn shim_name(argv0: &str) -> Option<String> {
 /// PowerShell: pone los enlaces de Guard primero en el PATH (tras el perfil del usuario, que
 /// puede reordenarlo). Va dentro del arranque de Forge y no en un .ps1: con la política de
 /// scripts «Restricted», la de fábrica en Windows, un archivo no se cargaría.
-pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_SHIMS) + @($env:Path -split ';' | Where-Object { $_ -and $_ -ne $env:FORGE_SHIMS })) -join ';' }";
+pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_SHIMS) + @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\\') -ne $env:FORGE_SHIMS.TrimEnd('\\') })) -join ';' }";
 
 /// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
 /// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
