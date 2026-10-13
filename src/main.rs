@@ -242,13 +242,7 @@ fn main() -> eframe::Result {
     if let Some(name) = std::env::args()
         .next()
         .as_deref()
-        .and_then(|a| {
-            std::path::Path::new(a)
-                .file_name()?
-                .to_str()
-                .map(str::to_string)
-        })
-        .filter(|n| forge_core::danger::SHIMMED.contains(&n.as_str()))
+        .and_then(forge_core::danger::shim_name)
     {
         forge_core::danger::shim_main(&name, std::env::args().skip(1).collect());
     }

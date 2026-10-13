@@ -324,28 +324,59 @@ fn ask_tty(request: &Request) -> Result<bool, String> {
     ))
 }
 
-/// El programa real: el primero del PATH que no es un enlace de Forge.
+/// Nombre del comando vigilado con el que se ejecutó Forge (`git`, `C:\\…\\GIT.EXE` → `git`).
+pub fn shim_name(argv0: &str) -> Option<String> {
+    let file = argv0.rsplit(['/', '\\']).next()?.to_ascii_lowercase();
+    let name = file.strip_suffix(".exe").unwrap_or(&file);
+    SHIMMED.contains(&name).then(|| name.to_string())
+}
+
+/// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
+/// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
+pub const SHIMS_MARKER: &str = ".forge-shims";
+
+/// El programa de verdad: el primero del PATH que no esté en una carpeta de enlaces de Forge,
+/// probando las extensiones de `exts` (en Windows, las de PATHEXT).
+fn find_real(
+    name: &str,
+    path: &std::ffi::OsStr,
+    exts: &[&str],
+    is_forge: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    std::env::split_paths(path)
+        .filter(|dir| !dir.join(SHIMS_MARKER).exists())
+        .flat_map(|dir| exts.iter().map(move |ext| dir.join(format!("{name}{ext}"))))
+        .find(|p| executable(p) && !is_forge(p))
+}
+
+fn executable(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| {
+        #[cfg(unix)]
+        let ok =
+            m.is_file() && std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0;
+        // Windows no tiene bit de ejecución: cuenta la extensión (PATHEXT).
+        #[cfg(not(unix))]
+        let ok = m.is_file();
+        ok
+    })
+}
+
 fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
     let shims = shims.and_then(|s| s.canonicalize().ok());
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .filter(|dir| dir.canonicalize().ok() != shims || shims.is_none())
-        .map(|dir| dir.join(name))
-        .find(|p| {
-            p.is_file()
-                && std::fs::metadata(p).is_ok_and(|m| {
-                    // ponytail: en Windows basta con que exista (Guard en Windows: fase 4).
-                    #[cfg(unix)]
-                    let executable =
-                        std::os::unix::fs::PermissionsExt::mode(&m.permissions()) & 0o111 != 0;
-                    #[cfg(not(unix))]
-                    let executable = m.is_file();
-                    executable
-                })
-                && p.canonicalize().ok()
-                    != std::env::current_exe()
-                        .ok()
-                        .and_then(|e| e.canonicalize().ok())
-        })
+    let path = std::env::var_os("PATH")?;
+    let dirs = std::env::split_paths(&path)
+        .filter(|dir| shims.is_none() || dir.canonicalize().ok() != shims);
+    let path = std::env::join_paths(dirs).ok()?;
+    let forge = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.canonicalize().ok());
+    #[cfg(windows)]
+    let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    #[cfg(windows)]
+    let exts: Vec<&str> = pathext.split(';').collect();
+    #[cfg(not(windows))]
+    let exts = [""];
+    find_real(name, &path, &exts, |p| p.canonicalize().ok() == forge)
 }
 
 /// Punto de entrada cuando Forge se ejecuta como `rm`, `git`… (enlace en `shims/`).
@@ -478,6 +509,17 @@ fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
     #[cfg(not(unix))]
     let err = {
         let _ = name;
+        // Ctrl+C llega a toda la consola: el shim lo ignora y espera a que el programa real
+        // termine a su manera (si no, el prompt volvería antes y su salida saldría encima).
+        // Con una función propia, no con NULL: ignorar con NULL lo heredaría el hijo.
+        #[cfg(windows)]
+        {
+            unsafe extern "system" fn ignore(_: u32) -> windows_sys::core::BOOL {
+                1
+            }
+            // SAFETY: registra una función estática que no toca estado.
+            unsafe { windows_sys::Win32::System::Console::SetConsoleCtrlHandler(Some(ignore), 1) };
+        }
         match std::process::Command::new(real).args(args).status() {
             Ok(status) => std::process::exit(status.code().unwrap_or(1)),
             Err(e) => e,
@@ -591,6 +633,67 @@ fn zsh_file(name: &str, tail: &str) -> String {
     s
 }
 
+/// Windows: `<nombre>.exe` como enlace duro de `exe` (ni symlinks, que piden Modo de
+/// desarrollador, ni copias de 50 MB). Uno igual se deja; uno en uso se aparta con otro
+/// nombre (Windows deja renombrar un .exe abierto, no borrarlo) y se borra en otro arranque.
+/// Un enlace duro no cruza discos (Forge en D:, el perfil en C:): entonces se hace una sola
+/// copia de Forge en `shims/` y los comandos se enlazan a ella. Si ni así, se avisa.
+#[cfg(windows)]
+fn windows_shims(shims: &Path, exe: &Path) {
+    for entry in std::fs::read_dir(shims).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().contains(".old-") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let stamp = |p: &Path| {
+        std::fs::metadata(p)
+            .ok()
+            .map(|m| (m.len(), m.modified().ok()))
+    };
+    let forge = stamp(exe);
+    // Copia local para otro disco (CopyFile conserva la fecha: el sello coincide con `exe`).
+    let local = shims.join("forge-shim.exe");
+    let mut source = exe.to_path_buf();
+    for name in SHIMMED {
+        let link = shims.join(format!("{name}.exe"));
+        if link.exists() && stamp(&link) == forge {
+            continue;
+        }
+        let mut linked = make_room(&link).and_then(|()| std::fs::hard_link(&source, &link));
+        if linked.is_err() && source == exe {
+            let copied = if stamp(&local) == forge {
+                Ok(())
+            } else {
+                make_room(&local).and_then(|()| std::fs::copy(exe, &local).map(|_| ()))
+            };
+            if copied.is_ok() {
+                source = local.clone();
+                linked = std::fs::hard_link(&source, &link);
+            }
+        }
+        if let Err(e) = linked {
+            eprintln!(
+                "forge: sin control de `{name}` (no se pudo enlazar {}): {e}",
+                link.display()
+            );
+        }
+    }
+}
+
+/// Deja libre `path`: lo borra o, si está en uso, lo aparta como `<nombre>.old-<ms>`.
+#[cfg(windows)]
+fn make_room(path: &Path) -> std::io::Result<()> {
+    if !path.exists() || std::fs::remove_file(path).is_ok() {
+        return Ok(());
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let mut old = path.as_os_str().to_owned();
+    old.push(format!(".old-{now}"));
+    std::fs::rename(path, old)
+}
+
 /// Crea `shims/` (enlaces a `exe`), `zsh/` y `bash/` dentro de `base` y devuelve las variables para
 /// las terminales de Forge.
 pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, String>> {
@@ -601,13 +704,15 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     for dir in [&shims, &zsh, &approvals, &events] {
         std::fs::create_dir_all(dir)?;
     }
-    // ponytail: en Windows, sin enlaces hasta que Guard llegue allí (plan #11, fase 4): sin
-    // `.exe` no servirían como comandos, y sin Modo de desarrollador serían copias de Forge.
-    for name in SHIMMED.iter().filter(|_| cfg!(unix)) {
+    std::fs::write(shims.join(SHIMS_MARKER), "")?;
+    #[cfg(unix)]
+    for name in SHIMMED {
         let link = shims.join(name);
         let _ = std::fs::remove_file(&link);
         crate::symlink(exe, &link)?;
     }
+    #[cfg(windows)]
+    windows_shims(&shims, exe);
     let readers = base.join("shims-read");
     std::fs::create_dir_all(&readers)?;
     for name in READERS {
@@ -652,8 +757,11 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
     } else {
         // bash los vuelve a poner primero al final de su arranque (FORGE_BASHRC).
         // ponytail: en fish van delante del PATH heredado (su perfil puede reordenarlo).
-        let path = std::env::var("PATH").unwrap_or_default();
-        env.insert("PATH".into(), format!("{}:{path}", shims.display()));
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let dirs = std::iter::once(shims.clone()).chain(std::env::split_paths(&path));
+        if let Ok(joined) = std::env::join_paths(dirs) {
+            env.insert("PATH".into(), joined.to_string_lossy().into_owned());
+        }
     }
     Ok(env)
 }
@@ -661,6 +769,44 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shims_are_recognised_by_name_with_or_without_exe() {
+        assert_eq!(
+            shim_name("/Users/ana/forge/shims/git").as_deref(),
+            Some("git")
+        );
+        assert_eq!(shim_name(r"C:\Forge\shims\GIT.EXE").as_deref(), Some("git"));
+        assert_eq!(shim_name("rm.exe").as_deref(), Some("rm"));
+        assert_eq!(shim_name("git.cmd"), None);
+        assert_eq!(shim_name("forge"), None);
+        assert_eq!(shim_name(r"C:\Forge\forge.exe"), None);
+    }
+
+    #[test]
+    fn the_real_program_is_never_another_shim() {
+        let base = std::env::temp_dir().join(format!("forge-real-{}", std::process::id()));
+        let (shims, real) = (base.join("shims"), base.join("bin"));
+        for dir in [&shims, &real] {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("git.exe"), "").unwrap();
+            #[cfg(unix)]
+            std::fs::set_permissions(
+                dir.join("git.exe"),
+                std::os::unix::fs::PermissionsExt::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        std::fs::write(shims.join(SHIMS_MARKER), "").unwrap();
+        let path = std::env::join_paths([&shims, &real]).unwrap();
+        let exts = ["", ".exe"];
+        assert_eq!(
+            find_real("git", &path, &exts, |_| false),
+            Some(real.join("git.exe"))
+        );
+        assert_eq!(find_real("docker", &path, &exts, |_| false), None);
+        std::fs::remove_dir_all(base).unwrap();
+    }
 
     fn args(s: &str) -> Vec<String> {
         s.split_whitespace().map(str::to_string).collect()

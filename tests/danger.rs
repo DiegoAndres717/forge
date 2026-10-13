@@ -19,37 +19,48 @@ fn setup(name: &str) -> Env {
     let _ = std::fs::remove_dir_all(&base);
     let repo = base.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
-    let base = base.canonicalize().unwrap();
-    let repo = repo.canonicalize().unwrap();
+    // Sin `\\?\` en Windows: el sh de Git for Windows no entiende esas rutas en el PATH.
+    let base = forge_core::canonical(&base);
+    let repo = forge_core::canonical(&repo);
     let mut vars = danger::install(&base.join("forge"), Path::new(FORGE)).unwrap();
     // El "proceso de la app" es este test (sigue vivo mientras espera la respuesta).
     vars.insert("FORGE_APP_PID".into(), std::process::id().to_string());
     vars.insert("FORGE_PROJECT".into(), repo.to_string_lossy().into_owned());
     vars.insert("FORGE_ORIGIN".into(), "Claude Code".into());
-    let path = format!("{}:{}", vars["FORGE_SHIMS"], std::env::var("PATH").unwrap());
-    vars.insert("PATH".into(), path);
+    let path = std::env::join_paths(
+        std::iter::once(std::path::PathBuf::from(&vars["FORGE_SHIMS"]))
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    vars.insert("PATH".into(), path.to_string_lossy().into_owned());
     vars.remove("ZDOTDIR");
     let e = Env { base, repo, vars };
-    assert!(sh(&e, "git init -q -b main && git config user.email t@t && git config user.name t && echo v1 > a.txt && git add . && git commit -qm inicio").status.success());
+    assert!(sh(&e, "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false && echo v1 > a.txt && git add . && git commit -qm inicio").status.success());
     e
 }
 
+/// `sh -c script` con el entorno de una terminal de agente de Forge.
+fn shell(e: &Env, script: &str) -> Command {
+    // Windows: el sh de Git for Windows pone sus carpetas (y su git.exe) delante del PATH al
+    // arrancar; los enlaces de Forge vuelven a ir primero, como hace Forge con bash.
+    let script = if cfg!(windows) {
+        format!("PATH=\"$(cygpath -u \"$FORGE_SHIMS\"):$PATH\"; {script}")
+    } else {
+        script.to_string()
+    };
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", &script]).current_dir(&e.repo).envs(&e.vars);
+    cmd
+}
+
 fn sh(e: &Env, script: &str) -> Output {
-    Command::new("sh")
-        .args(["-c", script])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
-        .output()
-        .unwrap()
+    shell(e, script).output().unwrap()
 }
 
 /// Lanza el comando, espera su solicitud y la responde.
 fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
     let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
-    let child = Command::new("sh")
-        .args(["-c", script])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
+    let child = shell(e, script)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -59,10 +70,13 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
         if let Some(r) = danger::pending(&dir).into_iter().next() {
             break r;
         }
-        assert!(
-            start.elapsed() < Duration::from_secs(10),
-            "no llegó la solicitud"
-        );
+        if start.elapsed() > Duration::from_secs(10) {
+            let which = sh(e, "command -v git rm; echo \"$PATH\"");
+            panic!(
+                "no llegó la solicitud. git y rm, y PATH:\n{}",
+                String::from_utf8_lossy(&which.stdout)
+            );
+        }
         std::thread::sleep(Duration::from_millis(20));
     };
     danger::answer(&dir, &request.id, allow).unwrap();
@@ -70,10 +84,6 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
-)]
 fn dangerous_commands_wait_for_authorization() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -114,19 +124,12 @@ fn dangerous_commands_wait_for_authorization() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "Guard's dangerous-command shims come to Windows in plan #11, phase 4"
-)]
 fn without_forge_open_and_no_terminal_it_is_blocked() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let mut e = setup("closed");
     e.vars.insert("FORGE_APP_PID".into(), "999999".into());
-    let out = Command::new("sh")
-        .args(["-c", "git reset --hard"])
-        .current_dir(&e.repo)
-        .envs(&e.vars)
+    let out = shell(&e, "git reset --hard")
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
