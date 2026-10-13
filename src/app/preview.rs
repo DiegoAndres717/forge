@@ -558,20 +558,14 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "15-sugerencias");
     // Panel maximizado con el desplegable de los demás abierto.
-    harness.key_press_modifiers(
-        egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND,
-        egui::Key::Enter,
-    );
+    harness.key_press_modifiers(super::e2e::CMD, egui::Key::Enter);
     settle(&mut harness);
     let hidden = forge_core::tr!("Paneles ocultos ({n})", n = 2);
     harness.get_by_label(&hidden).click();
     settle(&mut harness);
     save(&mut harness, &out, "16-maximizado");
     harness.key_press(egui::Key::Escape);
-    harness.key_press_modifiers(
-        egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND,
-        egui::Key::Enter,
-    );
+    harness.key_press_modifiers(super::e2e::CMD, egui::Key::Enter);
     settle(&mut harness);
     // Terminales tipo VS Code: tres en el panel "Terminal", lista a la derecha.
     harness.state_mut().workspaces[0].focus_first_shell();

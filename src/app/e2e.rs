@@ -12,14 +12,31 @@ fn serial() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-const CMD: Modifiers = Modifiers {
+// ⌘ y ⌘⇧ en macOS; Ctrl+Shift y Ctrl+Alt en Linux y Windows (ver `command_mods`).
+#[cfg(target_os = "macos")]
+pub(super) const CMD: Modifiers = Modifiers {
     alt: false,
     ctrl: false,
     shift: false,
     mac_cmd: true,
     command: true,
 };
+#[cfg(target_os = "macos")]
 const CMD_SHIFT: Modifiers = Modifiers { shift: true, ..CMD };
+#[cfg(not(target_os = "macos"))]
+pub(super) const CMD: Modifiers = Modifiers {
+    alt: false,
+    ctrl: true,
+    shift: true,
+    mac_cmd: false,
+    command: true,
+};
+#[cfg(not(target_os = "macos"))]
+const CMD_SHIFT: Modifiers = Modifiers {
+    alt: true,
+    shift: false,
+    ..CMD
+};
 
 /// Repositorio Git temporal con un archivo preparado y un check que pasa.
 fn project(name: &str) -> PathBuf {

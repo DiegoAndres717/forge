@@ -839,9 +839,13 @@ impl Terminal {
                         self.send(text.as_bytes());
                     }
                 }
+                // Ctrl+X en PC llega como «cortar»: es del shell (nano sale con él).
+                egui::Event::Cut if !cfg!(target_os = "macos") => self.send(b"\x18"),
                 egui::Event::Copy => {
-                    if let Some(text) = self.term.lock().unwrap().selection_to_string() {
-                        ctx.copy_text(text);
+                    let selection = self.term.lock().unwrap().selection_to_string();
+                    match copy_key(cfg!(target_os = "macos"), selection) {
+                        Ok(text) => ctx.copy_text(text),
+                        Err(bytes) => self.send(bytes),
                     }
                 }
                 egui::Event::Key {
@@ -849,8 +853,10 @@ impl Terminal {
                     pressed: true,
                     modifiers,
                     ..
-                } if modifiers.mac_cmd => {
-                    // ⌘K: limpia pantalla y scrollback, como Terminal.app.
+                } if crate::app::command_mods(modifiers, cfg!(target_os = "macos"))
+                    == Some((false, false)) =>
+                {
+                    // ⌘K (Ctrl+Shift+K en PC): limpia pantalla y scrollback, como Terminal.app.
                     self.term.lock().unwrap().grid_mut().clear_history();
                     self.send(b"\x0c");
                 }
@@ -1127,8 +1133,8 @@ impl Terminal {
             }
         }
 
-        // URL bajo el puntero con ⌘ (la de la manito); el ⌘-clic abre esta misma.
-        let hover_url = hover.filter(|_| mods.mac_cmd && over).and_then(|p| {
+        // URL bajo el puntero con ⌘ (Ctrl en PC; la de la manito); el clic abre esta misma.
+        let hover_url = hover.filter(|_| mods.command && over).and_then(|p| {
             let (line, col, _) = self.cell_at(p, rect, m);
             url_at_point(
                 &term,
@@ -1167,7 +1173,7 @@ impl Terminal {
                         continue;
                     }
                     let point = viewport_to_point(offset, Point::new(line, Column(col)));
-                    if modifiers.mac_cmd || mods.mac_cmd {
+                    if modifiers.command || mods.command {
                         // ⌘+clic abre la URL en el navegador predeterminado.
                         if let Some(url) = hover_url.clone().or_else(|| url_at_point(&term, point))
                         {
@@ -1249,7 +1255,7 @@ impl Terminal {
         // ⌘ sobre una URL: cursor de mano (el subrayado se pinta en paint()).
         if hover_url.is_some() {
             ctx.set_cursor_icon(CursorIcon::PointingHand);
-        } else if !mods.mac_cmd && over && !report {
+        } else if !mods.command && over && !report {
             ctx.set_cursor_icon(CursorIcon::Text);
         }
 
@@ -1948,9 +1954,26 @@ impl Search {
     }
 }
 
+/// Ctrl+C en PC llega como «copiar» (egui-winit): con selección copia, como Windows
+/// Terminal; sin ella, los bytes que van al shell.
+fn copy_key(mac: bool, selection: Option<String>) -> Result<String, &'static [u8]> {
+    selection
+        .filter(|s| !s.is_empty())
+        .ok_or(if mac { b"" } else { b"\x03" })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctrl_c_interrupts_on_pc_without_selection() {
+        assert_eq!(copy_key(false, None), Err(&b"\x03"[..]));
+        assert_eq!(copy_key(false, Some(String::new())), Err(&b"\x03"[..]));
+        assert_eq!(copy_key(false, Some("ls".into())), Ok("ls".into()));
+        // En macOS ⌘C solo copia: la interrupción es Ctrl+C, que no pasa por aquí.
+        assert_eq!(copy_key(true, None), Err(&b""[..]));
+    }
 
     #[test]
     fn powershell_gets_the_startup_script_encoded() {
