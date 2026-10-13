@@ -212,3 +212,27 @@ fn forge_bash_puts_shims_first() {
     assert!(path.starts_with(&format!("{read}:{shims}:")), "{path}");
     assert!(text.contains("PERFIL=1"), "{text}");
 }
+
+/// PowerShell en Windows: con el arranque de Forge, `git` es el enlace de Guard aunque algo
+/// del perfil haya puesto otra carpeta delante en el PATH.
+#[cfg(windows)]
+#[test]
+fn forge_powershell_puts_shims_first() {
+    let e = setup("pwsh");
+    let script = format!(
+        "$env:Path = 'C:\\forge-delante;' + $env:Path; {}; (Get-Command git).Source",
+        danger::PWSH_GUARD
+    );
+    let out = Command::new(forge_core::powershell())
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .envs(&e.vars)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    let shims = Path::new(&e.vars["FORGE_SHIMS"]);
+    assert!(
+        text.trim().to_lowercase() == shims.join("git.exe").to_string_lossy().to_lowercase(),
+        "git = {text:?}, enlaces en {}",
+        shims.display()
+    );
+}
