@@ -37,11 +37,17 @@
       Invoke-WebRequest "$base/$zip.sha256" -OutFile (Join-Path $tmp "$zip.sha256")
     }
     $expected = ((Get-Content (Join-Path $tmp "$zip.sha256") -Raw).Trim() -split '\s+')[0].ToLower()
-    $actual = (Get-FileHash (Join-Path $tmp $zip) -Algorithm SHA256).Hash.ToLower()
+    # Con .NET y no Get-FileHash: lanzado desde PowerShell 7, un Windows PowerShell hereda su
+    # PSModulePath y no encuentra el módulo de Get-FileHash.
+    $stream = [System.IO.File]::OpenRead((Join-Path $tmp $zip))
+    try {
+      $actual = [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($stream)).Replace('-', '').ToLower()
+    } finally { $stream.Dispose() }
     if ($expected -ne $actual) {
       throw 'forge: la suma SHA-256 no coincide: la descarga está dañada o no es la publicada'
     }
-    Expand-Archive (Join-Path $tmp $zip) -DestinationPath (Join-Path $tmp 'out') -Force
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory((Join-Path $tmp $zip), (Join-Path $tmp 'out'))
     $new = Join-Path $tmp 'out\forge.exe'
     if (-not (Test-Path $new)) { throw "forge: $zip no contiene forge.exe" }
 

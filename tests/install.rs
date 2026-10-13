@@ -6,9 +6,11 @@ use std::process::{Command, Output};
 
 const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
+/// Windows PowerShell 5.1 con su propio PSModulePath (el del CI es el de PowerShell 7).
 fn powershell(script: &str) -> Output {
     Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env_remove("PSModulePath")
         .output()
         .unwrap()
 }
@@ -30,6 +32,8 @@ fn install(release: &Path, dir: &Path) -> Output {
         .env("FORGE_RELEASE_DIR", release)
         .env("FORGE_DIR", dir)
         .env("FORGE_SKIP_USER_SETUP", "1")
+        // Lanzado desde PowerShell 7, como desde una terminal de Forge: el instalador no
+        // puede depender de los módulos de Windows PowerShell.
         .output()
         .unwrap()
 }
@@ -44,7 +48,8 @@ fn installs_updates_and_rejects_a_tampered_download() {
         std::env::consts::ARCH
     ));
     let made = powershell(&format!(
-        "Compress-Archive -Path '{FORGE}' -DestinationPath '{}'; \
+        "$ErrorActionPreference = 'Stop'; \
+         Compress-Archive -Path '{FORGE}' -DestinationPath '{}'; \
          $h = (Get-FileHash '{}' -Algorithm SHA256).Hash.ToLower(); \
          \"$h  x.zip\" | Out-File -Encoding ascii '{}.sha256'",
         zip.display(),
