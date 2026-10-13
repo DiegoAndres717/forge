@@ -93,11 +93,28 @@ pub enum Action {
     NextRecent,
 }
 
-/// Atajos globales (siempre con ⌘, nunca con Ctrl, para no robar teclas al shell).
+/// Atajos globales: con ⌘ en macOS y con Ctrl+Shift/Ctrl+Alt en Linux y Windows, nunca
+/// con Ctrl a secas, para no robar teclas al shell (ver `command_mods`).
 pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
-    if !m.mac_cmd || m.ctrl {
-        return None;
+    shortcut_for(key, m, cfg!(target_os = "macos"))
+}
+
+/// Modificadores de un atajo de Forge como (⇧, ⌥) de macOS. Fuera de macOS, ⌘ es
+/// Ctrl+Shift, ⌘⇧ es Ctrl+Alt y ⌘⌥ es Ctrl+Alt+Shift: Ctrl a secas es del shell.
+pub(crate) fn command_mods(m: Modifiers, mac: bool) -> Option<(bool, bool)> {
+    if mac {
+        return (m.mac_cmd && !m.ctrl).then_some((m.shift, m.alt));
     }
+    match (m.ctrl, m.shift, m.alt) {
+        (true, true, false) => Some((false, false)),
+        (true, false, true) => Some((true, false)),
+        (true, true, true) => Some((false, true)),
+        _ => None,
+    }
+}
+
+fn shortcut_for(key: Key, m: Modifiers, mac: bool) -> Option<Action> {
+    let (shift, alt) = command_mods(m, mac)?;
     let digits = [
         Key::Num1,
         Key::Num2,
@@ -112,11 +129,11 @@ pub fn shortcut(key: Key, m: Modifiers) -> Option<Action> {
     if let Some(n) = digits
         .iter()
         .position(|k| *k == key)
-        .filter(|_| !m.shift && !m.alt)
+        .filter(|_| !shift && !alt)
     {
         return Some(Action::Switch(n));
     }
-    Some(match (key, m.shift, m.alt) {
+    Some(match (key, shift, alt) {
         (Key::D, true, false) => Action::Ws(WsAction::Split(Dir::Column)),
         (Key::D, false, false) => Action::Ws(WsAction::Split(Dir::Row)),
         (Key::T, false, false) => Action::Ws(WsAction::NewTerminal),
@@ -1561,6 +1578,7 @@ mod tests {
 
     #[test]
     fn shortcuts() {
+        let shortcut = |k, m| shortcut_for(k, m, true);
         let cmd = Modifiers::MAC_CMD | Modifiers::COMMAND;
         assert_eq!(
             shortcut(Key::D, cmd),
@@ -1582,6 +1600,35 @@ mod tests {
         // ⌘← (inicio de línea) y Ctrl+D (EOF) siguen siendo del shell.
         assert_eq!(shortcut(Key::ArrowLeft, cmd), None);
         assert_eq!(shortcut(Key::D, Modifiers::CTRL), None);
+    }
+
+    #[test]
+    fn pc_shortcuts() {
+        // Fuera de macOS: ⌘ es Ctrl+Shift, ⌘⇧ es Ctrl+Alt y ⌘⌥ es Ctrl+Alt+Shift.
+        let shortcut = |k, m| shortcut_for(k, m, false);
+        let cmd = Modifiers::CTRL | Modifiers::SHIFT;
+        let cmd_shift = Modifiers::CTRL | Modifiers::ALT;
+        assert_eq!(
+            shortcut(Key::D, cmd),
+            Some(Action::Ws(WsAction::Split(Dir::Row)))
+        );
+        assert_eq!(
+            shortcut(Key::D, cmd_shift),
+            Some(Action::Ws(WsAction::Split(Dir::Column)))
+        );
+        assert_eq!(shortcut(Key::Num2, cmd), Some(Action::Switch(1)));
+        assert_eq!(shortcut(Key::G, cmd), Some(Action::ToggleGuard));
+        assert_eq!(shortcut(Key::G, cmd_shift), Some(Action::ToggleGit));
+        assert_eq!(
+            shortcut(Key::ArrowLeft, cmd | Modifiers::ALT),
+            Some(Action::Ws(WsAction::Focus(Toward::Left)))
+        );
+        // Ctrl a secas sigue siendo del shell: EOF, borrar palabra, borrar línea.
+        for key in [Key::D, Key::W, Key::K] {
+            assert_eq!(shortcut(key, Modifiers::CTRL), None);
+        }
+        // Y ⌘ no existe en un PC.
+        assert_eq!(shortcut(Key::K, Modifiers::MAC_CMD), None);
     }
 }
 
