@@ -41,6 +41,9 @@ let lastAnchor = ''
 let sinceAnchor = 0
 // Quick filter before asking Forge (`forge secret`) whether a call reads a file with
 // secrets; Forge decides. Same idea as the reader shims of the other agents.
+// Windows: Claude Code's shell can rebuild PATH and skip Guard's shims, so on a Bash call
+// that names a watched program the mod asks Forge (`forge danger`) as a second line.
+const DANGER_HINT = /\b(git|rm|docker|psql|mysql|mariadb|dropdb)(\.exe)?\b/i
 const SECRET_HINT = /\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
@@ -285,6 +288,11 @@ export const register: Register = on => {
     const verdict = await next(e)
     if (verdict.decision === 'deny') return verdict
     const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; command?: unknown }
+    if (e.tool === 'Bash' && typeof input.command === 'string' && DANGER_HINT.test(input.command)
+      && await $.env.get('FORGE_GUARD_COMMANDS').catch(() => undefined) === '1') {
+      const out = await forge($, ['danger', '--command', input.command], undefined, 2_000)
+      if (out && out.exitCode === 0) return { decision: 'ask' as const, reason: `Forge: ${out.stdout.trim()}` }
+    }
     const target = e.tool === 'Bash' ? input.command : e.tool === 'Read' || e.tool === 'Grep' ? input.file_path ?? input.path : undefined
     if (typeof target !== 'string' || !SECRET_HINT.test(target)) return verdict
     const out = await forge($, ['secret', e.tool === 'Bash' ? '--command' : '--path', target], undefined, 2_000)

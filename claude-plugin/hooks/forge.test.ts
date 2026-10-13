@@ -407,6 +407,39 @@ test('the band warns when the context is getting full', async ($, on) => {
   expect(drawn).toContain('/compact')
 })
 
+test('on Windows a dangerous Bash command asks first; others keep their verdict', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge', FORGE_GUARD_COMMANDS: '1' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    const danger = e.argv.includes('danger') && e.argv.some(a => a.includes('--force'))
+    return { value: { exitCode: danger ? 0 : 1, stdout: danger ? 'reescribe la historia del remoto' : '', stderr: '' } } as never
+  })
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  const check = (command: string) => $.tool.check({ tool: 'Bash', input: { command } } as never)
+  const push = await check('git status && git push --force')
+  expect(push.decision).toBe('ask')
+  expect(push.reason).toContain('reescribe la historia')
+  expect((await check('git status')).decision).toBe('allow')
+  // No watched program in the line: Forge isn't even asked.
+  const before = asked.length
+  expect((await check('npm test')).decision).toBe('allow')
+  expect(asked.length).toBe(before)
+})
+
+test('outside Windows the shims already guard Bash: Forge is not asked', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    return { value: { exitCode: 0, stdout: 'x', stderr: '' } } as never
+  })
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  const verdict = await $.tool.check({ tool: 'Bash', input: { command: 'git push --force' } } as never)
+  expect(verdict.decision).toBe('allow')
+  expect(asked.some(a => a.includes('danger'))).toBe(false)
+})
+
 test('reading a file with secrets asks first; other files keep their verdict', async ($, on) => {
   mock.env(on, { FORGE_BIN: '/forge' })
   const asked: string[][] = []

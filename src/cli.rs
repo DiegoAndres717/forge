@@ -186,8 +186,8 @@ fn open_store() -> Result<Store, String> {
 /// carpeta que abrir en la app. Una sola lista: una orden nueva que falte aquí abriría
 /// la app en vez de ejecutarse.
 pub const COMMANDS: &[&str] = &[
-    "agent", "ai", "anchor", "context", "doctor", "guard", "handoff", "hooks", "ideas", "mcp",
-    "memory", "plans", "secret", "status",
+    "agent", "ai", "anchor", "context", "danger", "doctor", "guard", "handoff", "hooks", "ideas",
+    "mcp", "memory", "plans", "secret", "status",
 ];
 
 pub fn run(args: &[String]) -> i32 {
@@ -266,6 +266,22 @@ pub fn run(args: &[String]) -> i32 {
             println!("{cut}");
             0
         }),
+        // ¿Comando peligroso? (`--command "…"`; el mod de Claude Code lo pregunta en Windows,
+        // donde su shell puede saltarse los enlaces de Guard). Sale 0 con el motivo si sí, 1 si no.
+        (Some("danger"), _) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+            let found = flag(args, "--command").and_then(|c| {
+                forge_core::danger::dangerous_in_command(&c, &cwd, project.as_deref())
+            });
+            match found {
+                Some(reason) => {
+                    println!("{reason}");
+                    Ok(0)
+                }
+                None => Ok(1),
+            }
+        }
         // ¿Lee un archivo con secretos? (`--path p` o `--command "…"`; el mod de Claude Code
         // lo pregunta antes de Read, Grep y Bash). Sale 0 con el motivo si sí, 1 si no.
         (Some("secret"), _) => {
