@@ -339,7 +339,7 @@ impl Store {
         self.set_phases(project, id, &phases, by)
     }
 
-    /// Abiertas primero (en curso, luego pendientes, de la más antigua a la más nueva);
+    /// Abiertas primero (en curso, luego pendientes, de la más nueva a la más antigua);
     /// después las hechas, de la más reciente a la más antigua.
     pub fn list_ideas(
         &self,
@@ -352,7 +352,7 @@ impl Store {
                 "SELECT id, title, note, status, source, updated_by, created_at, updated_at, phases FROM ideas
                  WHERE project = ?1 AND (?2 OR status != 'done')
                  ORDER BY status = 'done', status != 'doing',
-                          CASE WHEN status = 'done' THEN -updated_at ELSE created_at END",
+                          CASE WHEN status = 'done' THEN -updated_at ELSE -created_at END, id DESC",
             )
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -570,6 +570,10 @@ mod tests {
             .add_idea(None, "App para talleres", "", "usuario")
             .unwrap();
         assert!(store.add_idea(None, "  ", "", "usuario").is_err());
+
+        // Pendientes: la más nueva arriba.
+        let list = store.list_ideas(Some(bovinapp), true).unwrap();
+        assert_eq!(list.iter().map(|i| i.id).collect::<Vec<_>>(), vec![b, a]);
 
         // En curso primero; las hechas al final y solo si se piden.
         assert!(
