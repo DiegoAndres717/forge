@@ -40,7 +40,7 @@ impl App {
         ui.add_space(18.0);
         ui.horizontal(|ui| {
             if theme::primary(ui, tr!("{p0}  Abrir proyecto…", p0 = icon::FOLDER_PLUS))
-                .on_hover_text("⌘O")
+                .on_hover_text(forge_core::i18n::keys("⌘O").into_owned())
                 .clicked()
             {
                 cmds.push(UiCmd::OpenFolder);
@@ -224,7 +224,11 @@ impl App {
             .fill(theme::SURFACE)
             .corner_radius(13.0);
         if !compact {
-            button = button.right_text(RichText::new("⌘K").size(11.0).color(theme::TEXT_4));
+            button = button.right_text(
+                RichText::new(forge_core::i18n::keys("⌘K"))
+                    .size(11.0)
+                    .color(theme::TEXT_4),
+            );
         }
         // En su propia capa: no mueve el cursor de la barra (la rama sigue a la izquierda).
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
@@ -335,7 +339,14 @@ impl App {
         let right_start = ui.max_rect().max.x;
         let right = ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             update::update_pill(ui, &update, cmds);
-            if theme::icon_toggle(ui, icon::GIT_BRANCH, "Git (⌘⇧G)", ws.git.open).clicked() {
+            if theme::icon_toggle(
+                ui,
+                icon::GIT_BRANCH,
+                &forge_core::i18n::keys("Git (⌘⇧G)"),
+                ws.git.open,
+            )
+            .clicked()
+            {
                 cmds.push(UiCmd::ToggleGit);
             }
             if theme::icon_toggle(
@@ -367,7 +378,7 @@ impl App {
                     .corner_radius(13.0)
                     .min_size(Vec2::new(0.0, 26.0)),
                 )
-                .on_hover_text("Project Guard (⌘G)");
+                .on_hover_text(forge_core::i18n::keys("Project Guard (⌘G)").into_owned());
             if guard.clicked() {
                 cmds.push(UiCmd::ToggleGuard);
             }

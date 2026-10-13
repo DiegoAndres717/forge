@@ -64,13 +64,50 @@ static EN: LazyLock<HashMap<&'static str, &'static str>> =
 
 /// Texto en el idioma actual (`s` es el español del código).
 pub fn t(s: &'static str) -> &'static str {
-    translate(lang(), s)
+    let s = translate(lang(), s);
+    if cfg!(target_os = "macos") || !s.contains(MAC_KEYS) {
+        return s;
+    }
+    // ponytail: se filtra una copia por texto con atajos; son literales, un puñado fijo.
+    static PC: LazyLock<std::sync::Mutex<HashMap<&'static str, &'static str>>> =
+        LazyLock::new(Default::default);
+    let mut pc = PC.lock().unwrap_or_else(|e| e.into_inner());
+    pc.entry(s)
+        .or_insert_with(|| Box::leak(pc_keys(s).into_boxed_str()))
 }
 
 fn translate(lang: Lang, s: &'static str) -> &'static str {
     match lang {
         Lang::Es => s,
         Lang::En => EN.get(s).copied().unwrap_or(s),
+    }
+}
+
+const MAC_KEYS: [char; 5] = ['⌘', '⌃', '⌥', '⇧', '↩'];
+
+/// Atajos de macOS escritos para Linux/Windows: «⌘⇧G» → «Ctrl+Alt+G» (ver `command_mods`
+/// en la app). Siempre compilada, para probarla en macOS.
+pub fn pc_keys(s: &str) -> String {
+    [
+        ("⌘⌥", "Ctrl+Alt+Shift+"),
+        ("⌘⇧", "Ctrl+Alt+"),
+        ("⌘", "Ctrl+Shift+"),
+        ("⌃", "Ctrl+"),
+        ("⌥-", "Alt-"),
+        ("⌥", "Alt+"),
+        ("⇧", "Shift+"),
+        ("↩", "Enter"),
+    ]
+    .iter()
+    .fold(s.to_string(), |s, (mac, pc)| s.replace(mac, pc))
+}
+
+/// Texto con atajos en las teclas de esta plataforma (en macOS, tal cual).
+pub fn keys(s: &str) -> std::borrow::Cow<'_, str> {
+    if cfg!(target_os = "macos") || !s.contains(MAC_KEYS) {
+        s.into()
+    } else {
+        pc_keys(s).into()
     }
 }
 
@@ -90,6 +127,22 @@ macro_rules! tr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pc_keys_spell_out_modifiers() {
+        for (mac, pc) in [
+            ("⌘K", "Ctrl+Shift+K"),
+            ("Git (⌘⇧G)", "Git (Ctrl+Alt+G)"),
+            ("⌘⌥← → Foco", "Ctrl+Alt+Shift+← → Foco"),
+            ("⌃Tab Reciente", "Ctrl+Tab Reciente"),
+            ("⌥-clic o +", "Alt-clic o +"),
+            ("⌥B y ⌥F", "Alt+B y Alt+F"),
+            ("Anterior (⇧↩)", "Anterior (Shift+Enter)"),
+            ("Sin atajos", "Sin atajos"),
+        ] {
+            assert_eq!(pc_keys(mac), pc);
+        }
+    }
 
     #[test]
     fn translates_with_fallback_and_values() {

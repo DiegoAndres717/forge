@@ -626,7 +626,9 @@ fn cmd_comma_opens_settings() {
     h.get_by_label("Tamaño de letra");
     let gear_selected = |h: &Harness<'_, App>| {
         use egui_kittest::kittest::NodeT;
-        h.get_by_label("Ajustes (⌘,)").accesskit_node().toggled()
+        h.get_by_label(forge_core::tr!("Ajustes (⌘,)"))
+            .accesskit_node()
+            .toggled()
             == Some(egui::accesskit::Toggled::True)
     };
     assert!(gear_selected(&h), "el botón ⚙ se ve seleccionado");
@@ -1158,7 +1160,7 @@ fn stacked_terminals_from_the_panel_ui() {
     // ⌘T y el + de la cabecera: terminales nuevas en el mismo panel.
     h.key_press_modifiers(CMD, Key::T);
     h.run_steps(3);
-    h.get_all_by_label("Nueva terminal en este panel (⌘T)")
+    h.get_all_by_label(forge_core::tr!("Nueva terminal en este panel (⌘T)"))
         .next()
         .unwrap()
         .click();
