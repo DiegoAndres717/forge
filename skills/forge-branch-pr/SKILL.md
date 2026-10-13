@@ -30,8 +30,8 @@ description: Branches, commits, pull requests and review comments in Forge.
 
 ## Review before the PR
 The author of a change reviews what they meant to write, not what they wrote; a fresh pair of eyes catches what the author's own tests didn't imagine.
-- Before opening the PR, ask the user: "Do you want a fresh-context review of the diff before I open the PR?" The user decides; don't ask again for the same PR.
-- If yes: hand the full diff (`git diff origin/main...HEAD`) to a subagent with a clean context (`forge:reviewer` in Claude Code, `forge-reviewer` in Codex and Gemini CLI; any subagent if those aren't installed). Ask it to look for what breaks, not to confirm it works: edge cases, other platforms (macOS, Linux, Windows/WSL), leaked resources (processes, threads, files), security, missing tests.
+- Every PR gets one before it opens; don't ask the user. Skip it only for changes with nothing to break (typos, docs wording) and say so in the PR.
+- Hand the full diff (`git diff origin/main...HEAD`) to a subagent with a clean context (`forge:reviewer` in Claude Code, `forge-reviewer` in Codex and Gemini CLI; any subagent if those aren't installed). Ask it to look for what breaks, not to confirm it works: edge cases, other platforms (macOS, Linux, Windows), leaked resources (processes, threads, files), security, missing tests.
 - Fix what holds up, run the checks again, and list in the PR description what the review found and what you changed. If something doesn't hold up, say why in one line.
 - If a finding is a pattern that could repeat elsewhere, save it to Forge Memory (`forge-memory` skill).
 
