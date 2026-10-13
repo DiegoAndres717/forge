@@ -329,3 +329,35 @@ fn powershell_recursive_delete_inside_the_project_does_not_ask() {
     assert!(!e.repo.join("build").exists());
     assert!(danger::pending(Path::new(&e.vars["FORGE_APPROVALS"])).is_empty());
 }
+
+/// Git Bash (lo que usa Claude Code en Windows): su /etc/profile pone /mingw64/bin y /usr/bin
+/// (el git.exe y el rm.exe de Git) delante del PATH; con el BASH_ENV de Forge los enlaces de
+/// Guard vuelven a ir primero.
+#[cfg(windows)]
+#[test]
+fn git_bash_puts_shims_first() {
+    let e = setup("gitbash");
+    let bash = PathBuf::from(std::env::var("ProgramFiles").unwrap())
+        .join("Git")
+        .join("bin")
+        .join("bash.exe");
+    assert!(bash.exists(), "sin Git Bash en {}", bash.display());
+    let out = Command::new(&bash)
+        .args(["-l", "-c", "command -v git rm"])
+        .current_dir(&e.repo)
+        .envs(&e.vars)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+    let shims = e.vars["FORGE_SHIMS"]
+        .replace('\\', "/")
+        .to_lowercase()
+        .split_once(':')
+        .map(|(drive, rest)| format!("/{drive}{rest}"))
+        .unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 2, "{text}");
+    for line in lines {
+        assert!(line.starts_with(&shims), "{line} no está en {shims}");
+    }
+}
