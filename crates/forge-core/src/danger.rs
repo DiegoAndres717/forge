@@ -142,7 +142,6 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
     ))
 }
 
-/// `a/./b/../c` → `a/c` sin tocar el disco (el destino puede no existir).
 /// ¿Está `path` dentro de `root` (sin ser la raíz ni su `.git`)? En Windows sin distinguir
 /// mayúsculas: `c:\\users\\ana\\app\\build` está dentro de `C:\\Users\\Ana\\app`.
 fn inside_project(path: &Path, root: &Path, ignore_case: bool) -> bool {
@@ -159,6 +158,7 @@ fn inside_project(path: &Path, root: &Path, ignore_case: bool) -> bool {
     path.starts_with(&root) && path != root && !path.components().any(|c| c.as_os_str() == ".git")
 }
 
+/// `a/./b/../c` → `a/c` sin tocar el disco (el destino puede no existir).
 fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for c in path.components() {
@@ -359,7 +359,7 @@ end {
   if ($Recurse -and -not $WhatIf -and $env:FORGE_BIN) {
     $forgeTargets = @(@($forgePath) + @($forgeLiteral) | ForEach-Object { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($_) })
     & $env:FORGE_BIN --guard-check rm -rf -- @forgeTargets
-    if ($LASTEXITCODE -ne 0) { return }
+    if ($LASTEXITCODE -ne 0) { Write-Error -Category PermissionDenied ('Forge: Remove-Item ' + ($forgeTargets -join ', ')); return }
   }
   $forgeRest = @{} + $PSBoundParameters
   [void]$forgeRest.Remove('Path'); [void]$forgeRest.Remove('LiteralPath')
