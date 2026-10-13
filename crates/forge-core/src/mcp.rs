@@ -553,9 +553,13 @@ impl<'a> Server<'a> {
                 None => Err(tr!("falta `id`").into()),
             },
             // Los nombres anteriores (ideas_*) siguen valiendo para sesiones ya abiertas.
-            "plans_list" | "ideas_list" => self
-                .store
-                .list_ideas(list, args["include_done"].as_bool().unwrap_or(false))
+            "plans_list" | "ideas_list" => list
+                // Antes de listar, cierra las fases cuya rama ya está en main.
+                .map_or(Ok(Vec::new()), |p| self.store.close_merged(p))
+                .and_then(|_| {
+                    self.store
+                        .list_ideas(list, args["include_done"].as_bool().unwrap_or(false))
+                })
                 .map(|ideas| {
                     if ideas.is_empty() {
                         tr!("No hay planes ni ideas en el backlog.").into()
@@ -788,6 +792,7 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         );
         out.extend(important);
     }
+    let _ = store.close_merged(project);
     let open = store.list_ideas(Some(project), false).unwrap_or_default();
     let (doing, backlog): (Vec<_>, Vec<_>) = open.iter().partition(|i| i.status == "doing");
     if !doing.is_empty() {
@@ -882,6 +887,35 @@ mod tests {
             store.list_memories(project, None, 10).unwrap()[0].body,
             "Por PSE."
         );
+    }
+
+    #[test]
+    fn plans_list_closes_phases_already_in_main() {
+        let dir = crate::git::test_repo(
+            "mcp-merged",
+            "git switch -qc feat/uno && echo 2 > b && git add -A && git commit -qm uno \
+             && git switch -q main && git merge -q --squash feat/uno && git commit -qm 'uno (#1)'",
+        );
+        let store = Store::in_memory().unwrap();
+        let id = store
+            .add_idea(Some(&dir), "Plan", "", "claude-code")
+            .unwrap();
+        let phase = crate::ideas::Phase {
+            title: "Uno".into(),
+            notes: String::new(),
+            status: "doing".into(),
+            branch: Some("feat/uno".into()),
+            tasks: Vec::new(),
+        };
+        store
+            .set_phases(Some(&dir), id, &[phase], "claude-code")
+            .unwrap();
+        let mut server = Server::new(&dir, &store);
+        let out = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "plans_list", "arguments": {"include_done": true}}}))
+            .unwrap();
+        let text = out["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(&format!("#{id} ✓")), "{text}");
     }
 
     #[test]
