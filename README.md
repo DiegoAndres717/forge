@@ -88,7 +88,7 @@ What happens between `git commit` (or push, or a pull request) and your change l
 
 ## Install
 
-> **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app). Linux is in preview: see [Linux](#linux-preview).
+> **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app). Linux and Windows are in preview: see [Linux](#linux-preview) and [Windows](#windows-preview).
 
 ### One command (recommended)
 
@@ -149,20 +149,29 @@ The same command works on Linux (x86_64 or aarch64): it checks the SHA-256 and i
 
 Data goes in `~/.local/share/forge` (or `$XDG_DATA_HOME/forge`); settings in `~/.config/forge/config.toml`.
 
-### Windows (WSL, experimental)
+### Windows (preview)
 
-Forge runs inside WSL2 as a Linux app. Windows 11 shows its window through WSLg. Not tested on real hardware yet: tell us what breaks.
+In PowerShell:
 
-1. In PowerShell: `wsl --install` (or `wsl --update`), then open **Ubuntu**.
-2. Inside Ubuntu: `sudo apt install wslu zenity` (open links with Windows apps, pick folders), run the Linux install command above, then `forge`.
+```powershell
+irm https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.ps1 | iex
+```
 
-Keep in mind:
+It downloads the build for your PC (x64 or ARM), checks its SHA-256, installs it in `%LOCALAPPDATA%\Programs\Forge`, adds `forge` to your PATH and creates a **Forge** entry in the Start menu. Run it again to update, even with Forge open.
 
-- **Projects inside WSL** (`~/projects`), not under `/mnt/c/...`: there Git and tests are much slower, and Forge warns you.
-- **Agents inside WSL:** `~/.claude` and `~/.codex` in WSL are separate from the Windows ones. Install and log in to Claude Code, Codex… inside Ubuntu; Forge doesn't see the Windows copies.
-- **Editors:** `code` opens VS Code for Windows connected to WSL. Cursor and other editors work if their command is on the WSL PATH.
-- **Notifications** show up as Windows notifications (through `powershell.exe`); clicking one doesn't open the project yet.
-- **Still to test:** HiDPI scaling and the clipboard with Windows.
+| Works | Not yet |
+|---|---|
+| Terminals with PowerShell 7 (or Windows PowerShell); Forge follows `cd` | Folder suggestions while typing (zsh only) |
+| Agents, processes, Forge Memory, plans, MCP | Clicking a notification doesn't open the project |
+| Project Guard for dangerous commands: `git push --force`, `git reset --hard`, recursive `rm`/`del`/`Remove-Item` outside the project, also from Git Bash and Claude Code | Guard asking before an agent reads secrets (`.env`, `~/.ssh`) for Codex and Gemini |
+| Windows notifications, sounds, folder dialog, editors on PATH (`code`, `cursor`…) | Automatic updates (run the installer again) |
+
+Good to know:
+
+- **SmartScreen:** Forge isn't signed yet, so Windows may warn the first time. Choose **More info → Run anyway**.
+- **Scripts disabled:** with PowerShell's default policy your `$PROFILE` doesn't load and each terminal shows a warning (Windows Terminal does the same). Forge itself still works. To load your profile: `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser`.
+- **Data** goes in `%LOCALAPPDATA%\Forge` and **settings** in `%APPDATA%\Forge\config.toml`.
+- **WSL** also works (install the Linux build inside Ubuntu), but the native version is simpler.
 
 ## Quick start
 
@@ -252,7 +261,7 @@ Run `forge help` for every option.
 No. Forge runs locally; its only network call is the update check against GitHub Releases (plus the optional AI review, if you enable it in `routing.toml`). Agents you launch talk to their own providers as usual.
 
 **Intel Macs? Windows?**
-Intel Macs: yes, the app is universal. Linux: in preview (see [Linux](#linux-preview)). Windows: through WSL, experimental (see [Windows](#windows-wsl-experimental)).
+Intel Macs: yes, the app is universal. Linux: in preview (see [Linux](#linux-preview)). Windows: in preview (see [Windows](#windows-preview)).
 
 **Do I need Claude Code?**
 No. Terminals, processes, Guard, Git and plans work without any agent. Forge detects Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code and Pi if they're installed.

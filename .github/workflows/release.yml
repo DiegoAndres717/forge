@@ -74,3 +74,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz dist/*.tar.gz.sha256
+
+  # Windows: forge.exe en un .zip por arquitectura (lo instala scripts/install.ps1).
+  windows:
+    needs: dmg
+    strategy:
+      matrix:
+        include:
+          - runner: windows-latest
+            arch: x86_64
+          - runner: windows-11-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - run: cargo build --release --locked
+      - name: Empaquetar
+        run: |
+          $name = "forge-$($env:GITHUB_REF_NAME.TrimStart('v'))-windows-${{ matrix.arch }}.zip"
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path target\release\forge.exe -DestinationPath "dist\$name"
+          $hash = (Get-FileHash "dist\$name" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $name" | Out-File -Encoding ascii -NoNewline "dist\$name.sha256"
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:GITHUB_REF_NAME (Get-ChildItem dist\*.zip, dist\*.sha256).FullName
