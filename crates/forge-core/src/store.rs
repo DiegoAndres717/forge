@@ -222,6 +222,19 @@ impl Store {
             .map_err(err)
     }
 
+    /// Orden de la barra lateral: cada proyecto en la posición de su índice.
+    pub fn reorder_projects(&self, paths: &[PathBuf]) -> Result<()> {
+        for (i, path) in paths.iter().enumerate() {
+            self.conn
+                .execute(
+                    "UPDATE projects SET position = ?2 WHERE path = ?1",
+                    params![path_key(path), i as i64],
+                )
+                .map_err(err)?;
+        }
+        Ok(())
+    }
+
     /// Marca el proyecto como cerrado; conserva su último layout para la próxima vez.
     pub fn set_closed(&self, path: &Path) -> Result<()> {
         self.conn

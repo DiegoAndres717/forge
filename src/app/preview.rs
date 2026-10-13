@@ -312,9 +312,11 @@ fn ui_preview() {
     harness.state_mut().traffic_end = 0.0;
     harness.state_mut().menu_button = true;
     harness.run_steps(3);
-    harness.get_by_label("Menú").click();
+    harness.get_by_label(forge_core::tr!("Menú")).click();
     harness.run_steps(3);
-    harness.get_by_label_contains("Ver").click();
+    harness
+        .get_by_label_contains(forge_core::tr!("Ver"))
+        .click();
     settle(&mut harness);
     save(&mut harness, &out, "20-linux-menu");
     harness.key_press(egui::Key::Escape);

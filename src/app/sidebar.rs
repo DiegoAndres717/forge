@@ -60,6 +60,9 @@ impl App {
                 let attention: Vec<_> = self.workspaces.iter().map(|w| w.attention()).collect();
                 let visible = self.visible_workspaces(&attention);
                 let ram = self.ram.lock().map(|r| r.clone()).unwrap_or_default();
+                // Filas dibujadas y el arrastre en curso (desde, ¿soltado?).
+                let mut rows: Vec<(usize, Rect)> = Vec::new();
+                let mut drag = None;
                 for (i, ws) in self.workspaces.iter().enumerate() {
                     if !visible.contains(&i) {
                         continue;
@@ -112,10 +115,23 @@ impl App {
                         );
                         tip = format!("{text}\n{tip}");
                     }
-                    let row = row.on_hover_text(tip);
+                    // Se agarra por el icono de carpeta para reordenar.
+                    let grip = ui
+                        .interact(
+                            Rect::from_min_size(row.rect.min, Vec2::new(30.0, row.rect.height())),
+                            egui::Id::new(("project-grip", &ws.project.path)),
+                            Sense::click_and_drag(),
+                        )
+                        .on_hover_cursor(egui::CursorIcon::Grab);
+                    if grip.dragged() || grip.drag_stopped() {
+                        drag = Some((i, grip.drag_stopped()));
+                    }
+                    // Clic y menú igual sobre el icono que sobre el resto de la fila.
+                    let row = row.union(grip).on_hover_text(tip);
                     if row.clicked() {
                         cmds.push(UiCmd::Activate(i));
                     }
+                    rows.push((i, row.rect));
                     row.context_menu(|ui| {
                         editor_menu(ui, i, self.store.as_ref(), cmds);
                         if dormant {
@@ -135,6 +151,26 @@ impl App {
                             cmds.push(UiCmd::Close(i));
                         }
                     });
+                }
+                if let Some((from, dropped)) = drag
+                    && let Some(p) = ui.ctx().pointer_interact_pos()
+                    && let Some(last) = rows.last()
+                {
+                    // Ranura: antes de la primera fila cuyo centro queda bajo el puntero.
+                    let (to, y) = match rows.iter().find(|(_, r)| p.y < r.center().y) {
+                        Some((i, r)) => (*i, r.min.y),
+                        None => (last.0 + 1, last.1.max.y),
+                    };
+                    if dropped {
+                        cmds.push(UiCmd::MoveProject(from, to));
+                    } else {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        ui.painter().hline(
+                            (last.1.min.x + 8.0)..=(last.1.max.x - 8.0),
+                            y,
+                            egui::Stroke::new(2.0, theme::ACCENT),
+                        );
+                    }
                 }
                 let hidden = self.workspaces.len() - visible.len();
                 if hidden > 0 || self.show_all {
