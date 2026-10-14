@@ -245,6 +245,13 @@ impl App {
                     {
                         ws.limit_reached(panel);
                     }
+                    // Mucho contexto: una franja en esa terminal, sin notificación.
+                    if event.kind == "compact" {
+                        if let Some(panel) = event.panel {
+                            ws.compact_offer(panel);
+                        }
+                        continue;
+                    }
                     ws.agent_event(Alert::from_event(&event.kind), event.text);
                 }
             }

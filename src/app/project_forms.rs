@@ -376,6 +376,23 @@ impl App {
                 changed |= ui.checkbox(&mut g.form.allow_escalation, tr!("Pasar a un modelo más capaz si hay riesgo")).changed();
                 theme::help(ui, tr!("Un cambio de riesgo (pagos, seguridad, migraciones…) lo revisa además un modelo más capaz. No aplica en Económico."));
             });
+            ui.horizontal(|ui| {
+                changed |= ui.checkbox(&mut g.form.best_effort, tr!("No bloquear si falta el proveedor")).changed();
+                theme::help(ui, tr!("Si el modelo no está instalado, no responde o se acabó el presupuesto, la revisión queda como aviso y el commit sigue. Sin esto, queda pendiente."));
+            });
+            ui.horizontal_wrapped(|ui| {
+                changed |= ui.checkbox(&mut g.form.local_reviews, tr!("Revisar en local (privado)")).changed();
+                theme::help(ui, tr!("La revisión de código, arquitectura y seguridad la hace un modelo de Ollama en tu ordenador: el código no sale de él y no gasta. Necesita Ollama con ese modelo descargado; sin él, la revisión queda incompleta y nunca se manda a la nube."));
+                if g.form.local_reviews {
+                    changed |= ui
+                        .add(
+                            egui::TextEdit::singleline(&mut g.form.local_model)
+                                .hint_text("qwen2.5-coder")
+                                .desired_width(150.0),
+                        )
+                        .changed();
+                }
+            });
             ui.add_space(4.0);
             if theme::secondary(ui, tr!("Abrir archivo"))
                 .on_hover_text(tr!(

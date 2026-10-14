@@ -340,6 +340,10 @@ enum HeaderAction {
     Handoff(i64),
     /// Cerrar el aviso de límite de la cuenta.
     DismissLimit,
+    /// Escribir `/compact` en el agente de esa terminal.
+    Compact,
+    /// Dejar la compactación para luego (el mod la vuelve a ofrecer más adelante).
+    DismissCompact,
     /// Seguir la conversación de esta terminal en otro agente (id del agente).
     AgentHandoff(String),
 }
@@ -371,6 +375,8 @@ pub struct Workspace {
     launch: HashMap<String, (String, String)>,
     /// Terminales de agente cuya cuenta llegó a su límite de uso (muestran el aviso).
     limited: Vec<PanelId>,
+    /// Terminales a las que se ofrece compactar (mucho contexto).
+    compacting: Vec<PanelId>,
     /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
     /// atiende la app (elige la cuenta en el proyecto y llama a `handoff`).
     pub handoff_request: Option<(PanelId, i64)>,
@@ -399,6 +405,48 @@ pub struct Workspace {
     sticky: Option<Attention>,
     /// Modos de Ajustes para los agentes nuevos («Primero pregunta», «Primero el test»).
     modes: forge_core::mcp::Modes,
+}
+
+/// Franja «mucho contexto»: compactar ahora (escribe `/compact`) o luego.
+fn compact_banner(ui: &mut egui::Ui, rect: Rect, id: PanelId, busy: bool) -> Vec<HeaderAction> {
+    use crate::theme::{self, icon};
+    let mut actions = Vec::new();
+    ui.painter()
+        .rect_filled(rect, 0.0, Color32::from_rgb(0x2a, 0x2a, 0x14));
+    let inner = rect.shrink2(Vec2::new(10.0, 4.0));
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("compact-banner", id))
+            .max_rect(inner)
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.set_clip_rect(inner);
+    child.label(
+        egui::RichText::new(format!(
+            "{}  {}",
+            icon::WARNING,
+            tr!("Mucho contexto: cada mensaje lo reenvía entero, cuesta más y responde peor.")
+        ))
+        .color(theme::ORANGE),
+    );
+    if child
+        .add_enabled(!busy, egui::Button::new(tr!("Compactar")))
+        .on_hover_text(tr!(
+            "Escribe /compact: el agente resume la conversación y sigue con lo importante"
+        ))
+        .on_disabled_hover_text(tr!("Espera a que el agente termine de responder"))
+        .clicked()
+    {
+        actions.push(HeaderAction::Compact);
+    }
+    if child
+        .button(tr!("Luego"))
+        .on_hover_text(tr!("Se volverá a ofrecer cuando el contexto crezca más"))
+        .clicked()
+    {
+        actions.push(HeaderAction::DismissCompact);
+    }
+    actions
 }
 
 impl Workspace {
@@ -447,6 +495,7 @@ impl Workspace {
             chosen: HashMap::new(),
             launch: HashMap::new(),
             limited: Vec::new(),
+            compacting: Vec::new(),
             handoff_request: None,
             agent_handoff_request: None,
             installed: Vec::new(),
@@ -599,6 +648,13 @@ impl Workspace {
     pub fn limit_reached(&mut self, panel: PanelId) {
         if self.panels.contains_key(&panel) && !self.limited.contains(&panel) {
             self.limited.push(panel);
+        }
+    }
+
+    /// Esa terminal tiene mucho contexto: se ofrece compactar.
+    pub fn compact_offer(&mut self, panel: PanelId) {
+        if self.panels.contains_key(&panel) && !self.compacting.contains(&panel) {
+            self.compacting.push(panel);
         }
     }
 
@@ -1767,6 +1823,7 @@ impl Workspace {
         }
         self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
         self.limited.retain(|p| *p != id);
+        self.compacting.retain(|p| *p != id);
         if self.maximized == Some(id) {
             self.maximized = None;
         }
@@ -1904,6 +1961,26 @@ impl Workspace {
             } else {
                 body
             };
+            // Mucho contexto: franja para compactar ahora o luego.
+            let body = if self.compacting.contains(&id) {
+                let (banner, rest) = body.split_top_bottom_at_y(body.min.y + 34.0);
+                // Mientras el agente escribe, /compact caería a mitad de su respuesta.
+                let busy = matches!(
+                    self.panels.get(&id).map(|p| &p.content),
+                    Some(Content::Shell(t)) if t.last_output().is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+                );
+                if busy {
+                    ui.ctx().request_repaint_after(Duration::from_millis(500));
+                }
+                header_actions.extend(
+                    compact_banner(ui, banner, id, busy)
+                        .into_iter()
+                        .map(|a| (id, a)),
+                );
+                rest
+            } else {
+                body
+            };
             let focused = active && id == self.focus && self.renaming.is_none();
             let terminal_id = egui::Id::new(("terminal", key.as_path(), id));
             let Some(panel) = self.panels.get_mut(&id) else {
@@ -1969,6 +2046,17 @@ impl Workspace {
                     }
                 }
                 HeaderAction::DismissLimit => self.limited.retain(|p| *p != id),
+                HeaderAction::DismissCompact => self.compacting.retain(|p| *p != id),
+                HeaderAction::Compact => {
+                    self.compacting.retain(|p| *p != id);
+                    if let Some(Panel {
+                        content: Content::Shell(t),
+                        ..
+                    }) = self.panels.get(&id)
+                    {
+                        t.submit("/compact");
+                    }
+                }
                 HeaderAction::Maximize => {
                     self.focus = id;
                     self.maximized = if self.maximized.is_some() {
