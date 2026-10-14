@@ -207,7 +207,33 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
+/// ¿Se salta los hooks de Git? `--no-verify` o una abreviatura que git acepte
+/// (`--no-veri`…); con `short_n`, también `-n` en un grupo de opciones cortas antes de una
+/// que toma valor (`-mfix` es un mensaje, `-uno` un modo).
+fn skips_hooks(rest: &[String], short_n: bool) -> bool {
+    rest.iter().any(|a| {
+        if a.starts_with("--") {
+            return a.len() >= "--no-veri".len() && "--no-verify".starts_with(a.as_str());
+        }
+        short_n
+            && a.starts_with('-')
+            && a.chars()
+                .skip(1)
+                .take_while(|c| !"mFCctuS".contains(*c))
+                .any(|c| c == 'n')
+    })
+}
+
 fn git(args: &[String]) -> Option<String> {
+    let no_hooks =
+        || tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into();
+    // Desactivar los hooks por configuración (`-c core.hooksPath=…`) es lo mismo.
+    if args
+        .windows(2)
+        .any(|w| w[0] == "-c" && w[1].to_ascii_lowercase().starts_with("core.hookspath"))
+    {
+        return Some(no_hooks());
+    }
     // Subcomando: primer argumento que no es opción global (`-C dir`, `-c k=v`…).
     let mut i = 0;
     while i < args.len() && args[i].starts_with('-') {
@@ -231,12 +257,8 @@ fn git(args: &[String]) -> Option<String> {
             Some(tr!("reescribe la historia del remoto (git push --force)").into())
         }
         // Sin hooks no corre Guard: saltárselos lo decide el dueño. (En push, -n es --dry-run.)
-        "commit" if has_flag(rest, 'n', "--no-verify") => {
-            Some(tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into())
-        }
-        "push" if rest.iter().any(|a| a == "--no-verify") => {
-            Some(tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into())
-        }
+        "commit" if skips_hooks(rest, true) => Some(no_hooks()),
+        "push" if skips_hooks(rest, false) => Some(no_hooks()),
         "clean" if has_flag(rest, 'f', "--force") && !has_flag(rest, 'n', "--dry-run") => {
             Some(tr!("borra los archivos sin seguimiento (git clean)").into())
         }
@@ -1038,6 +1060,15 @@ mod tests {
         assert!(c("git", "push --no-verify"));
         assert!(!c("git", "push -n"), "en push, -n es --dry-run");
         assert!(!c("git", "commit -am x"));
+        // El mensaje pegado a -m (o el modo de -u) no es -n.
+        assert!(!c("git", "commit -mfix:nada"));
+        assert!(!c("git", "commit -uno -m x"));
+        assert!(c("git", "commit -anm x"));
+        // Git acepta abreviaturas y desactivar los hooks por configuración.
+        assert!(c("git", "commit --no-veri -m x"));
+        assert!(!c("git", "commit --no-verbose -m x"));
+        assert!(c("git", "-c core.hooksPath=/dev/null commit -m x"));
+        assert!(c("git", "-c core.hookspath= push"));
         assert!(!c("rm", "-r web/.next"));
         assert!(!c("rm", "-f a.txt"));
         assert!(c("rm", "-rf ."));
