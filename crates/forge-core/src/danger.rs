@@ -230,6 +230,13 @@ fn git(args: &[String]) -> Option<String> {
         {
             Some(tr!("reescribe la historia del remoto (git push --force)").into())
         }
+        // Sin hooks no corre Guard: saltárselos lo decide el dueño. (En push, -n es --dry-run.)
+        "commit" if has_flag(rest, 'n', "--no-verify") => {
+            Some(tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into())
+        }
+        "push" if rest.iter().any(|a| a == "--no-verify") => {
+            Some(tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into())
+        }
         "clean" if has_flag(rest, 'f', "--force") && !has_flag(rest, 'n', "--dry-run") => {
             Some(tr!("borra los archivos sin seguimiento (git clean)").into())
         }
@@ -531,7 +538,13 @@ pub fn secret_read_main(args: Vec<String>) -> ! {
 }
 
 /// Pide autorización a Forge (o en la terminal) y sale si se rechaza.
-fn authorize(name: &str, args: &[String], reason: String, cwd: PathBuf, project: Option<PathBuf>) {
+pub fn authorize(
+    name: &str,
+    args: &[String],
+    reason: String,
+    cwd: PathBuf,
+    project: Option<PathBuf>,
+) {
     {
         let mut command = vec![name.to_string()];
         command.extend(args.iter().cloned());
@@ -1019,6 +1032,12 @@ mod tests {
         let c = |p: &str, a: &str| classify(p, &args(a), project, Some(project)).is_some();
         // rm -rf: dentro del proyecto es rutina; fuera, la raíz o .git piden autorización.
         assert!(!c("rm", "-rf dist node_modules"));
+        // Saltarse los hooks (y con ellos Guard) también pide autorización.
+        assert!(c("git", "commit --no-verify -m x"));
+        assert!(c("git", "commit -nm x"));
+        assert!(c("git", "push --no-verify"));
+        assert!(!c("git", "push -n"), "en push, -n es --dry-run");
+        assert!(!c("git", "commit -am x"));
         assert!(!c("rm", "-r web/.next"));
         assert!(!c("rm", "-f a.txt"));
         assert!(c("rm", "-rf ."));

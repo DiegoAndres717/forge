@@ -1101,6 +1101,14 @@ pub const EN: &[(&str, &str)] = &[
     ("Terminal", "Terminal"),
     ("Tamaño de letra", "Font size"),
     ("Tecla Option", "Option key"),
+    (
+        "se salta los hooks de Git y la validación de Guard (--no-verify)",
+        "skips Git hooks and Guard's validation (--no-verify)",
+    ),
+    (
+        "pide una excepción de Guard: «{p0}»",
+        "asks for a Guard exception: “{p0}”",
+    ),
     ("Tecla Alt", "Alt key"),
     ("Restaurar (⌘Enter)", "Restore (⌘Enter)"),
     ("Maximizar (⌘Enter)", "Maximize (⌘Enter)"),
