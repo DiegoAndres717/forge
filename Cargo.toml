@@ -5,8 +5,9 @@ members = ["crates/forge-core"]
 version = "0.7.3"
 repository = "https://github.com/DiegoAndres717/forge"
 edition = "2024"
-# Mínimo para compilar (if-let encadenados): cargo avisa claro con un Rust más viejo.
-rust-version = "1.88"
+# Mínimo para compilar (lo exigen egui y otras dependencias): cargo avisa claro con un Rust
+# más viejo.
+rust-version = "1.95"
 license = "MIT"
 
 [workspace.dependencies]
