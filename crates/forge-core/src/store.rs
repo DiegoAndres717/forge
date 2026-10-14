@@ -641,6 +641,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn writers_wait_for_each_other_instead_of_failing() {
+        // Cada agente abre su propio `forge mcp`: varias conexiones escriben a la vez.
+        // rusqlite pone 5 s de espera por defecto; si se perdiera, una escritura
+        // simultánea fallaría con «database is locked» y se perdería lo guardado.
+        let store = Store::in_memory().unwrap();
+        let wait: i64 = store
+            .conn
+            .query_row("PRAGMA busy_timeout", [], |r| r.get(0))
+            .unwrap();
+        assert!(wait >= 1000, "busy_timeout = {wait} ms");
+    }
+
+    #[test]
     fn verbatim_windows_paths_are_migrated_to_plain_ones() {
         // Forge 0.7.1 guardaba los proyectos de Windows como `\\?\C:\…`.
         let store = Store::in_memory().unwrap();

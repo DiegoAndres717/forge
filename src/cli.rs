@@ -620,6 +620,17 @@ fn allow(out: &Out, project: &Path, args: &[String], rule: Option<&str>) -> Resu
     };
     let rules = Rules::load(project)?.unwrap_or_default();
     valid_rule(rule, &rules, project)?;
+    // En una terminal de Forge puede pedirla un agente: la excepción la aprueba el dueño.
+    if std::env::var_os("FORGE_APPROVALS").is_some() {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        forge_core::danger::authorize(
+            "forge",
+            &args,
+            tr!("pide una excepción de Guard: «{p0}»", p0 = reason).to_string(),
+            project.to_path_buf(),
+            Some(project.to_path_buf()),
+        );
+    }
     let repo = guard::repo_root(project)?;
     // El candidato es el diff de ahora: si cambia, una excepción "commit" deja de valer.
     let diff = guard::collect_diff(&repo, stage, &rules, None)?;

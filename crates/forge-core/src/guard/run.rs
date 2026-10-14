@@ -42,6 +42,8 @@ pub struct GuardRun {
     pub stage: Stage,
     pub started_at: SystemTime,
     pub items: Vec<Item>,
+    /// Archivos del diff evaluado (el veredicto no lee etiquetas traducidas).
+    pub files: usize,
     pub checks: Vec<CheckRun>,
     pub diff_command: String,
     pub unstaged: bool,
@@ -198,12 +200,7 @@ impl GuardRun {
             .map(|i| Some(i.level))
             .chain(self.checks.iter().map(|c| self.check_level(c)))
             .collect();
-        if self
-            .items
-            .first()
-            .is_some_and(|i| i.label.starts_with("0 archivos"))
-            && self.checks.is_empty()
-        {
+        if !self.items.is_empty() && self.files == 0 && self.checks.is_empty() {
             return Verdict::NothingToCheck;
         }
         if levels.contains(&Some(Level::Block)) {
@@ -299,6 +296,7 @@ pub fn run(
         stage,
         started_at: SystemTime::now(),
         items: Vec::new(),
+        files: 0,
         checks: Vec::new(),
         diff_command: String::new(),
         unstaged: false,
@@ -403,6 +401,7 @@ pub fn run(
         {
             let mut st = s.lock().unwrap();
             st.items = items;
+            st.files = diff.files.len();
             st.diff_command = diff.command.clone();
             st.unstaged = diff.unstaged;
             st.candidate = diff.candidate.clone();
