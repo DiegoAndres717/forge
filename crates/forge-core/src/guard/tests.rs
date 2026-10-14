@@ -5,6 +5,37 @@ mod unit {
     use super::*;
 
     #[test]
+    fn nothing_to_check_in_any_language() {
+        // Con la app en inglés la etiqueta es «0 files analyzed»: el veredicto no puede
+        // depender del texto traducido.
+        let run = GuardRun {
+            stage: Stage::Commit,
+            started_at: std::time::SystemTime::now(),
+            items: vec![crate::guard::evaluate::item(
+                "summary",
+                Level::Info,
+                "0 files analyzed",
+                Vec::new(),
+            )],
+            files: 0,
+            checks: Vec::new(),
+            diff_command: String::new(),
+            unstaged: false,
+            analyzing: false,
+            error: None,
+            candidate: String::new(),
+            branch: String::new(),
+            exceptions: Vec::new(),
+            frozen: None,
+            finished_at: Some(std::time::SystemTime::now()),
+            project_name: String::new(),
+            usage: Vec::new(),
+            extra_evidence: Vec::new(),
+        };
+        assert_eq!(run.verdict(), Verdict::NothingToCheck);
+    }
+
+    #[test]
     fn globs() {
         assert!(glob_match("package-lock.json", "web/package-lock.json"));
         assert!(glob_match("*.generated.ts", "src/api/types.generated.ts"));
