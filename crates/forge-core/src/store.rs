@@ -147,6 +147,10 @@ impl Store {
                 position    INTEGER NOT NULL DEFAULT 0,
                 workspace   TEXT
             );
+            CREATE TABLE IF NOT EXISTS identities (
+                path TEXT PRIMARY KEY,
+                key  TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -219,14 +223,44 @@ impl Store {
         let path = path_key(project);
         let key = crate::git::remote_identity(project)
             .map_or_else(|| path.clone(), |id| format!("git:{id}"));
-        if key != path {
-            for table in ["memories", "ideas"] {
-                let _ = self.conn.execute(
-                    &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
-                    params![key, path],
-                );
+        // Lo guardado con la ruta, o con el remoto que tenía esta carpeta (repo renombrado o
+        // movido), pasa a la clave de ahora. Del remoto viejo, solo si la clave nueva también
+        // es un remoto (git puede fallar un momento) y ninguna otra carpeta lo sigue usando
+        // (otro clon, o el original de un fork).
+        let before: Option<String> = self
+            .conn
+            .query_row("SELECT key FROM identities WHERE path = ?1", [&path], |r| {
+                r.get(0)
+            })
+            .optional()
+            .ok()
+            .flatten()
+            .filter(|old| {
+                key.starts_with("git:")
+                    && !self
+                        .conn
+                        .query_row(
+                            "SELECT 1 FROM identities WHERE key = ?1 AND path != ?2",
+                            params![old, path],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .is_ok_and(|other| other.is_some())
+            });
+        for old in [Some(path.clone()), before].into_iter().flatten() {
+            if old != key {
+                for table in ["memories", "ideas"] {
+                    let _ = self.conn.execute(
+                        &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
+                        params![key, old],
+                    );
+                }
             }
         }
+        let _ = self.conn.execute(
+            "INSERT OR REPLACE INTO identities (path, key) VALUES (?1, ?2)",
+            params![path, key],
+        );
         keys.insert(project.to_path_buf(), key.clone());
         key
     }
