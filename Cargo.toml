@@ -50,6 +50,8 @@ notify-rust = "4.18.2"
 
 # Windows: sonidos de los avisos sin arrancar PowerShell.
 [target.'cfg(windows)'.dependencies]
+# Selector de carpetas moderno (IFileOpenDialog); sin features: las de Linux no aplican.
+rfd = { version = "0.17", default-features = false }
 windows-sys = { version = "0.61", features = [
     "Win32_Media_Audio",
     "Win32_Security",
