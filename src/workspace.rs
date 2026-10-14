@@ -913,7 +913,7 @@ impl Workspace {
         // Y que el agente avise él mismo al terminar o al necesitar al usuario.
         let forge = std::env::current_exe()
             .ok()
-            .map(|e| e.canonicalize().unwrap_or(e));
+            .map(|e| forge_core::canonical(&e));
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
                 let (model, effort) = self.launch.get(spec.program()).cloned().unwrap_or_default();
@@ -956,7 +956,7 @@ impl Workspace {
         match memory.provider {
             MemoryProvider::Local => {
                 let exe = std::env::current_exe().ok()?;
-                let exe = exe.canonicalize().unwrap_or(exe);
+                let exe = forge_core::canonical(&exe);
                 Some(forge_core::agents::McpServer {
                     name: "forge".into(),
                     command: exe.to_string_lossy().into_owned(),

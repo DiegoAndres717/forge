@@ -527,7 +527,7 @@ impl App {
 
     /// Abre un proyecto; dormido (`awake = false`) solo aparece en la lista hasta usarlo.
     fn open_project_as(&mut self, ctx: &egui::Context, path: &Path, awake: bool) {
-        let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let path = forge_core::canonical(path);
         if let Some(i) = self.workspaces.iter().position(|w| w.project.path == path) {
             self.active = Some(i);
             return;
@@ -1243,7 +1243,7 @@ impl App {
                             UiCmd::HooksInstall => std::env::current_exe()
                                 .map_err(|e| e.to_string())
                                 .and_then(|exe| {
-                                    hooks::install(&path, &exe.canonicalize().unwrap_or(exe))
+                                    hooks::install(&path, &forge_core::canonical(&exe))
                                 }),
                             _ => hooks::uninstall(&path),
                         };

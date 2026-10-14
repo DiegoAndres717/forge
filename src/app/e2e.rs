@@ -43,7 +43,7 @@ fn project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("forge-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join(".forge")).unwrap();
-    let dir = dir.canonicalize().unwrap();
+    let dir = forge_core::canonical(&dir);
     std::fs::write(
         dir.join(".forge/rules.toml"),
         "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\nname = \"Tests\"\ncommand = \"true\"\n",
@@ -1366,6 +1366,18 @@ fn the_app_closes_phases_whose_branch_reached_main() {
             .status
             == "done"
     });
+}
+
+#[test]
+fn opened_projects_keep_a_plain_path() {
+    // En Windows, `canonicalize` antepone `\\?\`: PowerShell lo mostraba en el prompt
+    // (`Microsoft.PowerShell.Core\FileSystem::\\?\C:\…`) y llegaba así al MCP.
+    let _serial = serial();
+    let h = app(project("plain-path"));
+    let path = ws(h.state()).project.path.to_string_lossy().into_owned();
+    assert!(!path.starts_with(r"\\?\"), "{path}");
+    let server = ws(h.state()).mcp_server().unwrap();
+    assert!(!server.command.starts_with(r"\\?\"), "{}", server.command);
 }
 
 #[test]
