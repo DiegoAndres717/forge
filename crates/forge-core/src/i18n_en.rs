@@ -1108,6 +1108,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Tamaño de letra", "Font size"),
     ("Tecla Option", "Option key"),
     (
+        "{p0}: presupuesto mensual agotado",
+        "{p0}: monthly budget used up",
+    ),
+    (
         "se salta los hooks de Git y la validación de Guard (--no-verify)",
         "skips Git hooks and Guard's validation (--no-verify)",
     ),

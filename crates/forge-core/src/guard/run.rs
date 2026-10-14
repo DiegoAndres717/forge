@@ -658,6 +658,8 @@ impl AiRun<'_> {
                 AiVerdict::Approve => (Level::Pass, "aprobada"),
                 AiVerdict::Changes => (Level::Warn, tr!("pide cambios")),
                 AiVerdict::Block => (Level::Block, "bloquea"),
+                // best_effort: sin proveedor o sin respuesta no bloquea, avisa.
+                AiVerdict::Incomplete if self.config.best_effort => (Level::Warn, "incompleta"),
                 AiVerdict::Incomplete => (Level::Pending, "incompleta"),
             };
             let mut details = outcome.details();
@@ -748,8 +750,9 @@ impl AiRun<'_> {
         }
         (self.notify)();
 
-        // ponytail: todos parten del mismo gasto del mes; con presupuesto muy justo se puede
-        // superar como mucho en (revisores − 1) × max_cost_per_call_usd.
+        // Todos parten del mismo gasto del mes: se lanzan solo los que caben con su tope.
+        let fit = router::affordable_reviewers(self.config, spent, pending.len());
+        let skipped = pending.split_off(fit.min(pending.len()));
         let (config, rules) = (self.config, self.rules);
         let outcomes: Vec<(usize, Activation, AiOutcome)> = std::thread::scope(|scope| {
             let handles: Vec<_> = pending
@@ -765,6 +768,15 @@ impl AiRun<'_> {
         });
 
         let mut st = s.lock().unwrap();
+        // Los que no cabían en el presupuesto del mes: como un revisor sin respuesta.
+        for (n, a) in &skipped {
+            st.items[*n].level = match (a.reviewer.blocking, config.best_effort) {
+                (true, false) => Level::Pending,
+                (true, true) => Level::Warn,
+                (false, _) => Level::Info,
+            };
+            st.items[*n].label = tr!("{p0}: presupuesto mensual agotado", p0 = a.reviewer.name);
+        }
         for (n, a, outcome) in &outcomes {
             let rule = format!("reviewer:{}", a.reviewer.id);
             st.usage
@@ -776,6 +788,7 @@ impl AiRun<'_> {
                 (AiVerdict::Block, false) => (Level::Warn, "objeta (informativo)"),
                 (AiVerdict::Changes, true) => (Level::Warn, tr!("pide cambios")),
                 (AiVerdict::Changes, false) => (Level::Info, "comenta"),
+                (AiVerdict::Incomplete, true) if config.best_effort => (Level::Warn, "incompleto"),
                 (AiVerdict::Incomplete, true) => (Level::Pending, "incompleto"),
                 (AiVerdict::Incomplete, false) => (Level::Info, tr!("sin respuesta")),
             };
