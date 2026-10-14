@@ -427,11 +427,8 @@ test('Forge offers to compact by tokens, and again each step', async ($, on) => 
     return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
   })
   on('session.measure', ($, e) => ({ changed: e.changed }))
-  // El aviso sale sin esperar (no frena a Claude): se le da un momento.
-  const measure = async (percent: number) => {
-    await $.session.measure({ context: { percent, window: 1_000_000 } as never, rateLimits: [], changed: ['context'] })
-    await new Promise(r => setTimeout(r, 20))
-  }
+  const measure = (percent: number) =>
+    $.session.measure({ context: { percent, window: 1_000_000 } as never, rateLimits: [], changed: ['context'] })
   // En una ventana de 1M se ofrece desde 400k, no al 60 % (600k).
   await measure(39)
   expect(offers.length).toBe(0)

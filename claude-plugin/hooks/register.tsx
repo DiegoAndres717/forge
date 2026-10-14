@@ -279,7 +279,8 @@ export const register: Register = on => {
           // Forge shows "Compactar · Luego" on this terminal; left for later, it comes back
           // a step further on.
           compactNext = Math.floor(tokens / COMPACT_STEP) * COMPACT_STEP + COMPACT_STEP
-          void forge($, ['agent-event', 'compact'], JSON.stringify({ message: `${Math.round(tokens / 1000)}k tokens`, origin: 'Claude Code' }))
+          // Only writes a file: waited for (2 s at most), so nothing is left running.
+          await forge($, ['agent-event', 'compact'], JSON.stringify({ message: `${Math.round(tokens / 1000)}k tokens`, origin: 'Claude Code' }), 2_000).catch(() => undefined)
         }
       }
     }
