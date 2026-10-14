@@ -49,7 +49,7 @@ pub enum Scope {
 }
 
 /// Una sesión dura 8 horas.
-pub const SESSION_SECS: i64 = 8 * 3600;
+pub const SESSION_SECS: i64 = 2 * 3600;
 
 impl Scope {
     pub const ALL: [Scope; 3] = [Scope::Commit, Scope::PullRequest, Scope::Session];
@@ -70,7 +70,7 @@ impl Scope {
         match self {
             Scope::Commit => tr!("solo este commit"),
             Scope::PullRequest => tr!("esta rama (pull request)"),
-            Scope::Session => tr!("esta sesión (8 h)"),
+            Scope::Session => tr!("esta sesión (2 h)"),
         }
     }
 }
@@ -376,12 +376,17 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
             false => item(
                 "secrets",
                 Level::Block,
-                format!("{} posibles secretos", found.len()),
+                tr!("{p0} posibles secretos", p0 = found.len()),
                 found
                     .iter()
-                    .map(|s| format!("{}:{} — {} ({})", s.path, s.line, s.kind, s.preview))
-                    .chain([format!(
-                        "Si es un dato de prueba, añade `{ALLOW_SECRET}` en esa línea."
+                    .map(|s| match s.line {
+                        // Línea 0: dentro de un binario.
+                        0 => format!("{} ({}) — {} ({})", s.path, tr!("binario"), s.kind, s.preview),
+                        n => format!("{}:{n} — {} ({})", s.path, s.kind, s.preview),
+                    })
+                    .chain([tr!(
+                        "Si es un dato de prueba, añade `{p0}` en esa línea; en un binario, pide una excepción de la regla secrets.",
+                        p0 = ALLOW_SECRET
                     )])
                     .collect(),
             ),
