@@ -104,7 +104,10 @@ impl App {
                     .spawn();
                 match spawned {
                     // Al cerrar se guarda la sesión (on_exit) y el script hace el resto.
-                    Ok(_) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                    Ok(_) => {
+                        self.quitting = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
