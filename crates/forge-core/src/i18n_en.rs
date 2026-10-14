@@ -1116,6 +1116,19 @@ pub const EN: &[(&str, &str)] = &[
     ("modelo", "model"),
     ("Usar este modelo", "Use this model"),
     (
+        "No bloquear si falta el proveedor",
+        "Don't block if the provider is missing",
+    ),
+    (
+        "Si el modelo no está instalado, no responde o se acabó el presupuesto, la revisión queda como aviso y el commit sigue. Sin esto, queda pendiente.",
+        "If the model isn't installed, doesn't answer or the budget is used up, the review becomes a warning and the commit goes on. Without this, it stays pending.",
+    ),
+    ("Revisar en local (privado)", "Review locally (private)"),
+    (
+        "La revisión de código, arquitectura y seguridad la hace un modelo de Ollama en tu ordenador: el código no sale de él y no gasta. Necesita Ollama con ese modelo descargado; sin él, la revisión queda incompleta y nunca se manda a la nube.",
+        "Code, architecture and security reviews run on an Ollama model on your computer: the code never leaves it and costs nothing. Needs Ollama with that model pulled; without it the review stays incomplete and is never sent to the cloud.",
+    ),
+    (
         "{p0}: presupuesto mensual agotado",
         "{p0}: monthly budget used up",
     ),

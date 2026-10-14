@@ -223,16 +223,16 @@ impl Route {
 /// Ruta de una tarea: la de routing.toml o la por defecto del perfil. Con `prefer_local`
 /// y ollama disponible, la clasificación va a un modelo local.
 pub fn route(config: &RouterConfig, task: Task, local_available: bool) -> Route {
+    // Una ruta elegida se respeta siempre: una local sin Ollama falla (queda incompleta, o
+    // como aviso con best_effort) en vez de mandar el código a la nube sin decirlo.
     if let Some(t) = config.tasks.get(task.key()) {
-        let local = matches!(t.provider.as_str(), "local" | "ollama");
-        if !local || local_available {
-            return Route {
-                task,
-                provider: t.provider.clone(),
-                model: t.model.clone(),
-                effort: t.effort.clone().unwrap_or_else(|| "medium".into()),
-            };
-        }
+        let _ = local_available;
+        return Route {
+            task,
+            provider: t.provider.clone(),
+            model: t.model.clone(),
+            effort: t.effort.clone().unwrap_or_else(|| "medium".into()),
+        };
     }
     let (provider, model, effort) = match (config.profile, task) {
         (_, Task::Classification) if config.prefer_local && local_available => {
@@ -1171,7 +1171,18 @@ pub struct RoutingForm {
     pub monthly_budget_usd: f64,
     pub allow_escalation: bool,
     pub max_cost_per_call_usd: f64,
+    /// Sin proveedor o sin respuesta, la revisión avisa y no bloquea.
+    pub best_effort: bool,
+    /// Revisión de código, arquitectura y seguridad con un modelo local (Ollama): el código no
+    /// sale del ordenador.
+    pub local_reviews: bool,
+    pub local_model: String,
 }
+
+/// Las tareas de nivel 2–3 que «Revisar en local» lleva a Ollama.
+const LOCAL_TASKS: [&str; 3] = ["code_review", "architecture", "security"];
+/// Modelo local propuesto si no hay ninguno elegido.
+const LOCAL_MODEL: &str = "qwen2.5-coder";
 
 impl RoutingForm {
     pub fn load(project: &Path) -> Result<Self, String> {
@@ -1182,6 +1193,16 @@ impl RoutingForm {
             monthly_budget_usd: c.monthly_budget_usd,
             allow_escalation: c.allow_escalation,
             max_cost_per_call_usd: c.max_cost_per_call_usd,
+            best_effort: c.best_effort,
+            // En local si las tres tareas van a Ollama (con el mismo modelo).
+            local_reviews: LOCAL_TASKS
+                .iter()
+                .all(|t| c.tasks.get(*t).is_some_and(|r| r.provider == "local")),
+            local_model: c
+                .tasks
+                .get(LOCAL_TASKS[0])
+                .filter(|r| r.provider == "local" && !r.model.is_empty())
+                .map_or_else(|| LOCAL_MODEL.into(), |r| r.model.clone()),
         })
     }
 
@@ -1204,6 +1225,36 @@ impl RoutingForm {
         r["monthly_budget_usd"] = toml_edit::value(self.monthly_budget_usd.max(0.0));
         r["allow_escalation"] = toml_edit::value(self.allow_escalation);
         r["max_cost_per_call_usd"] = toml_edit::value(self.max_cost_per_call_usd.max(0.0));
+        r["best_effort"] = toml_edit::value(self.best_effort);
+        let model = match self.local_model.trim() {
+            "" => LOCAL_MODEL,
+            m => m,
+        };
+        if r.get("tasks").is_none_or(|t| !t.is_table_like()) {
+            r["tasks"] = toml_edit::table();
+        }
+        for task in LOCAL_TASKS {
+            let field = |k: &str| {
+                r["tasks"]
+                    .get(task)
+                    .and_then(|t| t.get(k))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            };
+            let local = field("provider").as_deref() == Some("local");
+            if self.local_reviews && !local {
+                // Solo las que aún no van en local: lo afinado a mano en una local se queda.
+                let mut t = toml_edit::Table::new();
+                t["provider"] = toml_edit::value("local");
+                t["model"] = toml_edit::value(model);
+                r["tasks"][task] = toml_edit::Item::Table(t);
+            } else if !self.local_reviews && local && field("model").as_deref() == Some(model) {
+                // Solo se quita lo que puso esta opción (su modelo); lo propio se queda.
+                if let Some(tasks) = r["tasks"].as_table_like_mut() {
+                    tasks.remove(task);
+                }
+            }
+        }
         let out = doc.to_string();
         toml::from_str::<RoutingFile>(&out).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
@@ -1233,6 +1284,67 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_local_route_never_falls_back_to_the_cloud() {
+        // «Revisar en local (privado)» sin Ollama: falla (o avisa), pero el código no sube.
+        let mut config = RouterConfig::default();
+        config.tasks.insert(
+            "security".into(),
+            TaskRoute {
+                provider: "local".into(),
+                model: "qwen2.5-coder".into(),
+                effort: None,
+            },
+        );
+        assert_eq!(route(&config, Task::Security, false).provider, "local");
+    }
+
+    #[test]
+    fn the_form_can_send_reviews_to_a_local_model() {
+        // Niveles 2–3 en local: el código no sale del ordenador.
+        let dir = std::env::temp_dir().join(format!("forge-routing-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut form = RoutingForm::load(&dir).unwrap();
+        assert!(!form.local_reviews && !form.best_effort);
+        form.local_reviews = true;
+        form.local_model = "qwen2.5-coder:14b".into();
+        form.best_effort = true;
+        form.save(&dir).unwrap();
+        let config = RouterConfig::load(&dir).unwrap();
+        assert!(config.best_effort);
+        for task in ["code_review", "architecture", "security"] {
+            let route = &config.tasks[task];
+            assert_eq!(route.provider, "local", "{task}");
+            assert_eq!(route.model, "qwen2.5-coder:14b", "{task}");
+        }
+        let again = RoutingForm::load(&dir).unwrap();
+        assert!(again.local_reviews && again.best_effort);
+        assert_eq!(again.local_model, "qwen2.5-coder:14b");
+        // Lo que el usuario afinó a mano en una tarea local no se pisa al guardar.
+        let path = dir.join(".forge/routing.toml");
+        let mut doc: toml_edit::DocumentMut =
+            std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        doc["routing"]["tasks"]["security"]["model"] = toml_edit::value("llama-sec");
+        doc["routing"]["tasks"]["security"]["effort"] = toml_edit::value("high");
+        std::fs::write(&path, doc.to_string()).unwrap();
+        let mut form = RoutingForm::load(&dir).unwrap();
+        form.monthly_budget_usd = 7.0;
+        form.save(&dir).unwrap();
+        let security = RouterConfig::load(&dir).unwrap().tasks["security"].clone();
+        assert_eq!(
+            (security.model.as_str(), security.effort.as_deref()),
+            ("llama-sec", Some("high"))
+        );
+        // Quitarlo deja de serie solo lo que puso la opción; la ruta propia se queda.
+        let mut off = RoutingForm::load(&dir).unwrap();
+        off.local_reviews = false;
+        off.save(&dir).unwrap();
+        let tasks = RouterConfig::load(&dir).unwrap().tasks;
+        assert!(!tasks.contains_key("code_review"));
+        assert_eq!(tasks["security"].model, "llama-sec");
+    }
 
     #[test]
     fn the_routing_form_keeps_comments_and_tasks() {
