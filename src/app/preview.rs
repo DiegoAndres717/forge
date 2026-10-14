@@ -375,7 +375,9 @@ fn ui_preview() {
     harness.get_by_label("Acme Store").click_secondary();
     settle(&mut harness);
     // Con varios editores, «Abrir con» los lista con su icono.
-    if let Some(with) = harness.query_by_label_contains(forge_core::tr!("Abrir con")) {
+    if let Some(with) =
+        harness.query_by_label_contains(&forge_core::tr!("{p0}  Abrir con", p0 = icon::CODE))
+    {
         with.hover();
         settle(&mut harness);
     }

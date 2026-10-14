@@ -126,7 +126,8 @@ pub fn command(repo: &Path, draft: &Draft) -> Result<String, String> {
         .trim(),
     );
     std::fs::write(&path, &draft.body).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(tr!(
+    // Un comando, no un texto: no se traduce.
+    Ok(format!(
         "gh pr create --base {p0} --title {p1} --body-file {p2}{p3}",
         p0 = shell_quote(&draft.base),
         p1 = shell_quote(draft.title.trim()),
