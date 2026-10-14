@@ -90,7 +90,16 @@ What happens between `git commit` (or push, or a pull request) and your change l
 
 > **Requirements:** macOS 13 Ventura or later, on Apple Silicon or Intel (universal app). Linux and Windows are in preview: see [Linux](#linux-preview) and [Windows](#windows-preview).
 
-### One command (recommended)
+Pick the command for your system:
+
+| System | Where to paste it | Command |
+|---|---|---|
+| macOS, Linux | Terminal | `curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh \| sh` |
+| Windows | PowerShell | `irm https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.ps1 \| iex` |
+
+The `curl … | sh` command does not work in Windows PowerShell (it has no `sh`), and Forge is not on winget.
+
+### One command on macOS (recommended)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh

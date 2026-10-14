@@ -90,7 +90,16 @@ Lo que pasa entre `git commit` (o el push, o el pull request) y que tu cambio sa
 
 > **Requisitos:** macOS 13 Ventura o superior, en Apple Silicon o Intel (app universal). Linux y Windows están en vista previa: ver [Linux](#linux-vista-previa) y [Windows](#windows-vista-previa).
 
-### Con un comando (recomendado)
+Elige el comando de tu sistema:
+
+| Sistema | Dónde pegarlo | Comando |
+|---|---|---|
+| macOS, Linux | Terminal | `curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh \| sh` |
+| Windows | PowerShell | `irm https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.ps1 \| iex` |
+
+El comando `curl … | sh` no funciona en PowerShell de Windows (no tiene `sh`), y Forge no está en winget.
+
+### Con un comando en macOS (recomendado)
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
