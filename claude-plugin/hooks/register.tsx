@@ -331,7 +331,7 @@ export const register: Register = on => {
     // ponytail: by length; read a marker if the engine ever labels the summary.
     const summary = [...(messages ?? [])].sort((a, b) => b.text.length - a.text.length)[0]?.text.trim()
     // One note per project, updated each time (see `forge memory session`).
-    if (summary && e.trigger !== 'precompute') void forge($, ['memory', 'session'], summary)
+    if (summary && e.trigger !== 'precompute') void forge($, ['memory', 'session', '--agent', 'Claude Code'], summary)
     return result
   })
 
