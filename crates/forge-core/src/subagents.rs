@@ -75,14 +75,15 @@ pub fn cheap_codex_model(catalog: &str) -> Option<String> {
 }
 
 /// Los archivos de cada subagente: (nombre de archivo, contenido).
-pub fn files(agent: Agent, codex_model: Option<&str>) -> Vec<(String, String)> {
+/// `model`: el de los subagentes (Codex sin él hereda el principal; Gemini, el de serie).
+pub fn files(agent: Agent, model: Option<&str>) -> Vec<(String, String)> {
     AGENTS
         .iter()
         .map(|(name, description, prompt, effort)| {
             let text = match agent {
                 // Las cadenas van como JSON, que también es una cadena TOML válida.
                 Agent::Codex => {
-                    let model = codex_model
+                    let model = model
                         .map(|m| format!("model = {}\n", json!(m)))
                         .unwrap_or_default();
                     // El explorador no necesita escribir nada; el revisor sí (builds, tests).
@@ -100,8 +101,9 @@ pub fn files(agent: Agent, codex_model: Option<&str>) -> Vec<(String, String)> {
                     )
                 }
                 Agent::Gemini => format!(
-                    "---\nname: {name}\ndescription: {}\nmodel: {GEMINI_MODEL}\n---\n\n{prompt}\n",
-                    json!(description)
+                    "---\nname: {name}\ndescription: {}\nmodel: {}\n---\n\n{prompt}\n",
+                    json!(description),
+                    model.unwrap_or(GEMINI_MODEL)
                 ),
             };
             (agent.file(name), text)
@@ -109,10 +111,21 @@ pub fn files(agent: Agent, codex_model: Option<&str>) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn install(agent: Agent, home: &Path, codex_model: Option<&str>) -> Result<(), String> {
+pub fn install(agent: Agent, home: &Path, model: Option<&str>) -> Result<(), String> {
+    // Un nombre de modelo («gpt-5-mini», «gemini-3-flash-preview»): nada que pueda meter
+    // campos en el TOML o en la cabecera YAML.
+    if let Some(m) = model
+        && (m.is_empty()
+            || !m
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c))
+            || m.starts_with(['-', ':']))
+    {
+        return Err(crate::tr!("modelo no válido: «{m}»", m = m));
+    }
     let dir = agent.dir(home);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    for (file, text) in files(agent, codex_model) {
+    for (file, text) in files(agent, model) {
         std::fs::write(dir.join(file), text).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -129,6 +142,22 @@ pub fn remove(agent: Agent, home: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// El modelo con el que están instalados (None: sin `model`, heredan el del agente).
+pub fn installed_model(agent: Agent, home: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(agent.dir(home).join(agent.file(AGENTS[0].0))).ok()?;
+    match agent {
+        Agent::Codex => toml::from_str::<toml::Value>(&text)
+            .ok()?
+            .get("model")?
+            .as_str()
+            .map(String::from),
+        Agent::Gemini => text
+            .lines()
+            .find_map(|l| l.strip_prefix("model:"))
+            .map(|m| m.trim().to_string()),
+    }
+}
+
 pub fn installed(agent: Agent, home: &Path) -> bool {
     AGENTS
         .iter()
@@ -138,6 +167,41 @@ pub fn installed(agent: Agent, home: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_installed_model_can_be_read_and_chosen_by_hand() {
+        let home =
+            std::env::temp_dir().join(format!("forge-subagent-model-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        // Codex sin modelo barato en el catálogo: hereda el principal (y Ajustes avisa).
+        install(Agent::Codex, &home, None).unwrap();
+        assert_eq!(installed_model(Agent::Codex, &home), None);
+        install(Agent::Codex, &home, Some("gpt-mini")).unwrap();
+        assert_eq!(
+            installed_model(Agent::Codex, &home).as_deref(),
+            Some("gpt-mini")
+        );
+        // Gemini: el de serie, o el que se elija.
+        install(Agent::Gemini, &home, None).unwrap();
+        assert_eq!(
+            installed_model(Agent::Gemini, &home).as_deref(),
+            Some(GEMINI_MODEL)
+        );
+        install(Agent::Gemini, &home, Some("gemini-x-lite")).unwrap();
+        assert_eq!(
+            installed_model(Agent::Gemini, &home).as_deref(),
+            Some("gemini-x-lite")
+        );
+        // Un nombre de modelo, no texto libre: no puede meter campos en el archivo.
+        for bad in ["x\nsandbox: none", "a: b", "", "# nada"] {
+            assert!(install(Agent::Gemini, &home, Some(bad)).is_err(), "{bad:?}");
+        }
+        assert_eq!(
+            installed_model(Agent::Gemini, &home).as_deref(),
+            Some("gemini-x-lite")
+        );
+        let _ = std::fs::remove_dir_all(home);
+    }
 
     #[test]
     fn codex_gets_the_cheap_model_of_its_catalog() {
@@ -159,7 +223,9 @@ mod tests {
         std::fs::write(&mine, "name = \"mine\"\n").unwrap();
         for agent in [Agent::Codex, Agent::Gemini] {
             assert!(!installed(agent, &home));
-            install(agent, &home, Some("gpt-6-luna")).unwrap();
+            // El modelo de Codex; Gemini se queda con el de serie.
+            let model = matches!(agent, Agent::Codex).then_some("gpt-6-luna");
+            install(agent, &home, model).unwrap();
             assert!(installed(agent, &home));
         }
         let codex =

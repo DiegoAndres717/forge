@@ -348,6 +348,8 @@ pub struct App {
     traffic_end: f32,
     /// Botón ☰ con los menús: fuera de macOS, que no tiene barra de menús nativa.
     menu_button: bool,
+    /// Modelo escrito para los subagentes de Codex/Gemini (por carpeta), antes de aplicarlo.
+    subagent_model: HashMap<String, String>,
     /// Forge mismo pidió cerrarse (reiniciar tras actualizar): la X no lo esconde.
     quitting: bool,
     /// Opciones elegidas en el botón ☰, para el próximo fotograma.
@@ -426,6 +428,7 @@ impl App {
             mru: Vec::new(),
             mru_cycle: None,
             quitting: false,
+            subagent_model: HashMap::new(),
             merged_check: Instant::now(),
             merging: Arc::default(),
             show_all: false,

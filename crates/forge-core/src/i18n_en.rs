@@ -1107,6 +1107,14 @@ pub const EN: &[(&str, &str)] = &[
     ("Terminal", "Terminal"),
     ("Tamaño de letra", "Font size"),
     ("Tecla Option", "Option key"),
+    ("Modelo: {m}", "Model: {m}"),
+    (
+        "Sin modelo barato: usan el del agente y no ahorran. Escribe uno abajo.",
+        "No cheap model: they use the agent's own and save nothing. Type one below.",
+    ),
+    ("modelo no válido: «{m}»", "invalid model: “{m}”"),
+    ("modelo", "model"),
+    ("Usar este modelo", "Use this model"),
     (
         "{p0}: presupuesto mensual agotado",
         "{p0}: monthly budget used up",
