@@ -361,7 +361,8 @@ fn main() -> eframe::Result {
             .map(PathBuf::from)
             .or_else(|| forge_core::home_dir().map(|h| h.join(".local/share"))),
         std::env::current_exe(),
-    ) {
+    ) && desktop_entry::stable(&exe)
+    {
         let _ = desktop_entry::install(&data, &exe);
     }
     eframe::run_native(

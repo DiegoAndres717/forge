@@ -6,10 +6,20 @@ use std::path::Path;
 
 /// Escribe (o actualiza) el lanzador y el icono bajo `data_home` (XDG_DATA_HOME).
 pub fn install(data_home: &Path, exe: &Path) -> std::io::Result<()> {
-    // ponytail: el PNG es de 1024 px en la carpeta de 512; los temas lo escalan.
     let icon = data_home.join("icons/hicolor/512x512/apps/forge.png");
-    write_if_changed(&icon, include_bytes!("../assets/icon.png"))?;
-    let exe = exe.to_string_lossy().replace('"', "\\\"");
+    write_if_changed(&icon, include_bytes!("../assets/icon-512.png"))?;
+    // Reglas de Exec: dentro de comillas se escapan " ` $ \ (y el archivo, a su vez, lee
+    // \ como escape: se doblan), y % se dobla.
+    let mut quoted = String::new();
+    for c in exe.to_string_lossy().chars() {
+        match c {
+            '\\' => quoted.push_str("\\\\\\\\"),
+            '"' | '`' | '$' => quoted.push_str(&format!("\\\\{c}")),
+            '%' => quoted.push_str("%%"),
+            _ => quoted.push(c),
+        }
+    }
+    let exe = quoted;
     let entry = format!(
         "[Desktop Entry]\nType=Application\nName=Forge\n\
          Comment=Workspace for coding with AI agents\nExec=\"{exe}\" %F\nIcon=forge\n\
@@ -19,6 +29,11 @@ pub fn install(data_home: &Path, exe: &Path) -> std::io::Result<()> {
         &data_home.join("applications/forge.desktop"),
         entry.as_bytes(),
     )
+}
+
+/// Un ejecutable que seguirá ahí: no el de `cargo run` ni uno abierto desde un temporal.
+pub fn stable(exe: &Path) -> bool {
+    !exe.starts_with(std::env::temp_dir()) && !exe.components().any(|c| c.as_os_str() == "target")
 }
 
 fn write_if_changed(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -51,6 +66,17 @@ mod tests {
         let icon = home.join("icons/hicolor/512x512/apps/forge.png");
         assert!(entry.contains("Icon=forge"), "{entry}");
         assert!(std::fs::metadata(&icon).unwrap().len() > 1000);
+        // Comillas, $, ` y \ se escapan; % se dobla (si no, sería un código de campo).
+        install(&home, Path::new(r#"/a "b" $c `d` \e 100%/forge"#)).unwrap();
+        let entry = std::fs::read_to_string(home.join("applications/forge.desktop")).unwrap();
+        assert!(
+            entry.contains(r#"Exec="/a \\"b\\" \\$c \\`d\\` \\\\e 100%%/forge" %F"#),
+            "{entry}"
+        );
+        // Desde una compilación o una carpeta temporal no se toca el lanzador.
+        assert!(!stable(Path::new("/home/x/forge/target/debug/forge")));
+        assert!(!stable(&std::env::temp_dir().join("x/forge")));
+        assert!(stable(Path::new("/home/x/.local/bin/forge")));
         // Sin cambios no se reescribe.
         let before = std::fs::metadata(&icon).unwrap().modified().unwrap();
         install(&home, exe).unwrap();
