@@ -419,6 +419,32 @@ test('the band shows how much exploration was delegated', async ($, on) => {
   expect(after).toContain('delegated 0%')
 })
 
+test('Forge offers to compact by tokens, and again each step', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const offers: string[] = []
+  on('process.run', ($, e) => {
+    if (e.argv.includes('compact')) offers.push((e.init as { stdin?: string } | undefined)?.stdin ?? '')
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('session.measure', ($, e) => ({ changed: e.changed }))
+  // El aviso sale sin esperar (no frena a Claude): se le da un momento.
+  const measure = async (percent: number) => {
+    await $.session.measure({ context: { percent, window: 1_000_000 } as never, rateLimits: [], changed: ['context'] })
+    await new Promise(r => setTimeout(r, 20))
+  }
+  // En una ventana de 1M se ofrece desde 400k, no al 60 % (600k).
+  await measure(39)
+  expect(offers.length).toBe(0)
+  await measure(41)
+  expect(offers.length).toBe(1)
+  expect(offers[0]).toContain('410k')
+  await measure(45)
+  expect(offers.length).toBe(1)
+  // Si se dejó para luego, vuelve a ofrecerse 100k más tarde.
+  await measure(51)
+  expect(offers.length).toBe(2)
+})
+
 test('the band warns when the context is getting full', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed }))
   await $.session.measure({

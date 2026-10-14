@@ -1469,6 +1469,31 @@ fn the_close_button_hides_forge_on_macos_instead_of_quitting() {
 }
 
 #[test]
+fn the_compact_offer_types_slash_compact_or_waits_for_later() {
+    // Con mucho contexto, el mod de Claude Code avisa y el panel ofrece compactar.
+    let _serial = serial();
+    let mut h = app(project("compact"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let panel = ws(h.state()).focused();
+    h.state_mut().workspaces[0].compact_offer(panel);
+    h.run_steps(3);
+    h.get_by_label("Compactar").click();
+    wait_until(&mut h, "la terminal recibe /compact", |a| {
+        ws(a).shell_text().contains("/compact")
+    });
+    h.run_steps(2);
+    assert!(h.query_by_label("Compactar").is_none(), "la franja se va");
+    // «Luego»: se va sin escribir nada (el mod vuelve a ofrecerlo más adelante).
+    h.state_mut().workspaces[0].compact_offer(panel);
+    h.run_steps(3);
+    h.get_by_label("Luego").click();
+    h.run_steps(3);
+    assert!(h.query_by_label("Compactar").is_none());
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");
