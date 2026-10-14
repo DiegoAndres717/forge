@@ -658,7 +658,10 @@ impl AiRun<'_> {
                 AiVerdict::Approve => (Level::Pass, "aprobada"),
                 AiVerdict::Changes => (Level::Warn, tr!("pide cambios")),
                 AiVerdict::Block => (Level::Block, "bloquea"),
-                AiVerdict::Incomplete => (Level::Pending, "incompleta"),
+                AiVerdict::Incomplete => (
+                    incomplete_level(self.config.best_effort, true),
+                    "incompleta",
+                ),
             };
             let mut details = outcome.details();
             let level = match st.exception_for(&rule).cloned() {
@@ -748,8 +751,18 @@ impl AiRun<'_> {
         }
         (self.notify)();
 
-        // ponytail: todos parten del mismo gasto del mes; con presupuesto muy justo se puede
-        // superar como mucho en (revisores − 1) × max_cost_per_call_usd.
+        // Todos parten del mismo gasto del mes: de los de pago se lanzan solo los que caben con
+        // su tope, primero los que bloquean. Los locales no gastan.
+        pending.sort_by_key(|(_, a)| !a.reviewer.blocking);
+        let room = router::affordable_reviewers(self.config, spent, pending.len());
+        let mut paid = 0;
+        let (pending, skipped): (Vec<_>, Vec<_>) = pending.into_iter().partition(|(_, a)| {
+            if !router::reviewer_is_paid(self.config, &a.reviewer, local) {
+                return true;
+            }
+            paid += 1;
+            paid <= room
+        });
         let (config, rules) = (self.config, self.rules);
         let outcomes: Vec<(usize, Activation, AiOutcome)> = std::thread::scope(|scope| {
             let handles: Vec<_> = pending
@@ -765,6 +778,11 @@ impl AiRun<'_> {
         });
 
         let mut st = s.lock().unwrap();
+        // Los que no cabían en el presupuesto del mes: como un revisor sin respuesta.
+        for (n, a) in &skipped {
+            st.items[*n].level = incomplete_level(config.best_effort, a.reviewer.blocking);
+            st.items[*n].label = tr!("{p0}: presupuesto mensual agotado", p0 = a.reviewer.name);
+        }
         for (n, a, outcome) in &outcomes {
             let rule = format!("reviewer:{}", a.reviewer.id);
             st.usage
@@ -776,7 +794,9 @@ impl AiRun<'_> {
                 (AiVerdict::Block, false) => (Level::Warn, "objeta (informativo)"),
                 (AiVerdict::Changes, true) => (Level::Warn, tr!("pide cambios")),
                 (AiVerdict::Changes, false) => (Level::Info, "comenta"),
-                (AiVerdict::Incomplete, true) => (Level::Pending, "incompleto"),
+                (AiVerdict::Incomplete, true) => {
+                    (incomplete_level(config.best_effort, true), "incompleto")
+                }
                 (AiVerdict::Incomplete, false) => (Level::Info, tr!("sin respuesta")),
             };
             let mut details = vec![tr!("archivos: {p0}", p0 = a.files.join(", "))];
@@ -967,4 +987,14 @@ pub(crate) fn run_check(
 pub(crate) fn tail(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+/// Una revisión con IA que no se completó (sin proveedor, sin respuesta, sin presupuesto):
+/// con best_effort avisa y deja pasar; si no, la de un revisor que bloquea queda pendiente.
+pub fn incomplete_level(best_effort: bool, blocking: bool) -> Level {
+    match (blocking, best_effort) {
+        (false, _) => Level::Info,
+        (true, true) => Level::Warn,
+        (true, false) => Level::Pending,
+    }
 }

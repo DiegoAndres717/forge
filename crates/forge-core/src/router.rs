@@ -43,6 +43,9 @@ pub struct RouterConfig {
     pub tasks: HashMap<String, TaskRoute>,
     /// Proveedores propios o cambios a los conocidos.
     pub providers: HashMap<String, ProviderDef>,
+    /// Si la revisión no se puede completar (sin proveedor, sin respuesta, sin presupuesto),
+    /// queda como aviso en vez de pendiente: no bloquea.
+    pub best_effort: bool,
 }
 
 impl Default for RouterConfig {
@@ -56,8 +59,29 @@ impl Default for RouterConfig {
             timeout_seconds: 240,
             tasks: HashMap::new(),
             providers: HashMap::new(),
+            best_effort: false,
         }
     }
+}
+
+/// ¿Paga este revisor? Los de un proveedor local no gastan presupuesto.
+pub fn reviewer_is_paid(
+    config: &RouterConfig,
+    reviewer: &crate::reviewers::ReviewerSpec,
+    local: bool,
+) -> bool {
+    let chosen = reviewer_route(config, reviewer, local);
+    config.provider(&chosen.provider).is_some_and(|p| !p.local)
+}
+
+/// Cuántos de `n` revisores en paralelo caben en lo que queda del mes, contando el tope de
+/// cada llamada (todos parten del mismo gasto: sin esto se podía pasar en (n − 1) topes).
+pub fn affordable_reviewers(config: &RouterConfig, spent: f64, n: usize) -> usize {
+    let room = config.monthly_budget_usd - spent;
+    if config.max_cost_per_call_usd <= 0.0 {
+        return if room > 0.0 { n } else { 0 };
+    }
+    ((room / config.max_cost_per_call_usd).floor().max(0.0) as usize).min(n)
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -1131,7 +1155,8 @@ const TEMPLATE: &str = "# Router de modelos: qué modelo revisa según la tarea 
                 prefer_local = true             # clasificación con ollama si está instalado\n\
                 monthly_budget_usd = 20.00\n\
                 allow_escalation = true\n\
-                max_cost_per_call_usd = 0.50\n\n\
+                max_cost_per_call_usd = 0.50\n\
+                best_effort = false             # true: sin proveedor o sin respuesta, avisa y no bloquea\n\n\
                 # Cada tarea puede fijar proveedor (anthropic, openai, opencode, local), modelo y esfuerzo.\n\
                 # [routing.tasks.classification]\n# provider = \"local\"\n# model = \"qwen2.5-coder\"\n# effort = \"low\"\n\n\
                 # [routing.tasks.code_review]\n# provider = \"anthropic\"\n# model = \"haiku\"\n# effort = \"medium\"\n\n\
@@ -1188,6 +1213,25 @@ impl RoutingForm {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parallel_reviewers_fit_the_remaining_budget() {
+        let c = RouterConfig {
+            monthly_budget_usd: 1.0,
+            max_cost_per_call_usd: 0.3,
+            ..Default::default()
+        };
+        assert_eq!(affordable_reviewers(&c, 0.2, 5), 2, "0,80 / 0,30");
+        assert_eq!(affordable_reviewers(&c, 0.0, 2), 2);
+        assert_eq!(affordable_reviewers(&c, 1.5, 3), 0);
+        let file: RoutingFile = toml::from_str("[routing]\nbest_effort = true").unwrap();
+        assert!(file.routing.best_effort);
+        // Incompleta: con best_effort avisa y deja pasar; sin él, queda pendiente.
+        use crate::guard::{Level, incomplete_level};
+        assert_eq!(incomplete_level(true, true), Level::Warn);
+        assert_eq!(incomplete_level(false, true), Level::Pending);
+        assert_eq!(incomplete_level(false, false), Level::Info, "informativo");
+    }
+
     use super::*;
 
     #[test]

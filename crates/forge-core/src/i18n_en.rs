@@ -1116,6 +1116,10 @@ pub const EN: &[(&str, &str)] = &[
     ("modelo", "model"),
     ("Usar este modelo", "Use this model"),
     (
+        "{p0}: presupuesto mensual agotado",
+        "{p0}: monthly budget used up",
+    ),
+    (
         "se salta los hooks de Git y la validación de Guard (--no-verify)",
         "skips Git hooks and Guard's validation (--no-verify)",
     ),
