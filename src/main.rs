@@ -1,6 +1,8 @@
 mod app;
 mod claude_plugin;
 mod cli;
+#[cfg(any(target_os = "linux", test))]
+mod desktop_entry;
 mod layout;
 mod processes;
 mod suggest;
@@ -335,6 +337,8 @@ fn main() -> eframe::Result {
         // vista y un NSVisualEffectView (desenfoque) quedaría encima tapando todo.
         viewport: egui::ViewportBuilder::default()
             .with_title("Forge")
+            // Linux (Wayland): la ventana se asocia a forge.desktop, de donde sale su icono.
+            .with_app_id("forge")
             .with_inner_size([1280.0, 800.0])
             .with_min_inner_size([760.0, 480.0])
             .with_fullsize_content_view(true)
@@ -349,6 +353,17 @@ fn main() -> eframe::Result {
     };
     #[cfg(windows)]
     leave_own_console();
+    // Linux: lanzador e icono en el menú de aplicaciones (ver `desktop_entry`).
+    #[cfg(target_os = "linux")]
+    if let (Some(data), Ok(exe)) = (
+        std::env::var_os("XDG_DATA_HOME")
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| forge_core::home_dir().map(|h| h.join(".local/share"))),
+        std::env::current_exe(),
+    ) {
+        let _ = desktop_entry::install(&data, &exe);
+    }
     eframe::run_native(
         "Forge",
         options,
