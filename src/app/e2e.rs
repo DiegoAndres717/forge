@@ -1660,11 +1660,19 @@ fn add_process_in_the_sidebar_opens_its_form() {
     h.get_by_label("Añadir proceso").click();
     h.run_steps(3);
     assert!(h.state().settings_open);
-    assert!(
-        h.query_by_label_contains("Servidores y tareas que Forge arranca")
-            .is_some(),
-        "abre en Este proyecto, con el formulario de procesos"
-    );
+    // El formulario lee .forge/project.toml: en un CI lento tarda más de unos fotogramas.
+    let start = Instant::now();
+    while h
+        .query_by_label_contains("Servidores y tareas que Forge arranca")
+        .is_none()
+    {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "abre en Este proyecto, con el formulario de procesos"
+        );
+        h.run_steps(1);
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Memoria, hilos y descriptores del proceso: (RSS en bytes, hilos, archivos abiertos).
