@@ -408,7 +408,7 @@ pub struct Workspace {
 }
 
 /// Franja «mucho contexto»: compactar ahora (escribe `/compact`) o luego.
-fn compact_banner(ui: &mut egui::Ui, rect: Rect, id: PanelId) -> Vec<HeaderAction> {
+fn compact_banner(ui: &mut egui::Ui, rect: Rect, id: PanelId, busy: bool) -> Vec<HeaderAction> {
     use crate::theme::{self, icon};
     let mut actions = Vec::new();
     ui.painter()
@@ -430,10 +430,11 @@ fn compact_banner(ui: &mut egui::Ui, rect: Rect, id: PanelId) -> Vec<HeaderActio
         .color(theme::ORANGE),
     );
     if child
-        .button(tr!("Compactar"))
+        .add_enabled(!busy, egui::Button::new(tr!("Compactar")))
         .on_hover_text(tr!(
             "Escribe /compact: el agente resume la conversación y sigue con lo importante"
         ))
+        .on_disabled_hover_text(tr!("Espera a que el agente termine de responder"))
         .clicked()
     {
         actions.push(HeaderAction::Compact);
@@ -1963,7 +1964,19 @@ impl Workspace {
             // Mucho contexto: franja para compactar ahora o luego.
             let body = if self.compacting.contains(&id) {
                 let (banner, rest) = body.split_top_bottom_at_y(body.min.y + 34.0);
-                header_actions.extend(compact_banner(ui, banner, id).into_iter().map(|a| (id, a)));
+                // Mientras el agente escribe, /compact caería a mitad de su respuesta.
+                let busy = matches!(
+                    self.panels.get(&id).map(|p| &p.content),
+                    Some(Content::Shell(t)) if t.last_output().is_some_and(|at| at.elapsed() < Duration::from_secs(2))
+                );
+                if busy {
+                    ui.ctx().request_repaint_after(Duration::from_millis(500));
+                }
+                header_actions.extend(
+                    compact_banner(ui, banner, id, busy)
+                        .into_iter()
+                        .map(|a| (id, a)),
+                );
                 rest
             } else {
                 body

@@ -274,7 +274,8 @@ export const register: Register = on => {
         const tokens = (e.context.percent / 100) * window
         const from = Math.min(COMPACT_FROM, (window * CONTEXT_WARN) / 100)
         warnAt = (from / window) * 100
-        if (compactNext === 0) compactNext = from
+        // First time, or the context got small again (/clear, a resumed session): start over.
+        if (compactNext === 0 || tokens < from) compactNext = from
         if (tokens >= compactNext) {
           // Forge shows "Compactar · Luego" on this terminal; left for later, it comes back
           // a step further on.

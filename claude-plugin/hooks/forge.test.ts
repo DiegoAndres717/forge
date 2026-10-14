@@ -440,6 +440,10 @@ test('Forge offers to compact by tokens, and again each step', async ($, on) => 
   // Si se dejó para luego, vuelve a ofrecerse 100k más tarde.
   await measure(51)
   expect(offers.length).toBe(2)
+  // Tras /clear o al retomar, el contexto vuelve a ser pequeño: se empieza de nuevo.
+  await measure(3)
+  await measure(41)
+  expect(offers.length).toBe(3)
 })
 
 test('the band warns when the context is getting full', async ($, on) => {

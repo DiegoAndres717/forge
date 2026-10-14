@@ -1478,6 +1478,18 @@ fn the_compact_offer_types_slash_compact_or_waits_for_later() {
     });
     let panel = ws(h.state()).focused();
     h.state_mut().workspaces[0].compact_offer(panel);
+    // Mientras la terminal escribe, el botón espera (no corta la respuesta del agente).
+    h.event(egui::Event::Text("echo ocupado".into()));
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    use egui_kittest::kittest::NodeT;
+    assert!(
+        h.get_by_label("Compactar").accesskit_node().is_disabled(),
+        "con la terminal escribiendo, el botón espera"
+    );
+    wait_until(&mut h, "terminal tranquila", |a| {
+        ws(a).is_quiet(Duration::from_millis(2200))
+    });
     h.run_steps(3);
     h.get_by_label("Compactar").click();
     wait_until(&mut h, "la terminal recibe /compact", |a| {

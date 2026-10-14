@@ -1130,6 +1130,10 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Luego", "Later"),
     (
+        "Espera a que el agente termine de responder",
+        "Wait until the agent finishes answering",
+    ),
+    (
         "Se volverá a ofrecer cuando el contexto crezca más",
         "It will be offered again when the context grows further",
     ),
