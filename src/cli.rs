@@ -1169,6 +1169,9 @@ fn memory_cli(
     if found.is_empty() && !brief {
         out.line(tr!("Sin resultados."));
     }
+    // Los agentes también leen esto (/forge-memory, skills): datos, no órdenes. Con --brief
+    // lo enmarca quien lo inyecta (el mod).
+    let framed = !brief && !found.is_empty();
     for m in found {
         let text = if brief {
             forge_core::memory::render_title(&m)
@@ -1177,6 +1180,9 @@ fn memory_cli(
         };
         out.line(&text);
         out.line("");
+    }
+    if framed {
+        out.line(forge_core::mcp::MEMORY_IS_DATA);
     }
     Ok(0)
 }
