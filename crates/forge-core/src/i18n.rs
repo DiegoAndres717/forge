@@ -166,7 +166,10 @@ mod tests {
         }
         let mut missing = Vec::new();
         for file in files {
-            let text = std::fs::read_to_string(&file).unwrap();
+            // Un checkout de Windows con autocrlf trae \r\n: el código es el mismo.
+            let text = std::fs::read_to_string(&file)
+                .unwrap()
+                .replace("\r\n", "\n");
             for literal in tr_literals(&text) {
                 if !EN.contains_key(literal.as_str()) {
                     missing.push(format!("{}: {literal:?}", file.display()));
