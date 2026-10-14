@@ -223,16 +223,16 @@ impl Route {
 /// Ruta de una tarea: la de routing.toml o la por defecto del perfil. Con `prefer_local`
 /// y ollama disponible, la clasificación va a un modelo local.
 pub fn route(config: &RouterConfig, task: Task, local_available: bool) -> Route {
+    // Una ruta elegida se respeta siempre: una local sin Ollama falla (queda incompleta, o
+    // como aviso con best_effort) en vez de mandar el código a la nube sin decirlo.
     if let Some(t) = config.tasks.get(task.key()) {
-        let local = matches!(t.provider.as_str(), "local" | "ollama");
-        if !local || local_available {
-            return Route {
-                task,
-                provider: t.provider.clone(),
-                model: t.model.clone(),
-                effort: t.effort.clone().unwrap_or_else(|| "medium".into()),
-            };
-        }
+        let _ = local_available;
+        return Route {
+            task,
+            provider: t.provider.clone(),
+            model: t.model.clone(),
+            effort: t.effort.clone().unwrap_or_else(|| "medium".into()),
+        };
     }
     let (provider, model, effort) = match (config.profile, task) {
         (_, Task::Classification) if config.prefer_local && local_available => {
@@ -1234,16 +1234,22 @@ impl RoutingForm {
             r["tasks"] = toml_edit::table();
         }
         for task in LOCAL_TASKS {
-            let current = r["tasks"].get(task);
-            let ours = current
-                .is_some_and(|t| t.get("provider").and_then(|p| p.as_str()) == Some("local"));
-            if self.local_reviews {
+            let field = |k: &str| {
+                r["tasks"]
+                    .get(task)
+                    .and_then(|t| t.get(k))
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            };
+            let local = field("provider").as_deref() == Some("local");
+            if self.local_reviews && !local {
+                // Solo las que aún no van en local: lo afinado a mano en una local se queda.
                 let mut t = toml_edit::Table::new();
                 t["provider"] = toml_edit::value("local");
                 t["model"] = toml_edit::value(model);
                 r["tasks"][task] = toml_edit::Item::Table(t);
-            } else if ours {
-                // Solo se quita lo que puso esta opción: una tarea propia en la nube se queda.
+            } else if !self.local_reviews && local && field("model").as_deref() == Some(model) {
+                // Solo se quita lo que puso esta opción (su modelo); lo propio se queda.
                 if let Some(tasks) = r["tasks"].as_table_like_mut() {
                     tasks.remove(task);
                 }
@@ -1280,6 +1286,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_local_route_never_falls_back_to_the_cloud() {
+        // «Revisar en local (privado)» sin Ollama: falla (o avisa), pero el código no sube.
+        let mut config = RouterConfig::default();
+        config.tasks.insert(
+            "security".into(),
+            TaskRoute {
+                provider: "local".into(),
+                model: "qwen2.5-coder".into(),
+                effort: None,
+            },
+        );
+        assert_eq!(route(&config, Task::Security, false).provider, "local");
+    }
+
+    #[test]
     fn the_form_can_send_reviews_to_a_local_model() {
         // Niveles 2–3 en local: el código no sale del ordenador.
         let dir = std::env::temp_dir().join(format!("forge-routing-local-{}", std::process::id()));
@@ -1301,16 +1322,28 @@ mod tests {
         let again = RoutingForm::load(&dir).unwrap();
         assert!(again.local_reviews && again.best_effort);
         assert_eq!(again.local_model, "qwen2.5-coder:14b");
-        // Quitarlo deja esas tareas como estaban de serie.
-        let mut off = again;
+        // Lo que el usuario afinó a mano en una tarea local no se pisa al guardar.
+        let path = dir.join(".forge/routing.toml");
+        let mut doc: toml_edit::DocumentMut =
+            std::fs::read_to_string(&path).unwrap().parse().unwrap();
+        doc["routing"]["tasks"]["security"]["model"] = toml_edit::value("llama-sec");
+        doc["routing"]["tasks"]["security"]["effort"] = toml_edit::value("high");
+        std::fs::write(&path, doc.to_string()).unwrap();
+        let mut form = RoutingForm::load(&dir).unwrap();
+        form.monthly_budget_usd = 7.0;
+        form.save(&dir).unwrap();
+        let security = RouterConfig::load(&dir).unwrap().tasks["security"].clone();
+        assert_eq!(
+            (security.model.as_str(), security.effort.as_deref()),
+            ("llama-sec", Some("high"))
+        );
+        // Quitarlo deja de serie solo lo que puso la opción; la ruta propia se queda.
+        let mut off = RoutingForm::load(&dir).unwrap();
         off.local_reviews = false;
         off.save(&dir).unwrap();
-        assert!(
-            !RouterConfig::load(&dir)
-                .unwrap()
-                .tasks
-                .contains_key("code_review")
-        );
+        let tasks = RouterConfig::load(&dir).unwrap().tasks;
+        assert!(!tasks.contains_key("code_review"));
+        assert_eq!(tasks["security"].model, "llama-sec");
     }
 
     #[test]

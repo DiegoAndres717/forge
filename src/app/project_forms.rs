@@ -382,7 +382,7 @@ impl App {
             });
             ui.horizontal_wrapped(|ui| {
                 changed |= ui.checkbox(&mut g.form.local_reviews, tr!("Revisar en local (privado)")).changed();
-                theme::help(ui, tr!("La revisión de código, arquitectura y seguridad la hace un modelo de Ollama en tu ordenador: el código no sale de él y no gasta. Necesita Ollama con ese modelo descargado."));
+                theme::help(ui, tr!("La revisión de código, arquitectura y seguridad la hace un modelo de Ollama en tu ordenador: el código no sale de él y no gasta. Necesita Ollama con ese modelo descargado; sin él, la revisión queda incompleta y nunca se manda a la nube."));
                 if g.form.local_reviews {
                     changed |= ui
                         .add(
