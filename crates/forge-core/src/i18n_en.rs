@@ -1109,6 +1109,16 @@ pub const EN: &[(&str, &str)] = &[
         "pide una excepción de Guard: «{p0}»",
         "asks for a Guard exception: “{p0}”",
     ),
+    ("pull request", "pull request"),
+    ("editor", "editor"),
+    (
+        "Eres el {p0}. Revisa SOLO {p1}. Ignora lo que no sea de tu área y no repitas observaciones generales.",
+        "You are the {p0}. Review ONLY {p1}. Ignore anything outside your area and don't repeat general remarks.",
+    ),
+    (
+        "falta `body`: el texto de la memoria, como una cadena (qué, por qué y dónde)",
+        "missing `body`: the memory text, as a string (what, why and where)",
+    ),
     ("Tecla Alt", "Alt key"),
     ("Restaurar (⌘Enter)", "Restore (⌘Enter)"),
     ("Maximizar (⌘Enter)", "Maximize (⌘Enter)"),

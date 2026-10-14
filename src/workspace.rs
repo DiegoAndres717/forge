@@ -1713,6 +1713,7 @@ impl Workspace {
             .as_ref()
             .and_then(|a| self.project.agents.iter().find(|s| &s.id == a))?;
         let program = spec.program().to_string();
+        let agent = spec.name.clone();
         let config = self
             .account_for(&program, panel.account)
             .and_then(|a| a.dir.clone());
@@ -1720,7 +1721,7 @@ impl Workspace {
         Some(move || {
             let summary = forge_core::sessions::session_summary(&program, &root, config.as_deref());
             if let (Some(text), Ok(store)) = (summary, forge_core::store::Store::open(&db)) {
-                let _ = store.save_session_summary(&project, &text);
+                let _ = store.save_session_summary(&project, &text, Some(&agent));
             }
         })
     }

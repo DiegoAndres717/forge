@@ -213,7 +213,8 @@ pub fn collect_diff(
         for path in untracked.split('\0').filter(|p| !p.is_empty()) {
             let (lines, binary) = read_text(&repo.join(path));
             hasher
-                .update(tr!("\0nuevo:{path}\0{p0}", p0 = lines.join("\n"), path = path).as_bytes());
+                // Parte de la huella del candidato: nunca traducida.
+                .update(format!("\0nuevo:{path}\0{p0}", p0 = lines.join("\n")).as_bytes());
             diff.files.push(FileChange {
                 path: path.into(),
                 added: lines.len(),
