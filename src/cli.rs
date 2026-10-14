@@ -1130,13 +1130,19 @@ fn memory_cli(
             out.line(&format!("Guardada como #{id}."));
             return Ok(0);
         }
-        // El mod guarda aquí el resumen de cada compactación (por stdin): una sola nota
-        // que se va actualizando, para no llenar la memoria de copias.
+        // El mod guarda aquí el resumen de cada compactación (por stdin): una nota por
+        // agente (--agent o el de la terminal) que se va actualizando, sin copias.
         "session" => {
             let mut text = String::new();
             std::io::Read::read_to_string(&mut std::io::stdin().take(64 * 1024), &mut text)
                 .map_err(|e| e.to_string())?;
-            let id = store.save_session_summary(project, &text)?;
+            let agent = rest
+                .iter()
+                .position(|a| *a == "--agent")
+                .and_then(|i| rest.get(i + 1))
+                .map(|a| a.to_string())
+                .or_else(|| std::env::var("FORGE_ORIGIN").ok());
+            let id = store.save_session_summary(project, &text, agent.as_deref())?;
             out.line(&format!("#{id}"));
             return Ok(0);
         }
