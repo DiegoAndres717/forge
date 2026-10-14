@@ -1446,6 +1446,29 @@ fn composed_text_reaches_the_shell() {
 }
 
 #[test]
+fn the_close_button_hides_forge_on_macos_instead_of_quitting() {
+    // La X roja cortaba agentes y procesos en marcha: en macOS esconde Forge (como ⌘H) y
+    // ⌘Q sale. Los cierres que pide Forge (reiniciar tras actualizar) sí cierran.
+    let _serial = serial();
+    let mut h = app(project("close-hides"));
+    let close = |h: &mut Harness<'_, App>| {
+        h.input_mut()
+            .viewports
+            .entry(egui::ViewportId::ROOT)
+            .or_default()
+            .events
+            .push(egui::ViewportEvent::Close);
+        h.run_steps(1);
+        h.output().viewport_output[&egui::ViewportId::ROOT]
+            .commands
+            .contains(&egui::ViewportCommand::CancelClose)
+    };
+    assert_eq!(close(&mut h), cfg!(target_os = "macos"));
+    h.state_mut().quitting = true;
+    assert!(!close(&mut h), "Forge pidió cerrar: se cierra");
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");

@@ -130,6 +130,9 @@ pub fn download(dmg_url: &str, checksum_url: &str) -> Result<PathBuf, String> {
 }
 
 /// Script que espera a que Forge (pid) se cierre, sustituye la app y la vuelve a abrir.
+/// Al final la abre otra vez: abierta desde un proceso de fondo, macOS la deja detrás, y un
+/// segundo `open` sobre la app ya abierta la trae al frente (sin pedir permiso de
+/// Automatización, como haría osascript).
 pub fn relaunch_script(pid: u32, staged: &Path, app: &Path) -> String {
     let q = |p: &Path| crate::agents::shell_quote(&p.to_string_lossy());
     let new = q(&app.with_extension("app.new"));
@@ -137,7 +140,7 @@ pub fn relaunch_script(pid: u32, staged: &Path, app: &Path) -> String {
     format!(
         "while kill -0 {pid} 2>/dev/null; do sleep 0.2; done; \
          rm -rf {new} && /usr/bin/ditto {staged} {new} && rm -rf {app} && mv {new} {app}; \
-         open {app}"
+         open {app} && sleep 1 && open {app}"
     )
 }
 
@@ -186,7 +189,13 @@ mod tests {
         );
         assert!(script.starts_with("while kill -0 42"));
         assert!(script.contains("mv '/Applications/Forge.app.new' '/Applications/Forge.app'"));
-        assert!(script.ends_with("open '/Applications/Forge.app'"));
+        // Abierta desde un proceso de fondo, macOS no la pone delante: se abre otra vez.
+        assert!(
+            script.ends_with(
+                "open '/Applications/Forge.app' && sleep 1 && open '/Applications/Forge.app'"
+            ),
+            "{script}"
+        );
     }
 
     /// Contra GitHub de verdad: `cargo test -p forge-core real_download -- --ignored`.

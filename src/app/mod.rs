@@ -348,6 +348,8 @@ pub struct App {
     traffic_end: f32,
     /// Botón ☰ con los menús: fuera de macOS, que no tiene barra de menús nativa.
     menu_button: bool,
+    /// Forge mismo pidió cerrarse (reiniciar tras actualizar): la X no lo esconde.
+    quitting: bool,
     /// Opciones elegidas en el botón ☰, para el próximo fotograma.
     menu_chosen: Vec<menu::MenuCmd>,
     /// Última lectura de la carpeta de eventos de los agentes.
@@ -423,6 +425,7 @@ impl App {
             notification_click: Arc::default(),
             mru: Vec::new(),
             mru_cycle: None,
+            quitting: false,
             merged_check: Instant::now(),
             merging: Arc::default(),
             show_all: false,
@@ -1286,10 +1289,29 @@ impl App {
     }
 }
 
+/// Esconde Forge entero (como ⌘H): macOS lo vuelve a mostrar al activarlo desde el Dock.
+#[cfg(all(target_os = "macos", not(test)))]
+fn hide_app() {
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        objc2_app_kit::NSApplication::sharedApplication(mtm).hide(None);
+    }
+}
+
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let mut cmds = Vec::new();
+
+        // macOS: la X esconde Forge (como ⌘H) y sigue corriendo con sus agentes; el Dock lo
+        // vuelve a mostrar. ⌘Q sale (terminate: no pasa por aquí).
+        if cfg!(target_os = "macos")
+            && !self.quitting
+            && ctx.input(|i| i.viewport().close_requested())
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            #[cfg(all(target_os = "macos", not(test)))]
+            hide_app();
+        }
 
         if let Some(picked) = self.picker.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.picker = None;
