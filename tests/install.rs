@@ -93,3 +93,37 @@ fn installs_updates_and_rejects_a_tampered_download() {
     assert_eq!(std::fs::metadata(&exe).unwrap().modified().unwrap(), before);
     let _ = std::fs::remove_dir_all(base);
 }
+
+#[test]
+fn picks_the_architecture_from_windows_itself() {
+    // En un PC real, RuntimeInformation salió vacío en Windows PowerShell 5.1: la
+    // arquitectura sale de PROCESSOR_ARCHITECTURE, la que Windows da a todo proceso.
+    let base = std::env::temp_dir().join(format!("forge-install-arch-{}", std::process::id()));
+    let out = {
+        let mut cmd = Command::new("powershell.exe");
+        cmd.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("scripts")
+                .join("install.ps1"),
+        )
+        .env("FORGE_VERSION", "9.9.9")
+        .env("FORGE_RELEASE_DIR", &base)
+        .env("FORGE_DIR", base.join("Forge"))
+        .env("FORGE_SKIP_USER_SETUP", "1")
+        .env("PROCESSOR_ARCHITECTURE", "x86")
+        .env_remove("PROCESSOR_ARCHITEW6432");
+        cmd.output().unwrap()
+    };
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !out.status.success() && err.contains("no soportada: x86"),
+        "{err}"
+    );
+}

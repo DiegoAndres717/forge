@@ -11,10 +11,13 @@
   $ProgressPreference = 'SilentlyContinue'
   $repo = 'DiegoAndres717/forge'
 
-  $arch = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {
-    'X64' { 'x86_64' }
-    'Arm64' { 'aarch64' }
-    default { throw "forge: arquitectura no soportada: $_" }
+  # PROCESSOR_ARCHITECTURE existe en toda versión de PowerShell; RuntimeInformation sale
+  # vacío en algunos Windows PowerShell 5.1. ARCHITEW6432: PowerShell de 32 bits en 64.
+  $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
+  $arch = switch ($cpu) {
+    'AMD64' { 'x86_64' }
+    'ARM64' { 'aarch64' }
+    default { throw "forge: arquitectura no soportada: $cpu" }
   }
 
   $version = $env:FORGE_VERSION
