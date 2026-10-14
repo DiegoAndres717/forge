@@ -25,6 +25,18 @@ const active = atom({ plugin: 'forge', key: 'active' } as const, {} as Active)
 const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<string, string>)
 const context = atom({ plugin: 'forge', key: 'context' } as const, null as number | null)
 const effort = atom({ plugin: 'forge', key: 'effort' } as const, '')
+/** Searches and reads done by the main loop vs inside subagents (the band shows the share). */
+const delegation = atom({ plugin: 'forge', key: 'delegation' } as const, { main: 0, sub: 0 })
+/** Below this many reads the share says nothing yet. */
+const DELEGATION_FROM = 5
+// Counted here, not with update(): parallel subagents would lose increments in a
+// read-modify-write. The atom only carries the figure to the band.
+const reads = { main: 0, sub: 0 }
+const countRead = async ($: EngineInterface, sub: boolean | null) => {
+  if (sub === null) Object.assign(reads, { main: 0, sub: 0 })
+  else reads[sub ? 'sub' : 'main'] += 1
+  await update($, delegation, () => ({ ...reads })).catch(() => undefined)
+}
 
 /** Effort levels Claude Code takes, from least to most. */
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
@@ -212,6 +224,8 @@ async function run($: EngineInterface, args: string[]) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // A new conversation measures its own delegation.
+    await countRead($, null)
     const agents = [
       { name: 'explorer', model: 'haiku', effort: 'low', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
         description: 'Fast, cheap code explorer: where things are, what code does, finding files, symbols and call sites, reading and summarizing several files. Returns a short answer with paths.' },
@@ -325,6 +339,8 @@ export const register: Register = on => {
   })
 
   on('session.compact', async ($, e, next) => {
+    // After compacting, the share is about what is still in the context.
+    await countRead($, null)
     const result = await next(e)
     const messages = 'messages' in result ? result.messages : undefined
     // The summary is the longest text left after compacting (it may come as a user turn).
@@ -396,6 +412,10 @@ export const register: Register = on => {
   // the model reads) to hand the rest to forge:explorer. Counted per message of yours.
   on('tool.call', async ($, e, next) => {
     const result = await next(e)
+    if (!('deny' in result) && explores(e)) {
+      // Only the band depends on this: a failure never touches the call.
+      await countRead($, Boolean(e.agentId))
+    }
     if (e.agentId || 'deny' in result) return result
     if (!checkNudged && e.tool === 'Bash' && 'command' in e && typeof e.command === 'string' && CHECK_SHELL.test(e.command)) {
       checkNudged = true
@@ -465,6 +485,9 @@ export const register: Register = on => {
     const subagents = working.filter(([key]) => key !== 'main')
     const main = working.find(([key]) => key === 'main')?.[1]
     const ctx = await read($, context)
+    const reads = await read($, delegation)
+    const total = reads.main + reads.sub
+    const delegated = total >= DELEGATION_FROM ? Math.round((reads.sub / total) * 100) : null
     const now = Date.now()
     const windows = await read($, limits)
     // The Forge account this session runs with (only set when there are several).
@@ -476,7 +499,10 @@ export const register: Register = on => {
       return [{ label, percent, reset: resetsIn(w.resetsAt, now) }]
     })
     const full = ctx !== null && ctx >= CONTEXT_WARN
-    if (e.props.hasSurvey || (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full))
+    if (
+      e.props.hasSurvey ||
+      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null)
+    )
       return next(e)
     const { Text } = $.ui.resolve(e)
     // One line of text with colored spans: it reads left to right and, when narrow,
@@ -532,6 +558,12 @@ export const register: Register = on => {
             <Text dimColor> · </Text>
             <Text color={ctx >= 85 ? 'error' : 'warning'}>{`context ${ctx}%`}</Text>
             <Text dimColor> /compact</Text>
+          </Text>
+        ) : null}
+        {delegated !== null ? (
+          <Text>
+            <Text dimColor> · </Text>
+            <Text color={delegated >= 50 ? 'success' : 'warning'}>{`delegated ${delegated}%`}</Text>
           </Text>
         ) : null}
         {/* Subagents at work go last: a long task wraps alone, the usage bars stay put. */}

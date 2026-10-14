@@ -394,6 +394,31 @@ test('the main loop running a whole suite or build itself is nudged once to forg
   expect(await bash('pytest', 'a1')).toBe(0)
 })
 
+test('the band shows how much exploration was delegated', async ($, on) => {
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  on('session.compact', () => ({ messages: [{ role: 'user', text: 'resumen', toolUses: [] }] }))
+  const read = (agentId?: string) => $.tool.call({ tool: 'Read', file_path: '/a', agentId } as never)
+  await read()
+  await read()
+  for (const _ of [1, 2, 3, 4]) await read('explorer-1')
+  const drawn = JSON.stringify(await (await $.ui.mount({
+    plugin: 'forge', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })).drawn())
+  // 4 de 6 lecturas las hizo un subagente: lo que se deja de releer en cada turno.
+  expect(drawn).toContain('delegated 67%')
+  // Un rg por la shell también es explorar; tras compactar se cuenta de nuevo.
+  await $.tool.call({ tool: 'Bash', command: 'rg login src', agentId: 'explorer-1' } as never)
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'resumen', toolUses: [] }] } as never)
+  for (const _ of [1, 2, 3, 4, 5]) await read()
+  const after = JSON.stringify(await (await $.ui.mount({
+    plugin: 'forge', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })).drawn())
+  // Sin reiniciar serían 5 de 12 (42 %): cuenta solo lo de después.
+  expect(after).toContain('delegated 0%')
+})
+
 test('the band warns when the context is getting full', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed }))
   await $.session.measure({
