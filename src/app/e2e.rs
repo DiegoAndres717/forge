@@ -43,7 +43,7 @@ fn project(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("forge-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join(".forge")).unwrap();
-    let dir = dir.canonicalize().unwrap();
+    let dir = forge_core::canonical(&dir);
     std::fs::write(
         dir.join(".forge/rules.toml"),
         "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\nname = \"Tests\"\ncommand = \"true\"\n",
