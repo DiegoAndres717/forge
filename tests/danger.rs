@@ -124,6 +124,32 @@ fn dangerous_commands_wait_for_authorization() {
 }
 
 #[test]
+fn agents_cannot_grant_guard_exceptions_on_their_own() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
+    let e = setup("allow");
+    std::fs::write(e.repo.join("a.txt"), "cambio").unwrap();
+    let db = e.base.join("forge.db");
+    let allow = format!(
+        "FORGE_DB='{}' '{FORGE}' guard allow lines --reason 'el diff es grande a propósito'",
+        db.display()
+    );
+    let (out, request) = answered(&e, &allow, false);
+    assert!(!out.status.success(), "sin tu permiso no hay excepción");
+    assert!(
+        request.command.contains("guard allow lines"),
+        "{}",
+        request.command
+    );
+    let (out, _) = answered(&e, &allow, true);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn without_forge_open_and_no_terminal_it_is_blocked() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
