@@ -39,8 +39,13 @@ pub struct Settings {
     font_italic: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     font_bold_italic: Option<PathBuf>,
-    /// Option (⌥) envía ESC+tecla en vez de caracteres especiales (∂, ƒ...).
-    option_as_meta: bool,
+    /// Option (⌥) envía ESC+tecla en vez de escribir (@, #, €…). Apagado por defecto, como
+    /// en Terminal.app.
+    option_is_meta: bool,
+    /// Nombre de hasta 0.7.2, cuando venía encendido por defecto y no dejaba escribir @: se
+    /// acepta al leer y se olvida.
+    #[serde(rename = "option_as_meta", skip_serializing)]
+    _old_option_as_meta: Option<bool>,
     /// Antes de planificar, los agentes aclaran lo imprescindible con el usuario.
     ask_first: bool,
 }
@@ -53,7 +58,8 @@ impl Default for Settings {
             font_bold: None,
             font_italic: None,
             font_bold_italic: None,
-            option_as_meta: true,
+            option_is_meta: false,
+            _old_option_as_meta: None,
             ask_first: false,
         }
     }
@@ -233,7 +239,7 @@ pub fn metrics(ctx: &egui::Context, s: &Settings) -> Metrics {
     Metrics {
         font_size: s.font_size,
         cell: Vec2::new(snap(w), snap(h)),
-        option_as_meta: s.option_as_meta,
+        option_as_meta: s.option_is_meta,
     }
 }
 
@@ -421,10 +427,21 @@ mod tests {
     #[test]
     fn settings_parse_and_reject_typos() {
         let s: Settings =
-            toml::from_str("font_size = 16\noption_as_meta = false\nask_first = true").unwrap();
+            toml::from_str("font_size = 16\noption_is_meta = false\nask_first = true").unwrap();
         assert_eq!(s.font_size, 16.0);
-        assert!(!s.option_as_meta);
+        assert!(!s.option_is_meta);
         assert!(s.ask_first);
         assert!(toml::from_str::<Settings>("font_sise = 16").is_err());
+    }
+
+    #[test]
+    fn option_types_by_default_even_with_the_old_saved_setting() {
+        // Hasta 0.7.2 Option era Meta por defecto y se guardaba así: no se podía escribir @.
+        assert!(!Settings::default().option_is_meta);
+        let old: Settings = toml::from_str("option_as_meta = true").unwrap();
+        assert!(!old.option_is_meta);
+        assert!(!toml::to_string(&old).unwrap().contains("option_as_meta"));
+        let chosen: Settings = toml::from_str("option_is_meta = true").unwrap();
+        assert!(chosen.option_is_meta);
     }
 }

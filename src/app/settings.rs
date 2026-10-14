@@ -257,7 +257,7 @@ impl App {
                 ),
                 |ui| {
                     changed |= ui
-                        .checkbox(&mut self.settings.option_as_meta, tr!("Usar como Meta"))
+                        .checkbox(&mut self.settings.option_is_meta, tr!("Usar como Meta"))
                         .changed();
                 },
             );
