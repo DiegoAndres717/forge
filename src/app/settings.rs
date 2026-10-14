@@ -428,6 +428,37 @@ impl App {
             ),
             |ui| {
                 if installed {
+                    // Qué modelo usan: si Codex no encontró uno barato, heredan el principal
+                    // y no ahorran nada; se puede escribir uno a mano.
+                    let current = subagents::installed_model(agent, &home);
+                    match &current {
+                        Some(m) => ui.label(tr!("Modelo: {m}", m = m)),
+                        None => ui.colored_label(
+                            theme::ORANGE,
+                            tr!("Sin modelo barato: usan el del agente y no ahorran"),
+                        ),
+                    };
+                    let draft = self
+                        .subagent_model
+                        .entry(dir.to_string())
+                        .or_insert_with(|| current.clone().unwrap_or_default());
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(draft)
+                                .hint_text(tr!("modelo"))
+                                .desired_width(170.0),
+                        );
+                        let wanted = draft.trim().to_string();
+                        if ui
+                            .add_enabled(
+                                !wanted.is_empty() && Some(&wanted) != current.as_ref(),
+                                egui::Button::new(tr!("Usar este modelo")),
+                            )
+                            .clicked()
+                        {
+                            result = Some(subagents::install(agent, &home, Some(&wanted)));
+                        }
+                    });
                     if ui.button(tr!("Quitar subagentes")).clicked() {
                         result = Some(subagents::remove(agent, &home));
                     }
