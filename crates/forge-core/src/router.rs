@@ -1171,7 +1171,18 @@ pub struct RoutingForm {
     pub monthly_budget_usd: f64,
     pub allow_escalation: bool,
     pub max_cost_per_call_usd: f64,
+    /// Sin proveedor o sin respuesta, la revisión avisa y no bloquea.
+    pub best_effort: bool,
+    /// Revisión de código, arquitectura y seguridad con un modelo local (Ollama): el código no
+    /// sale del ordenador.
+    pub local_reviews: bool,
+    pub local_model: String,
 }
+
+/// Las tareas de nivel 2–3 que «Revisar en local» lleva a Ollama.
+const LOCAL_TASKS: [&str; 3] = ["code_review", "architecture", "security"];
+/// Modelo local propuesto si no hay ninguno elegido.
+const LOCAL_MODEL: &str = "qwen2.5-coder";
 
 impl RoutingForm {
     pub fn load(project: &Path) -> Result<Self, String> {
@@ -1182,6 +1193,16 @@ impl RoutingForm {
             monthly_budget_usd: c.monthly_budget_usd,
             allow_escalation: c.allow_escalation,
             max_cost_per_call_usd: c.max_cost_per_call_usd,
+            best_effort: c.best_effort,
+            // En local si las tres tareas van a Ollama (con el mismo modelo).
+            local_reviews: LOCAL_TASKS
+                .iter()
+                .all(|t| c.tasks.get(*t).is_some_and(|r| r.provider == "local")),
+            local_model: c
+                .tasks
+                .get(LOCAL_TASKS[0])
+                .filter(|r| r.provider == "local" && !r.model.is_empty())
+                .map_or_else(|| LOCAL_MODEL.into(), |r| r.model.clone()),
         })
     }
 
@@ -1204,6 +1225,30 @@ impl RoutingForm {
         r["monthly_budget_usd"] = toml_edit::value(self.monthly_budget_usd.max(0.0));
         r["allow_escalation"] = toml_edit::value(self.allow_escalation);
         r["max_cost_per_call_usd"] = toml_edit::value(self.max_cost_per_call_usd.max(0.0));
+        r["best_effort"] = toml_edit::value(self.best_effort);
+        let model = match self.local_model.trim() {
+            "" => LOCAL_MODEL,
+            m => m,
+        };
+        if r.get("tasks").is_none_or(|t| !t.is_table_like()) {
+            r["tasks"] = toml_edit::table();
+        }
+        for task in LOCAL_TASKS {
+            let current = r["tasks"].get(task);
+            let ours = current
+                .is_some_and(|t| t.get("provider").and_then(|p| p.as_str()) == Some("local"));
+            if self.local_reviews {
+                let mut t = toml_edit::Table::new();
+                t["provider"] = toml_edit::value("local");
+                t["model"] = toml_edit::value(model);
+                r["tasks"][task] = toml_edit::Item::Table(t);
+            } else if ours {
+                // Solo se quita lo que puso esta opción: una tarea propia en la nube se queda.
+                if let Some(tasks) = r["tasks"].as_table_like_mut() {
+                    tasks.remove(task);
+                }
+            }
+        }
         let out = doc.to_string();
         toml::from_str::<RoutingFile>(&out).map_err(|e| e.to_string())?;
         std::fs::create_dir_all(project.join(".forge")).map_err(|e| e.to_string())?;
@@ -1233,6 +1278,40 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_form_can_send_reviews_to_a_local_model() {
+        // Niveles 2–3 en local: el código no sale del ordenador.
+        let dir = std::env::temp_dir().join(format!("forge-routing-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut form = RoutingForm::load(&dir).unwrap();
+        assert!(!form.local_reviews && !form.best_effort);
+        form.local_reviews = true;
+        form.local_model = "qwen2.5-coder:14b".into();
+        form.best_effort = true;
+        form.save(&dir).unwrap();
+        let config = RouterConfig::load(&dir).unwrap();
+        assert!(config.best_effort);
+        for task in ["code_review", "architecture", "security"] {
+            let route = &config.tasks[task];
+            assert_eq!(route.provider, "local", "{task}");
+            assert_eq!(route.model, "qwen2.5-coder:14b", "{task}");
+        }
+        let again = RoutingForm::load(&dir).unwrap();
+        assert!(again.local_reviews && again.best_effort);
+        assert_eq!(again.local_model, "qwen2.5-coder:14b");
+        // Quitarlo deja esas tareas como estaban de serie.
+        let mut off = again;
+        off.local_reviews = false;
+        off.save(&dir).unwrap();
+        assert!(
+            !RouterConfig::load(&dir)
+                .unwrap()
+                .tasks
+                .contains_key("code_review")
+        );
+    }
 
     #[test]
     fn the_routing_form_keeps_comments_and_tasks() {
