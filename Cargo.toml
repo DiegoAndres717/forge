@@ -5,6 +5,8 @@ members = ["crates/forge-core"]
 version = "0.7.3"
 repository = "https://github.com/DiegoAndres717/forge"
 edition = "2024"
+# Mínimo para compilar (if-let encadenados): cargo avisa claro con un Rust más viejo.
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.dependencies]
@@ -22,6 +24,7 @@ name = "forge"
 version.workspace = true
 repository.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
@@ -69,3 +72,9 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["wgpu", "snapshot", "eframe"] }
 rusqlite.workspace = true
+
+# La app final: LTO «thin» (más rápida y pequeña sin alargar mucho la compilación) y sin
+# símbolos de depuración.
+[profile.release]
+lto = "thin"
+strip = "symbols"
