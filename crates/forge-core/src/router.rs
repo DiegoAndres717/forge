@@ -64,6 +64,16 @@ impl Default for RouterConfig {
     }
 }
 
+/// ¿Paga este revisor? Los de un proveedor local no gastan presupuesto.
+pub fn reviewer_is_paid(
+    config: &RouterConfig,
+    reviewer: &crate::reviewers::ReviewerSpec,
+    local: bool,
+) -> bool {
+    let chosen = reviewer_route(config, reviewer, local);
+    config.provider(&chosen.provider).is_some_and(|p| !p.local)
+}
+
 /// Cuántos de `n` revisores en paralelo caben en lo que queda del mes, contando el tope de
 /// cada llamada (todos parten del mismo gasto: sin esto se podía pasar en (n − 1) topes).
 pub fn affordable_reviewers(config: &RouterConfig, spent: f64, n: usize) -> usize {
@@ -1215,6 +1225,11 @@ mod tests {
         assert_eq!(affordable_reviewers(&c, 1.5, 3), 0);
         let file: RoutingFile = toml::from_str("[routing]\nbest_effort = true").unwrap();
         assert!(file.routing.best_effort);
+        // Incompleta: con best_effort avisa y deja pasar; sin él, queda pendiente.
+        use crate::guard::{Level, incomplete_level};
+        assert_eq!(incomplete_level(true, true), Level::Warn);
+        assert_eq!(incomplete_level(false, true), Level::Pending);
+        assert_eq!(incomplete_level(false, false), Level::Info, "informativo");
     }
 
     use super::*;
