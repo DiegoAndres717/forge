@@ -1381,6 +1381,27 @@ fn opened_projects_keep_a_plain_path() {
 }
 
 #[test]
+fn composed_text_reaches_the_shell() {
+    // Teclas muertas (´ + a = á) y métodos de entrada: macOS entrega el texto compuesto
+    // como Ime::Commit, solo si quien tiene el foco lo pidió.
+    let _serial = serial();
+    let mut h = app(project("ime"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    assert!(
+        h.output().platform_output.ime.is_some(),
+        "la terminal pide el IME"
+    );
+    h.event(egui::Event::Text("echo zz".into()));
+    h.event(egui::Event::Ime(egui::ImeEvent::Commit("áñ@".into())));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "el shell recibe lo compuesto", |a| {
+        ws(a).shell_text().matches("zzáñ@").count() >= 2
+    });
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");

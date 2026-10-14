@@ -556,6 +556,25 @@ impl Terminal {
         }
         // Con la búsqueda abierta, el teclado es de su campo, no del programa.
         if focused && self.search.is_none() {
+            // Teclas muertas (´ + a = á) y métodos de entrada: macOS solo compone si quien
+            // tiene el foco lo pide; el resultado llega como Ime::Commit (ver `keyboard`).
+            // Con Option como Meta no: ⌥E/⌥N/⌥U son teclas muertas y se perderían.
+            let cursor = (!m.option_as_meta).then(|| {
+                let t = self.term.lock().unwrap();
+                let (c, offset) = (t.grid().cursor.point, t.grid().display_offset() as i32);
+                let at = Vec2::new(c.column.0 as f32, (c.line.0 + offset) as f32) * m.cell;
+                Rect::from_min_size(rect.min + at, m.cell)
+            });
+            if let Some(cursor) = cursor {
+                ctx.output_mut(|o| {
+                    o.ime = Some(egui::output::IMEOutput {
+                        purpose: egui::IMEPurpose::Terminal,
+                        rect,
+                        cursor_rect: cursor,
+                        should_interrupt_composition: false,
+                    });
+                });
+            }
             self.keyboard(&ctx, m);
         }
         self.mouse(&ctx, &response, rect, m);
@@ -830,6 +849,10 @@ impl Terminal {
                 }
                 // Con Option como Meta, el texto "∂" lo reemplaza ESC+d desde key_bytes.
                 egui::Event::Text(text) if !(alt && m.option_as_meta) => {
+                    self.scroll_to_bottom();
+                    self.send(text.as_bytes());
+                }
+                egui::Event::Ime(egui::ImeEvent::Commit(text)) if !text.is_empty() => {
                     self.scroll_to_bottom();
                     self.send(text.as_bytes());
                 }
