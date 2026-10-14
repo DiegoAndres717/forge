@@ -663,45 +663,34 @@ impl App {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             // ponytail: diálogo de macOS vía osascript; en Linux zenity (GNOME) o kdialog (KDE),
-            // si no hay ninguno se escribe la ruta. Windows (Fase 12) usará otro.
+            // si no hay ninguno se escribe la ruta. En Windows, el explorador moderno (rfd).
             let prompt = tr!("Elige la carpeta del proyecto");
-            let output = if cfg!(target_os = "macos") {
-                std::process::Command::new("osascript")
-                    .args([
-                        "-e",
-                        &format!("POSIX path of (choose folder with prompt \"{prompt}\")"),
-                    ])
-                    .output()
-            } else if cfg!(windows) {
-                // Diálogo nativo de Windows (WinForms pide -STA); el título va en una variable
-                // y la salida en UTF-8, para rutas con tildes.
-                std::process::Command::new("powershell.exe")
-                    .args([
-                        "-NoProfile",
-                        "-STA",
-                        "-Command",
-                        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \
-                         Add-Type -AssemblyName System.Windows.Forms; \
-                         $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
-                         $d.Description = $env:FORGE_PROMPT; \
-                         if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { exit 1 }",
-                    ])
-                    .env("FORGE_PROMPT", prompt)
-                    .output()
-            } else {
-                std::process::Command::new("zenity")
-                    .args(["--file-selection", "--directory", "--title", prompt])
-                    .output()
-                    .or_else(|_| {
-                        std::process::Command::new("kdialog")
-                            .args(["--getexistingdirectory", ".", "--title", prompt])
-                            .output()
-                    })
+            #[cfg(windows)]
+            let path = rfd::FileDialog::new().set_title(prompt).pick_folder();
+            #[cfg(not(windows))]
+            let path = {
+                let output = if cfg!(target_os = "macos") {
+                    std::process::Command::new("osascript")
+                        .args([
+                            "-e",
+                            &format!("POSIX path of (choose folder with prompt \"{prompt}\")"),
+                        ])
+                        .output()
+                } else {
+                    std::process::Command::new("zenity")
+                        .args(["--file-selection", "--directory", "--title", prompt])
+                        .output()
+                        .or_else(|_| {
+                            std::process::Command::new("kdialog")
+                                .args(["--getexistingdirectory", ".", "--title", prompt])
+                                .output()
+                        })
+                };
+                output
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
             };
-            let path = output
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()));
             let _ = tx.send(path);
             ctx.request_repaint();
         });
