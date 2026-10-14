@@ -303,10 +303,14 @@ impl Store {
         let title = title.as_str();
         // ponytail: recorte fijo; es una pista para retomar, no el historial entero.
         let body: String = summary.trim().chars().take(4000).collect();
-        let existing = self
-            .list_memories(project, Some("note"), 500)?
-            .into_iter()
-            .find(|m| m.title == title);
+        let notes = self.list_memories(project, Some("note"), 500)?;
+        // La nota de antes (sin agente) la adopta el primer resumen de un agente.
+        let existing = match notes.iter().find(|m| m.title == title) {
+            Some(m) => Some(m.clone()),
+            None => notes.into_iter().find(|m| m.title == *base).inspect(|m| {
+                let _ = self.update_memory(project, m.id, None, Some(title), None, None);
+            }),
+        };
         match existing {
             Some(m) if body.is_empty() => Ok(m.id),
             Some(m) => {
@@ -569,6 +573,12 @@ mod tests {
             .save_session_summary(p, &format!("pegó {token}"), Some("Claude Code"))
             .unwrap();
         assert!(!body(s).contains(&token));
+        // La nota de antes (sin agente) la adopta el primer resumen por agente.
+        let old = store.save_session_summary(p, "antigua", None).unwrap();
+        let adopted = store
+            .save_session_summary(p, "nueva", Some("Gemini"))
+            .unwrap();
+        assert_eq!(old, adopted);
         // Una nota por agente: la de Codex no pisa la de Claude.
         let c = store
             .save_session_summary(p, "Codex hizo X", Some("Codex"))
@@ -601,13 +611,44 @@ mod tests {
             .unwrap()
             .add_memory(&repo, "decision", "Usar Postgres", "", "", "x")
             .unwrap();
-        git(&[
+        // Otro clon del mismo repo, que se queda en el remoto viejo.
+        let other = tmp.join("otro");
+        std::fs::create_dir_all(&other).unwrap();
+        let git_in = |dir: &Path, args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git_in(&other, &["init", "-q"]);
+        git_in(
+            &other,
+            &["remote", "add", "origin", "git@github.com:Org/Viejo.git"],
+        );
+        let shared = Store::open(&db)
+            .unwrap()
+            .add_memory(&other, "note", "Compartida", "", "", "x")
+            .unwrap();
+        let renamed = [
             "remote",
             "set-url",
             "origin",
             "git@github.com:Org/Nuevo.git",
-        ]);
+        ];
+        git(&renamed);
         let store = Store::open(&db).unwrap();
+        assert!(
+            store.get_memory(&repo, id).unwrap().is_none(),
+            "con otro clon en el remoto viejo, la memoria no se muda"
+        );
+        assert!(store.get_memory(&other, shared).unwrap().is_some());
+        // El otro clon cambia también: ya nadie usa el viejo y todo se muda.
+        git_in(&other, &renamed);
+        let store = Store::open(&db).unwrap();
+        assert!(store.get_memory(&other, shared).unwrap().is_some());
         assert!(
             store.get_memory(&repo, id).unwrap().is_some(),
             "la memoria se quedó con el remoto viejo"

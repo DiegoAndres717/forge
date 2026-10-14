@@ -224,8 +224,9 @@ impl Store {
         let key = crate::git::remote_identity(project)
             .map_or_else(|| path.clone(), |id| format!("git:{id}"));
         // Lo guardado con la ruta, o con el remoto que tenía esta carpeta (repo renombrado o
-        // movido), pasa a la clave de ahora.
-        // ponytail: otro clon que siga en el remoto viejo deja de verlo; raro, y se nota.
+        // movido), pasa a la clave de ahora. Del remoto viejo, solo si la clave nueva también
+        // es un remoto (git puede fallar un momento) y ninguna otra carpeta lo sigue usando
+        // (otro clon, o el original de un fork).
         let before: Option<String> = self
             .conn
             .query_row("SELECT key FROM identities WHERE path = ?1", [&path], |r| {
@@ -233,7 +234,19 @@ impl Store {
             })
             .optional()
             .ok()
-            .flatten();
+            .flatten()
+            .filter(|old| {
+                key.starts_with("git:")
+                    && !self
+                        .conn
+                        .query_row(
+                            "SELECT 1 FROM identities WHERE key = ?1 AND path != ?2",
+                            params![old, path],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .is_ok_and(|other| other.is_some())
+            });
         for old in [Some(path.clone()), before].into_iter().flatten() {
             if old != key {
                 for table in ["memories", "ideas"] {
