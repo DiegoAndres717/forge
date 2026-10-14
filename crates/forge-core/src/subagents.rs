@@ -40,6 +40,10 @@ const GEMINI_MODEL: &str = "gemini-3-flash-preview";
 pub enum Agent {
     Codex,
     Gemini,
+    /// `~/.config/opencode/agents/*.md` (mode: subagent).
+    OpenCode,
+    /// `~/.qwen/agents/*.md`; su alias `fast` es el modelo rápido de Qwen.
+    Qwen,
 }
 
 impl Agent {
@@ -48,6 +52,8 @@ impl Agent {
         home.join(match self {
             Agent::Codex => ".codex",
             Agent::Gemini => ".gemini",
+            Agent::OpenCode => ".config/opencode",
+            Agent::Qwen => ".qwen",
         })
         .join("agents")
     }
@@ -55,7 +61,7 @@ impl Agent {
     fn file(self, name: &str) -> String {
         match self {
             Agent::Codex => format!("{name}.toml"),
-            Agent::Gemini => format!("{name}.md"),
+            Agent::Gemini | Agent::OpenCode | Agent::Qwen => format!("{name}.md"),
         }
     }
 }
@@ -100,6 +106,23 @@ pub fn files(agent: Agent, model: Option<&str>) -> Vec<(String, String)> {
                         json!(prompt),
                     )
                 }
+                // Sin modelo, el subagente hereda el del agente principal.
+                Agent::OpenCode => format!(
+                    "---\ndescription: {}\nmode: subagent\n{}{}---\n\n{prompt}\n",
+                    json!(description),
+                    model.map(|m| format!("model: {m}\n")).unwrap_or_default(),
+                    // El explorador solo lee.
+                    if *name == "forge-explorer" {
+                        "permission:\n  edit: deny\n"
+                    } else {
+                        ""
+                    },
+                ),
+                Agent::Qwen => format!(
+                    "---\nname: {name}\ndescription: {}\nmodel: {}\n---\n\n{prompt}\n",
+                    json!(description),
+                    model.unwrap_or("fast")
+                ),
                 Agent::Gemini => format!(
                     "---\nname: {name}\ndescription: {}\nmodel: {}\n---\n\n{prompt}\n",
                     json!(description),
@@ -151,7 +174,7 @@ pub fn installed_model(agent: Agent, home: &Path) -> Option<String> {
             .get("model")?
             .as_str()
             .map(String::from),
-        Agent::Gemini => text
+        Agent::Gemini | Agent::OpenCode | Agent::Qwen => text
             .lines()
             .find_map(|l| l.strip_prefix("model:"))
             .map(|m| m.trim().to_string()),
@@ -167,6 +190,37 @@ pub fn installed(agent: Agent, home: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opencode_and_qwen_get_their_subagents_too() {
+        let home =
+            std::env::temp_dir().join(format!("forge-subagents-more-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        for agent in [Agent::OpenCode, Agent::Qwen] {
+            install(agent, &home, None).unwrap();
+            assert!(installed(agent, &home));
+        }
+        let opencode =
+            std::fs::read_to_string(home.join(".config/opencode/agents/forge-explorer.md"))
+                .unwrap();
+        assert!(
+            opencode.contains("mode: subagent") && opencode.contains("edit: deny"),
+            "{opencode}"
+        );
+        // Qwen trae un alias para su modelo rápido; OpenCode sin modelo hereda el suyo.
+        assert_eq!(installed_model(Agent::Qwen, &home).as_deref(), Some("fast"));
+        assert_eq!(installed_model(Agent::OpenCode, &home), None);
+        install(Agent::OpenCode, &home, Some("opencode/big-pickle")).unwrap();
+        assert_eq!(
+            installed_model(Agent::OpenCode, &home).as_deref(),
+            Some("opencode/big-pickle")
+        );
+        for agent in [Agent::OpenCode, Agent::Qwen] {
+            remove(agent, &home).unwrap();
+            assert!(!installed(agent, &home));
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
 
     #[test]
     fn the_installed_model_can_be_read_and_chosen_by_hand() {
