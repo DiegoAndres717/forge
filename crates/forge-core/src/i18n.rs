@@ -144,6 +144,75 @@ mod tests {
         }
     }
 
+    /// Todo `tr!("…")` del código tiene su inglés: sin él, la app en inglés (la de serie)
+    /// enseña español, y el texto traducido no sirve para comparar ni para huellas.
+    #[test]
+    fn every_tr_string_has_an_english_translation() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut files = Vec::new();
+        let mut dirs = vec![root.join("src"), root.join("crates")];
+        while let Some(dir) = dirs.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() && !path.ends_with("target") {
+                    dirs.push(path);
+                } else if path.extension().is_some_and(|e| e == "rs")
+                    && !path.ends_with("i18n_en.rs")
+                    && !path.ends_with("i18n.rs")
+                {
+                    files.push(path);
+                }
+            }
+        }
+        let mut missing = Vec::new();
+        for file in files {
+            let text = std::fs::read_to_string(&file).unwrap();
+            for literal in tr_literals(&text) {
+                if !EN.contains_key(literal.as_str()) {
+                    missing.push(format!("{}: {literal:?}", file.display()));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "sin traducción:\n{}",
+            missing.join("\n")
+        );
+    }
+
+    /// Los literales de `tr!("…")` (no `include_str!`), con los escapes de Rust aplicados.
+    fn tr_literals(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (at, _) in text.match_indices("tr!(") {
+            let before = text[..at].chars().next_back();
+            if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                continue;
+            }
+            let Some(body) = text[at + 4..].trim_start().strip_prefix('"') else {
+                continue;
+            };
+            let mut s = String::new();
+            let mut chars = body.chars().peekable();
+            while let Some(c) = chars.next() {
+                match c {
+                    '"' => break,
+                    '\\' => match chars.next() {
+                        Some('n') => s.push('\n'),
+                        Some('t') => s.push('\t'),
+                        Some('0') => s.push('\0'),
+                        // Continuación de línea: se saltan el salto y la sangría.
+                        Some('\n') => while chars.next_if(|c| c.is_whitespace()).is_some() {},
+                        Some(other) => s.push(other),
+                        None => break,
+                    },
+                    _ => s.push(c),
+                }
+            }
+            out.push(s);
+        }
+        out
+    }
+
     #[test]
     fn translates_with_fallback_and_values() {
         // Sin tocar el idioma global (otros tests corren en paralelo en español).
