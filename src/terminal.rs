@@ -111,6 +111,11 @@ pub struct Terminal {
     scroll_acc: f32,
     had_focus: bool,
     mouse_down: Option<u8>,
+    /// Clic principal en una app que captura el ratón, aún sin enviar: si se arrastra, es
+    /// una selección de Forge; si se suelta quieto, va a la app (línea, columna).
+    held: Option<(usize, usize, Side)>,
+    /// Arrastrando una selección propia aunque la app capture el ratón.
+    selecting: bool,
     /// Barra de scroll y botones flotantes (los clics ahí no seleccionan texto).
     overlays: Vec<Rect>,
     /// Último paso del desplazamiento automático al arrastrar una selección fuera.
@@ -351,6 +356,8 @@ impl Terminal {
             scroll_acc: 0.0,
             had_focus: true,
             mouse_down: None,
+            held: None,
+            selecting: false,
             overlays: Vec::new(),
             autoscroll_at: Instant::now(),
             suggest: None,
@@ -1190,6 +1197,39 @@ impl Terminal {
                         PointerButton::Secondary => 2,
                         _ => continue,
                     };
+                    // Arrastrar selecciona aunque la app capture el ratón (Claude Code): el
+                    // clic principal espera a ver si se mueve antes de ir a la app.
+                    if button == PointerButton::Primary && !pressed {
+                        let (held, selecting) = (self.held.take(), self.selecting);
+                        self.selecting = false;
+                        match held {
+                            // Se arrastró: se copia ya, porque la app al redibujar borra la
+                            // selección de las líneas que reescribe.
+                            Some(_) if selecting => {
+                                if let Some(text) =
+                                    term.selection_to_string().filter(|t| !t.is_empty())
+                                {
+                                    ctx.copy_text(text);
+                                    self.copy_button = Some(pos);
+                                    self.copied_at = Some(Instant::now());
+                                }
+                                continue;
+                            }
+                            // Clic quieto: a la app, en la celda donde se pulsó.
+                            Some((l, c, _)) if report => {
+                                outgoing.extend(mouse_report(0, c, l, true, mode));
+                                outgoing.extend(mouse_report(0, c, l, false, mode));
+                                continue;
+                            }
+                            _ => {}
+                        }
+                    }
+                    if report && button == PointerButton::Primary && pressed {
+                        self.held = Some((line, col, side));
+                        self.selecting = false;
+                        term.selection = None;
+                        continue;
+                    }
                     if report {
                         if pressed || self.mouse_down.is_some() {
                             outgoing.extend(mouse_report(code, col, line, pressed, mode));
@@ -1213,7 +1253,18 @@ impl Terminal {
                 }
                 egui::Event::PointerMoved(pos) => {
                     let (line, col, side) = self.cell_at(pos, rect, m);
-                    if report {
+                    // Se movió a otra celda con el clic pendiente: empieza la selección.
+                    if let Some((l, c, start_side)) = self.held
+                        && (l, c) != (line, col)
+                        && !self.selecting
+                        && response.dragged_by(PointerButton::Primary)
+                    {
+                        let start = viewport_to_point(offset, Point::new(l, Column(c)));
+                        term.selection =
+                            Some(Selection::new(SelectionType::Simple, start, start_side));
+                        self.selecting = true;
+                    }
+                    if report && !self.selecting {
                         if let Some(code) = self.mouse_down
                             && mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION)
                         {
@@ -1232,7 +1283,7 @@ impl Terminal {
 
         // Arrastrando una selección fuera de la terminal, el contenido se desplaza solo (más
         // rápido cuanto más lejos) y la selección sigue al puntero; también tras la rueda.
-        if !report
+        if (!report || self.selecting)
             && response.dragged_by(PointerButton::Primary)
             && term.selection.is_some()
             && let Some(p) = response.interact_pointer_pos()

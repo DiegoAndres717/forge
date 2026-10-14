@@ -959,6 +959,50 @@ fn dragging_a_selection_past_the_edge_scrolls_and_offers_copy() {
     h.get_by_label_contains("Copiado");
 }
 
+/// Con una app que captura el ratón (Claude Code), arrastrar selecciona igual para ⌘C.
+#[test]
+#[cfg_attr(windows, ignore = "types `printf`, which PowerShell doesn't have")]
+fn dragging_selects_even_when_the_app_captures_the_mouse() {
+    let _serial = serial();
+    let mut h = app(project("select-mouse"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    // 1000h: la app pide los clics del ratón, como hacen los programas de pantalla completa.
+    h.event(egui::Event::Text(
+        "clear; printf '\\e[?1000h'; seq 1 60".into(),
+    ));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "salida", |a| {
+        ws(a).shell_text().contains("\n59\n") && ws(a).is_quiet(Duration::from_millis(300))
+    });
+    let (from, to) = (egui::pos2(700.0, 500.0), egui::pos2(400.0, 300.0));
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.event(egui::Event::PointerMoved(from));
+    h.event(button(from, true));
+    h.run_steps(2);
+    for k in 1..=4 {
+        h.event(egui::Event::PointerMoved(
+            from + (to - from) * k as f32 / 4.0,
+        ));
+        h.run_steps(1);
+    }
+    h.event(button(to, false));
+    h.run_steps(3);
+    let selected = ws(h.state()).shell_view().1.unwrap_or_default();
+    assert!(
+        selected.chars().any(|c| c.is_ascii_digit()),
+        "no seleccionó: {selected:?}"
+    );
+    // Se copia al soltar: la app, al redibujar, borraría la selección antes del ⌘C.
+    h.get_by_label_contains("Copiado");
+}
+
 /// Mientras se escribe una ruta, la terminal sugiere carpetas sin distinguir mayúsculas y
 /// Tab escribe la elegida. (El zsh de Forge manda la línea en una secuencia invisible; aquí
 /// la imprime el propio shell para no depender de su configuración.)
