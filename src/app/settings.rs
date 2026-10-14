@@ -318,6 +318,18 @@ impl App {
                 self.subagents_ui(ui, forge_core::subagents::Agent::Gemini, None)
             });
         }
+        if installed("opencode") {
+            theme::section(ui, "OpenCode");
+            theme::card(ui, |ui| {
+                self.subagents_ui(ui, forge_core::subagents::Agent::OpenCode, None)
+            });
+        }
+        if installed("qwen") {
+            theme::section(ui, "Qwen Code");
+            theme::card(ui, |ui| {
+                self.subagents_ui(ui, forge_core::subagents::Agent::Qwen, None)
+            });
+        }
         self.accounts_ui(ui, cmds);
     }
 
@@ -420,6 +432,8 @@ impl App {
         let dir = match agent {
             subagents::Agent::Codex => "~/.codex/agents",
             subagents::Agent::Gemini => "~/.gemini/agents",
+            subagents::Agent::OpenCode => "~/.config/opencode/agents",
+            subagents::Agent::Qwen => "~/.qwen/agents",
         };
         row(
             ui,
