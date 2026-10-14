@@ -49,6 +49,10 @@ muda = { version = "0.17", default-features = false }
 notify-rust = "4.18.2"
 
 # Windows: sonidos de los avisos sin arrancar PowerShell.
+# Icono dentro de forge.exe (lo usa build.rs solo al compilar para Windows).
+[build-dependencies]
+winresource = "0.1"
+
 [target.'cfg(windows)'.dependencies]
 # Selector de carpetas moderno (IFileOpenDialog); sin features: las de Linux no aplican.
 rfd = { version = "0.17", default-features = false }
