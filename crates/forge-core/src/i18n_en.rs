@@ -696,6 +696,11 @@ pub const EN: &[(&str, &str)] = &[
     ("esta rama (pull request)", "this branch (pull request)"),
     ("esta sesión (2 h)", "this session (2 h)"),
     ("{p0} posibles secretos", "{p0} possible secrets"),
+    ("binario", "binary"),
+    (
+        "Si es un dato de prueba, añade `{p0}` en esa línea; en un binario, pide una excepción de la regla secrets.",
+        "If it's test data, add `{p0}` on that line; in a binary, ask for an exception to the secrets rule.",
+    ),
     ("{p0} archivos analizados", "{p0} files analyzed"),
     (" y {p0} más", " and {p0} more"),
     (

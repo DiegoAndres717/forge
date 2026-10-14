@@ -131,7 +131,7 @@ mod unit {
 
     #[test]
     fn secrets_inside_binary_files_are_found() {
-        // Un .sqlite, un .zip o un build pueden llevar una clave dentro.
+        // Un .sqlite o un build sin comprimir pueden llevar una clave dentro.
         let dir = crate::git::test_repo("binary-secret", "true");
         let mut bytes = vec![0u8, 1, 2, 0];
         bytes.extend_from_slice(b"aws_key=AKIAIOSFODNN7EXAMPLE"); // forge:allow-secret
@@ -149,6 +149,32 @@ mod unit {
         let items = evaluate(&Rules::default(), Stage::Commit, &diff);
         let secrets = items.iter().find(|i| i.id == "secrets").unwrap();
         assert_eq!(secrets.level, Level::Block, "{:?}", secrets.details);
+        assert!(
+            secrets.details[0].starts_with("datos.bin ("),
+            "sin «:0»: {:?}",
+            secrets.details
+        );
+        // Lo que va al commit es el índice: otro contenido en la carpeta no cuenta.
+        std::fs::write(dir.join("datos.bin"), [0u8, 1, 2, 0]).unwrap();
+        let again = collect_diff(&dir, Stage::Commit, &Rules::default(), None).unwrap();
+        let items = evaluate(&Rules::default(), Stage::Commit, &again);
+        assert_eq!(
+            items.iter().find(|i| i.id == "secrets").unwrap().level,
+            Level::Block
+        );
+        // Y la huella sigue al contenido del binario (una excepción no vale para otro).
+        let mut other = bytes.clone();
+        other.extend_from_slice(b" y otra cosa mas larga");
+        std::fs::write(dir.join("datos.bin"), &other).unwrap();
+        let ok = std::process::Command::new("git")
+            .args(["add", "datos.bin"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let changed = collect_diff(&dir, Stage::Commit, &Rules::default(), None).unwrap();
+        assert_ne!(diff.candidate, changed.candidate);
     }
 
     fn rules(toml_text: &str) -> Rules {

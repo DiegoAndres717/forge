@@ -379,9 +379,14 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
                 tr!("{p0} posibles secretos", p0 = found.len()),
                 found
                     .iter()
-                    .map(|s| format!("{}:{} — {} ({})", s.path, s.line, s.kind, s.preview))
-                    .chain([format!(
-                        "Si es un dato de prueba, añade `{ALLOW_SECRET}` en esa línea."
+                    .map(|s| match s.line {
+                        // Línea 0: dentro de un binario.
+                        0 => format!("{} ({}) — {} ({})", s.path, tr!("binario"), s.kind, s.preview),
+                        n => format!("{}:{n} — {} ({})", s.path, s.kind, s.preview),
+                    })
+                    .chain([tr!(
+                        "Si es un dato de prueba, añade `{p0}` en esa línea; en un binario, pide una excepción de la regla secrets.",
+                        p0 = ALLOW_SECRET
                     )])
                     .collect(),
             ),
