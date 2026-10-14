@@ -50,8 +50,79 @@ pub struct McpServer {
     pub args: Vec<String>,
 }
 
+/// Las terminales de Forge en Windows son PowerShell (en los tests, a elección).
+fn powershell() -> bool {
+    // En los tests, solo si la prueba lo pide (también en el CI de Windows).
+    #[cfg(test)]
+    return PS.with(|c| c.get());
+    #[cfg(not(test))]
+    cfg!(windows)
+}
+
+/// Un argumento para el shell de la terminal. En PowerShell, entre comillas simples y con
+/// las dobles escapadas como las lee un programa de Windows (ver `powershell_line`).
 fn quote(s: &str) -> String {
+    match powershell() {
+        // Vacío: sin comillas dobles, PowerShell 5.1 no pasaría nada.
+        true if s.is_empty() => "'\"\"'".into(),
+        true => ps_quote(&argv_escape(s)),
+        false => posix_quote(s),
+    }
+}
+
+fn posix_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
+}
+
+/// PowerShell también cierra la cadena con las comillas tipográficas ‘ ’ ‚ ‛: se doblan.
+fn ps_quote(s: &str) -> String {
+    let mut out = String::from("'");
+    for c in s.chars() {
+        if matches!(c, '\'' | '‘' | '’' | '‚' | '‛') {
+            out.push(c);
+        }
+        out.push(c);
+    }
+    out.push('\'');
+    out
+}
+
+/// Reglas de CommandLineToArgvW: `"` → `\"`, doblando las barras que la preceden; y las
+/// barras finales, si PowerShell va a envolver el argumento en comillas (tiene espacios).
+fn argv_escape(s: &str) -> String {
+    let mut out = String::new();
+    let mut slashes = 0;
+    for c in s.chars() {
+        match c {
+            '\\' => slashes += 1,
+            '"' => {
+                out.push_str(&"\\".repeat(slashes * 2 + 1));
+                out.push('"');
+                slashes = 0;
+            }
+            _ => {
+                out.push_str(&"\\".repeat(slashes));
+                out.push(c);
+                slashes = 0;
+            }
+        }
+    }
+    let wrapped = s.chars().any(char::is_whitespace);
+    out.push_str(&"\\".repeat(if wrapped { slashes * 2 } else { slashes }));
+    out
+}
+
+#[cfg(test)]
+thread_local! {
+    static PS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Línea para PowerShell que pasa los argumentos a los programas tal como `quote` los
+/// escapa, en PowerShell 5.1 y 7.
+pub fn powershell_line(line: &str) -> String {
+    // PowerShell 7.3+ escapa las comillas él mismo ("Standard"); 5.1 no («Legacy»). Con
+    // Legacy en ambos, `quote` decide; el bloque lo deja solo para esta línea.
+    format!("& {{ $PSNativeCommandArgumentPassing = 'Legacy'; {line} }}")
 }
 
 impl AgentSpec {
@@ -74,10 +145,18 @@ impl AgentSpec {
                     Some((program, rest)) => format!("{program} --standalone {rest}"),
                     None => format!("{command} --standalone"),
                 };
-                return format!(
-                    "OPENCODE_CONFIG_CONTENT={} {flagged}",
-                    quote(&config.to_string())
-                );
+                // En PowerShell no existe `VAR=valor programa`: se fija antes con `$env:`.
+                return if powershell() {
+                    format!(
+                        "$env:OPENCODE_CONFIG_CONTENT = {}; {flagged}",
+                        ps_quote(&config.to_string())
+                    )
+                } else {
+                    format!(
+                        "OPENCODE_CONFIG_CONTENT={} {flagged}",
+                        quote(&config.to_string())
+                    )
+                };
             }
             McpStyle::CodexConfig => {
                 // Cadenas TOML con escapes compatibles con JSON.
@@ -104,7 +183,8 @@ impl AgentSpec {
         let flags = match self.mcp_style {
             Some(McpStyle::ClaudeJson) if has_mod => return command.to_string(),
             Some(McpStyle::ClaudeJson) => {
-                let hook = |kind: &str| serde_json::json!([{"hooks": [{"type": "command", "command": format!("{} agent-event {kind}", quote(forge))}]}]);
+                // El hook lo ejecuta Claude con bash (Git Bash en Windows): comillas de sh.
+                let hook = |kind: &str| serde_json::json!([{"hooks": [{"type": "command", "command": format!("{} agent-event {kind}", posix_quote(forge))}]}]);
                 let settings = serde_json::json!({"hooks": {"Stop": hook("stop"), "Notification": hook("waiting")}});
                 format!("--settings {}", quote(&settings.to_string()))
             }
@@ -784,6 +864,67 @@ mod tests {
             Some("codex"),
             "primero instalado"
         );
+    }
+
+    #[test]
+    fn powershell_gets_its_own_quoting() {
+        // Las terminales de Forge en Windows son PowerShell: comillas simples con '' y las
+        // dobles escapadas para la línea de comandos de Windows (modo Legacy, ver
+        // `powershell_line`); OpenCode recibe su variable con `$env:`.
+        PS.with(|c| c.set(true));
+        let agents = builtins();
+        let get = |id: &str| agents.iter().find(|a| a.id == id).unwrap();
+        let server = McpServer {
+            name: "forge".into(),
+            command: r"C:\Program Files\Forge\forge.exe".into(),
+            args: vec!["mcp".into(), "--project".into(), r"C:\p\it's".into()],
+        };
+        let claude = get("claude").with_mcp("claude", &server);
+        assert!(
+            claude.starts_with(r#"claude --mcp-config '{\"mcpServers\":{\"forge\":"#),
+            "{claude}"
+        );
+        assert!(claude.contains("it''s"), "{claude}");
+        let opencode = get("opencode").with_mcp("opencode", &server);
+        assert!(
+            opencode.starts_with(r#"$env:OPENCODE_CONFIG_CONTENT = '{"mcp":{"forge":"#)
+                && opencode.ends_with("'; opencode --standalone"),
+            "{opencode}"
+        );
+        assert_eq!(
+            get("claude")
+                .with_prompt("claude", r#"di "hola" y it's"#)
+                .as_deref(),
+            Some(r#"claude 'di \"hola\" y it''s'"#)
+        );
+        assert_eq!(quote("it’s"), "'it’’s'", "comilla tipográfica");
+        assert_eq!(quote(""), "'\"\"'", "vacío");
+        // Barras finales: PowerShell envuelve en comillas el argumento con espacios.
+        assert_eq!(quote(r"C:\a b\"), r"'C:\a b\\'");
+        PS.with(|c| c.set(false));
+    }
+
+    /// En Windows, con PowerShell de verdad: el programa recibe el texto tal cual.
+    #[cfg(windows)]
+    #[test]
+    fn powershell_passes_arguments_intact() {
+        PS.with(|c| c.set(true));
+        for text in [
+            r#"{"a": "C:\x y\", "b": 1}"#,
+            r#"di "hola" y it’s"#,
+            r"C:\a b\",
+            "",
+        ] {
+            let line = powershell_line(&format!("git rev-parse --sq-quote {}", quote(text)));
+            let out = Command::new("powershell.exe")
+                .args(["-NoProfile", "-Command", &line])
+                .output()
+                .unwrap();
+            let got = String::from_utf8_lossy(&out.stdout);
+            let want = format!(" '{}'", text.replace('\'', r"'\''"));
+            assert_eq!(got.trim_end(), want, "{line}");
+        }
+        PS.with(|c| c.set(false));
     }
 
     #[test]

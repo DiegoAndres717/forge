@@ -311,7 +311,12 @@ impl Terminal {
 
         // El comando se escribe cuando el shell ya mostró su prompt (salida y luego una
         // pausa breve): escrito antes, la terminal lo repetía encima del prompt.
-        if let Some(input) = input.map(str::to_string) {
+        // En Windows lo escrito va a PowerShell, que pasa los argumentos a su manera.
+        let input = input.map(|i| match cfg!(windows) {
+            true => forge_core::agents::powershell_line(i),
+            false => i.to_string(),
+        });
+        if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
             std::thread::spawn(move || {
                 let start = std::time::Instant::now();

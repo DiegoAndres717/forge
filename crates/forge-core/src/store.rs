@@ -65,6 +65,43 @@ fn db_path(
         .join("forge/forge.db")
 }
 
+/// Claves `\\?\…` que guardaba Forge 0.7.1 en Windows → la ruta normal.
+fn strip_verbatim_keys(conn: &Connection) {
+    // Igual que `crate::strip_verbatim`, en SQL; OR IGNORE si ya existe la clave normal.
+    let plain = |col: &str| {
+        format!(
+            r"CASE WHEN {col} LIKE '\\?\UNC\%' THEN '\\' || substr({col}, 9)
+             WHEN {col} LIKE '\\?\%' THEN substr({col}, 5) ELSE {col} END"
+        )
+    };
+    let columns = [
+        ("projects", "path"),
+        ("exceptions", "project"),
+        ("evidence", "project"),
+        ("usage", "project"),
+        ("validations", "project"),
+        ("agent_usage", "project"),
+        ("ideas", "project"),
+        ("memories", "project"),
+    ];
+    for (table, col) in columns {
+        let _ = conn.execute(
+            &format!(
+                r"UPDATE OR IGNORE {table} SET {col} = {} WHERE {col} LIKE '\\?\%'",
+                plain(col)
+            ),
+            [],
+        );
+    }
+    let _ = conn.execute(
+        &format!(
+            r"UPDATE settings SET value = {} WHERE key = 'active' AND value LIKE '\\?\%'",
+            plain("value")
+        ),
+        [],
+    );
+}
+
 fn path_key(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -90,6 +127,7 @@ impl Store {
             std::fs::create_dir_all(dir).map_err(err)?;
         }
         let mut store = Self::init(Connection::open(path).map_err(err)?)?;
+        strip_verbatim_keys(&store.conn);
         store.accounts_root = path.parent().map(|d| d.join("accounts"));
         Ok(store)
     }
@@ -567,6 +605,25 @@ pub fn ago(timestamp: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verbatim_windows_paths_are_migrated_to_plain_ones() {
+        // Forge 0.7.1 guardaba los proyectos de Windows como `\\?\C:\…`.
+        let store = Store::in_memory().unwrap();
+        let old = r"\\?\C:\p\jarvis";
+        store.touch(Path::new(old), "jarvis").unwrap();
+        store
+            .add_idea(Some(Path::new(old)), "plan", "", "x")
+            .unwrap();
+        store.set_setting("active", old).unwrap();
+        strip_verbatim_keys(&store.conn);
+        let plain = r"C:\p\jarvis";
+        let count =
+            |sql: &str| -> i64 { store.conn.query_row(sql, [plain], |r| r.get(0)).unwrap() };
+        assert_eq!(count("SELECT count(*) FROM projects WHERE path = ?1"), 1);
+        assert_eq!(count("SELECT count(*) FROM ideas WHERE project = ?1"), 1);
+        assert_eq!(store.setting("active").unwrap().as_deref(), Some(plain));
+    }
 
     #[test]
     fn the_database_lives_where_each_system_keeps_app_data() {

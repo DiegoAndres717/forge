@@ -1369,6 +1369,18 @@ fn the_app_closes_phases_whose_branch_reached_main() {
 }
 
 #[test]
+fn opened_projects_keep_a_plain_path() {
+    // En Windows, `canonicalize` antepone `\\?\`: PowerShell lo mostraba en el prompt
+    // (`Microsoft.PowerShell.Core\FileSystem::\\?\C:\…`) y llegaba así al MCP.
+    let _serial = serial();
+    let h = app(project("plain-path"));
+    let path = ws(h.state()).project.path.to_string_lossy().into_owned();
+    assert!(!path.starts_with(r"\\?\"), "{path}");
+    let server = ws(h.state()).mcp_server().unwrap();
+    assert!(!server.command.starts_with(r"\\?\"), "{}", server.command);
+}
+
+#[test]
 fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     let _serial = serial();
     let dir = project("agent-click");

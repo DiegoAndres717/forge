@@ -96,11 +96,19 @@ pub fn which(program: &str) -> Option<std::path::PathBuf> {
 /// La ruta real, sin el prefijo `\\?\` que `canonicalize` añade en Windows: con él la
 /// misma carpeta se escribe de dos formas (las excepciones de Guard, guardadas por ruta, no
 /// se encontrarían) y Git no lo acepta.
+/// `\\?\C:\x` → `C:\x` y `\\?\UNC\srv\x` → `\\srv\x`; `None` si no lleva el prefijo.
+pub fn strip_verbatim(path: &str) -> Option<String> {
+    match path.strip_prefix(r"\\?\UNC\") {
+        Some(share) => Some(format!(r"\\{share}")),
+        None => path.strip_prefix(r"\\?\").map(str::to_string),
+    }
+}
+
 pub fn canonical(path: &std::path::Path) -> std::path::PathBuf {
     let Ok(real) = path.canonicalize() else {
         return path.to_path_buf();
     };
-    match real.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+    match real.to_str().and_then(strip_verbatim) {
         Some(plain) => std::path::PathBuf::from(plain),
         None => real,
     }
@@ -207,6 +215,17 @@ pub fn strip_ansi(s: &str) -> String {
 #[cfg(test)]
 mod platform_tests {
     use std::path::PathBuf;
+
+    #[test]
+    fn verbatim_prefix_is_stripped_also_for_network_paths() {
+        use super::strip_verbatim;
+        assert_eq!(strip_verbatim(r"\\?\C:\p").as_deref(), Some(r"C:\p"));
+        assert_eq!(
+            strip_verbatim(r"\\?\UNC\srv\share\p").as_deref(),
+            Some(r"\\srv\share\p")
+        );
+        assert_eq!(strip_verbatim(r"C:\p"), None);
+    }
 
     #[test]
     fn powershell_7_wins_when_it_is_installed() {
