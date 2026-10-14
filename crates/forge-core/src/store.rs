@@ -147,6 +147,10 @@ impl Store {
                 position    INTEGER NOT NULL DEFAULT 0,
                 workspace   TEXT
             );
+            CREATE TABLE IF NOT EXISTS identities (
+                path TEXT PRIMARY KEY,
+                key  TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
@@ -219,14 +223,31 @@ impl Store {
         let path = path_key(project);
         let key = crate::git::remote_identity(project)
             .map_or_else(|| path.clone(), |id| format!("git:{id}"));
-        if key != path {
-            for table in ["memories", "ideas"] {
-                let _ = self.conn.execute(
-                    &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
-                    params![key, path],
-                );
+        // Lo guardado con la ruta, o con el remoto que tenía esta carpeta (repo renombrado o
+        // movido), pasa a la clave de ahora.
+        // ponytail: otro clon que siga en el remoto viejo deja de verlo; raro, y se nota.
+        let before: Option<String> = self
+            .conn
+            .query_row("SELECT key FROM identities WHERE path = ?1", [&path], |r| {
+                r.get(0)
+            })
+            .optional()
+            .ok()
+            .flatten();
+        for old in [Some(path.clone()), before].into_iter().flatten() {
+            if old != key {
+                for table in ["memories", "ideas"] {
+                    let _ = self.conn.execute(
+                        &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
+                        params![key, old],
+                    );
+                }
             }
         }
+        let _ = self.conn.execute(
+            "INSERT OR REPLACE INTO identities (path, key) VALUES (?1, ?2)",
+            params![path, key],
+        );
         keys.insert(project.to_path_buf(), key.clone());
         key
     }

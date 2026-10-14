@@ -129,6 +129,12 @@ impl Store {
         tags: &str,
         source: &str,
     ) -> Result<i64, String> {
+        // La memoria se reinyecta en todos los agentes: nunca guarda secretos pegados.
+        let (title, body) = (
+            crate::guard::mask_secrets(title),
+            crate::guard::mask_secrets(body),
+        );
+        let (title, body) = (title.as_str(), body.as_str());
         if !KINDS.iter().any(|(id, _)| *id == kind) {
             let valid: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
             return Err(tr!(
@@ -282,8 +288,19 @@ impl Store {
 
     /// Guarda el resumen de la última sesión (tras compactar): una sola nota por proyecto
     /// que se actualiza cada vez. Devuelve su id; un resumen vacío no cambia nada.
-    pub fn save_session_summary(&self, project: &Path, summary: &str) -> Result<i64, String> {
-        let title = tr!("Resumen de la última sesión");
+    pub fn save_session_summary(
+        &self,
+        project: &Path,
+        summary: &str,
+        agent: Option<&str>,
+    ) -> Result<i64, String> {
+        // Una nota por agente: el resumen de uno no pisa el de otro.
+        let base = tr!("Resumen de la última sesión");
+        let title = match agent.map(str::trim).filter(|a| !a.is_empty()) {
+            Some(agent) => format!("{base} · {agent}"),
+            None => base.to_string(),
+        };
+        let title = title.as_str();
         // ponytail: recorte fijo; es una pista para retomar, no el historial entero.
         let body: String = summary.trim().chars().take(4000).collect();
         let existing = self
@@ -333,6 +350,9 @@ impl Store {
         if title.is_some_and(|t| t.trim().is_empty()) {
             return Err(tr!("la memoria necesita un título").into());
         }
+        let title = title.map(crate::guard::mask_secrets);
+        let body = body.map(crate::guard::mask_secrets);
+        let (title, body) = (title.as_deref(), body.as_deref());
         self.conn
             .execute(
                 "UPDATE memories SET kind = COALESCE(?3, kind), title = COALESCE(?4, title),
@@ -484,10 +504,10 @@ mod tests {
         );
         // El resumen de sesión es una sola nota que se actualiza.
         let first = store
-            .save_session_summary(p, "Hecho: A. Pendiente: B.")
+            .save_session_summary(p, "Hecho: A. Pendiente: B.", None)
             .unwrap();
         let again = store
-            .save_session_summary(p, "Hecho: A y B. Pendiente: C.")
+            .save_session_summary(p, "Hecho: A y B. Pendiente: C.", None)
             .unwrap();
         assert_eq!(first, again);
         assert!(
@@ -529,6 +549,70 @@ mod tests {
             "el índice se actualiza al borrar"
         );
         assert!(store.add_memory(p, "otra-cosa", "x", "", "", "u").is_err());
+    }
+
+    #[test]
+    fn secrets_never_reach_the_memory_and_each_agent_keeps_its_session() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/secretos");
+        let token = format!("ghp_{}", "a".repeat(36));
+        let id = store
+            .add_memory(p, "note", "Deploy", &format!("usa {token}"), "", "x")
+            .unwrap();
+        let body = |id| store.get_memory(p, id).unwrap().unwrap().body;
+        assert!(!body(id).contains(&token) && body(id).contains("[SECRETO OCULTO]"));
+        store
+            .update_memory(p, id, None, None, Some(&format!("otra {token}")), None)
+            .unwrap();
+        assert!(!body(id).contains(&token), "{}", body(id));
+        let s = store
+            .save_session_summary(p, &format!("pegó {token}"), Some("Claude Code"))
+            .unwrap();
+        assert!(!body(s).contains(&token));
+        // Una nota por agente: la de Codex no pisa la de Claude.
+        let c = store
+            .save_session_summary(p, "Codex hizo X", Some("Codex"))
+            .unwrap();
+        assert_ne!(s, c);
+        assert!(body(s).contains("pegó"));
+    }
+
+    #[test]
+    fn memories_follow_the_project_when_its_remote_changes() {
+        // Renombrar el repo (o moverlo de organización) cambia el remoto: la memoria y los
+        // planes no se quedan huérfanos bajo la identidad vieja.
+        let tmp = std::env::temp_dir().join(format!("forge-relink-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let repo = tmp.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let ok = std::process::Command::new("git")
+                .args(args)
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        git(&["remote", "add", "origin", "git@github.com:Org/Viejo.git"]);
+        let db = tmp.join("forge.db");
+        let id = Store::open(&db)
+            .unwrap()
+            .add_memory(&repo, "decision", "Usar Postgres", "", "", "x")
+            .unwrap();
+        git(&[
+            "remote",
+            "set-url",
+            "origin",
+            "git@github.com:Org/Nuevo.git",
+        ]);
+        let store = Store::open(&db).unwrap();
+        assert!(
+            store.get_memory(&repo, id).unwrap().is_some(),
+            "la memoria se quedó con el remoto viejo"
+        );
+        let _ = std::fs::remove_dir_all(tmp);
     }
 
     #[test]
