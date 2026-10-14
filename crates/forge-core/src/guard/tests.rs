@@ -108,6 +108,49 @@ mod unit {
         assert!(scan_secrets(&[line(&allowed)]).is_empty());
     }
 
+    #[test]
+    fn a_session_exception_lasts_two_hours() {
+        let at = |hours: i64| {
+            Exception {
+                id: 1,
+                rule: "lines".into(),
+                reason: "motivo".into(),
+                scope: Scope::Session,
+                stage: Stage::Commit,
+                candidate: String::new(),
+                branch: String::new(),
+                user: String::new(),
+                created_at: 0,
+                revoked: false,
+            }
+            .applies("lines", Stage::Commit, "", "", hours * 3600)
+        };
+        assert!(at(1));
+        assert!(!at(3), "8 h era un permiso demasiado amplio");
+    }
+
+    #[test]
+    fn secrets_inside_binary_files_are_found() {
+        // Un .sqlite, un .zip o un build pueden llevar una clave dentro.
+        let dir = crate::git::test_repo("binary-secret", "true");
+        let mut bytes = vec![0u8, 1, 2, 0];
+        bytes.extend_from_slice(b"aws_key=AKIAIOSFODNN7EXAMPLE"); // forge:allow-secret
+        bytes.extend_from_slice(&[0, 255, 0]);
+        std::fs::write(dir.join("datos.bin"), &bytes).unwrap();
+        let ok = std::process::Command::new("git")
+            .args(["add", "datos.bin"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let diff = collect_diff(&dir, Stage::Commit, &Rules::default(), None).unwrap();
+        assert!(diff.files.iter().any(|f| f.binary), "es binario");
+        let items = evaluate(&Rules::default(), Stage::Commit, &diff);
+        let secrets = items.iter().find(|i| i.id == "secrets").unwrap();
+        assert_eq!(secrets.level, Level::Block, "{:?}", secrets.details);
+    }
+
     fn rules(toml_text: &str) -> Rules {
         toml::from_str(toml_text).unwrap()
     }

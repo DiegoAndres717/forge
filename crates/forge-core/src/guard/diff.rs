@@ -236,6 +236,20 @@ pub fn collect_diff(
     diff.branch = git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])
         .map(|b| b.trim().to_string())
         .unwrap_or_default();
+    // Binarios: un .sqlite, un .zip o un build también pueden llevar un secreto dentro.
+    // ponytail: se lee del árbol de trabajo, no del índice; basta para encontrar claves.
+    for f in diff.files.iter().filter(|f| f.binary && !f.removed) {
+        let path = repo.join(&f.path);
+        if std::fs::metadata(&path).is_ok_and(|m| m.len() <= 20 << 20)
+            && let Ok(bytes) = std::fs::read(&path)
+        {
+            diff.added_lines.extend(
+                binary_strings(&bytes)
+                    .into_iter()
+                    .map(|s| (f.path.clone(), 0, s)),
+            );
+        }
+    }
     Ok(diff)
 }
 
@@ -244,6 +258,15 @@ pub(crate) fn hex(bytes: &[u8]) -> String {
 }
 
 /// Líneas de un archivo de texto (vacío si es binario o mayor de 1 MB).
+/// Tramos de texto legible de un binario (como `strings`), donde estaría una clave.
+fn binary_strings(bytes: &[u8]) -> Vec<String> {
+    bytes
+        .split(|b| !(b.is_ascii_graphic() || *b == b' '))
+        .filter(|run| run.len() >= 16)
+        .map(|run| String::from_utf8_lossy(run).into_owned())
+        .collect()
+}
+
 pub(crate) fn read_text(path: &Path) -> (Vec<String>, bool) {
     match std::fs::read(path) {
         Ok(bytes) if bytes.len() <= 1 << 20 && !bytes.contains(&0) => (
