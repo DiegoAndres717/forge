@@ -227,13 +227,6 @@ fn skips_hooks(rest: &[String], short_n: bool) -> bool {
 fn git(args: &[String]) -> Option<String> {
     let no_hooks =
         || tr!("se salta los hooks de Git y la validación de Guard (--no-verify)").into();
-    // Desactivar los hooks por configuración (`-c core.hooksPath=…`) es lo mismo.
-    if args
-        .windows(2)
-        .any(|w| w[0] == "-c" && w[1].to_ascii_lowercase().starts_with("core.hookspath"))
-    {
-        return Some(no_hooks());
-    }
     // Subcomando: primer argumento que no es opción global (`-C dir`, `-c k=v`…).
     let mut i = 0;
     while i < args.len() && args[i].starts_with('-') {
@@ -244,6 +237,22 @@ fn git(args: &[String]) -> Option<String> {
         };
     }
     let (sub, rest) = (args.get(i)?.as_str(), &args[(i + 1).min(args.len())..]);
+    // Desactivar los hooks por configuración (`-c core.hooksPath=…`) es lo mismo, pero solo
+    // importa donde corren los de Guard: Claude Code lee el repo (`remote get-url`, `status`…)
+    // con los hooks apagados. Se busca en todo el comando: `--git-dir .git` despista a `sub`.
+    let hooks_path = |a: &String| {
+        let a = a.to_ascii_lowercase();
+        a.strip_prefix("-c")
+            .unwrap_or(&a)
+            .starts_with("core.hookspath")
+    };
+    if args.iter().any(hooks_path)
+        && args
+            .iter()
+            .any(|a| matches!(a.as_str(), "commit" | "push" | "merge"))
+    {
+        return Some(no_hooks());
+    }
     match sub {
         "reset" if rest.iter().any(|a| a == "--hard") => {
             Some(tr!("descarta todos los cambios sin commit (git reset --hard)").into())
@@ -1069,6 +1078,18 @@ mod tests {
         assert!(!c("git", "commit --no-verbose -m x"));
         assert!(c("git", "-c core.hooksPath=/dev/null commit -m x"));
         assert!(c("git", "-c core.hookspath= push"));
+        // Claude Code lee el repo con los hooks apagados: sin commit ni push no hay nada que saltarse.
+        assert!(!c(
+            "git",
+            "-c core.askPass= -c hook.pre-commit.enabled=false -c core.hooksPath=/dev/null remote get-url origin"
+        ));
+        assert!(!c("git", "-c core.hooksPath=/dev/null status --porcelain"));
+        // Una opción global con valor aparte no debe esconder el commit.
+        assert!(c(
+            "git",
+            "--git-dir .git -c core.hooksPath=/dev/null commit -m x"
+        ));
+        assert!(c("git", "-ccore.hooksPath=/dev/null push"));
         assert!(!c("rm", "-r web/.next"));
         assert!(!c("rm", "-f a.txt"));
         assert!(c("rm", "-rf ."));
