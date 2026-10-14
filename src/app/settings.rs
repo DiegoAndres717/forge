@@ -415,6 +415,8 @@ impl App {
         };
         let installed = subagents::installed(agent, &home);
         let mut result = None;
+        // Tras instalar o quitar, el campo vuelve a mostrar el modelo instalado.
+        let mut reseed = false;
         let dir = match agent {
             subagents::Agent::Codex => "~/.codex/agents",
             subagents::Agent::Gemini => "~/.gemini/agents",
@@ -435,7 +437,7 @@ impl App {
                         Some(m) => ui.label(tr!("Modelo: {m}", m = m)),
                         None => ui.colored_label(
                             theme::ORANGE,
-                            tr!("Sin modelo barato: usan el del agente y no ahorran"),
+                            tr!("Sin modelo barato: usan el del agente y no ahorran. Escribe uno abajo."),
                         ),
                     };
                     let draft = self
@@ -457,10 +459,12 @@ impl App {
                             .clicked()
                         {
                             result = Some(subagents::install(agent, &home, Some(&wanted)));
+                            reseed = true;
                         }
                     });
                     if ui.button(tr!("Quitar subagentes")).clicked() {
                         result = Some(subagents::remove(agent, &home));
+                        reseed = true;
                     }
                 } else if ui.button(tr!("Añadir subagentes")).clicked() {
                     // ponytail: el catálogo de Codex se lee al pulsar (es local y rápido).
@@ -478,6 +482,9 @@ impl App {
                 }
             },
         );
+        if reseed || matches!(result, Some(Ok(()))) {
+            self.subagent_model.remove(dir);
+        }
         if let Some(Err(e)) = result {
             self.error = Some(e);
         }

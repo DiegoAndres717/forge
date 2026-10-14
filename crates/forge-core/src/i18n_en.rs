@@ -1103,9 +1103,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Tecla Option", "Option key"),
     ("Modelo: {m}", "Model: {m}"),
     (
-        "Sin modelo barato: usan el del agente y no ahorran",
-        "No cheap model: they use the agent's own and save nothing",
+        "Sin modelo barato: usan el del agente y no ahorran. Escribe uno abajo.",
+        "No cheap model: they use the agent's own and save nothing. Type one below.",
     ),
+    ("modelo no válido: «{m}»", "invalid model: “{m}”"),
     ("modelo", "model"),
     ("Usar este modelo", "Use this model"),
     (

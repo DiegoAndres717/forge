@@ -112,6 +112,17 @@ pub fn files(agent: Agent, model: Option<&str>) -> Vec<(String, String)> {
 }
 
 pub fn install(agent: Agent, home: &Path, model: Option<&str>) -> Result<(), String> {
+    // Un nombre de modelo («gpt-5-mini», «gemini-3-flash-preview»): nada que pueda meter
+    // campos en el TOML o en la cabecera YAML.
+    if let Some(m) = model
+        && (m.is_empty()
+            || !m
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c))
+            || m.starts_with(['-', ':']))
+    {
+        return Err(crate::tr!("modelo no válido: «{m}»", m = m));
+    }
     let dir = agent.dir(home);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     for (file, text) in files(agent, model) {
@@ -177,6 +188,14 @@ mod tests {
             Some(GEMINI_MODEL)
         );
         install(Agent::Gemini, &home, Some("gemini-x-lite")).unwrap();
+        assert_eq!(
+            installed_model(Agent::Gemini, &home).as_deref(),
+            Some("gemini-x-lite")
+        );
+        // Un nombre de modelo, no texto libre: no puede meter campos en el archivo.
+        for bad in ["x\nsandbox: none", "a: b", "", "# nada"] {
+            assert!(install(Agent::Gemini, &home, Some(bad)).is_err(), "{bad:?}");
+        }
         assert_eq!(
             installed_model(Agent::Gemini, &home).as_deref(),
             Some("gemini-x-lite")
