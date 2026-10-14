@@ -33,6 +33,8 @@ declare module 'claude-code' {
       context: number | null
       /** Effort set for this session with /forge-effort ('' = the session's own). */
       effort: string
+      /** Searches and reads by the main loop vs inside subagents (the band's share). */
+      delegation: { main: number; sub: number }
     }
   }
 }
