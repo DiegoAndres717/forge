@@ -46,6 +46,14 @@ const isEffort = (v: string): v is Effort => (EFFORTS as readonly string[]).incl
 /** Context fuller than this: the band suggests /compact before it gets expensive. */
 // Quality drops well before the window is full: warn early enough to compact in time.
 const CONTEXT_WARN = 60
+/** In big windows (1M) the percentage says too little: from here (and every step more)
+ * Forge offers a button to compact. Each request resends the whole context; past this it
+ * costs more and answers get worse. */
+const COMPACT_FROM = 400_000
+const COMPACT_STEP = 100_000
+/** Tokens at which to offer next (0: not set yet), and the band's warning in percent. */
+let compactNext = 0
+let warnAt = CONTEXT_WARN
 // The plan anchor is repeated when it changes or every few messages: each copy stays in
 // the context, so not on every turn.
 const ANCHOR_EVERY = 8
@@ -261,6 +269,21 @@ export const register: Register = on => {
     if (e.changed.includes('context') && typeof e.context?.percent === 'number') {
       const percent = Math.round(e.context.percent)
       await update($, context, () => percent)
+      const window = e.context.window
+      if (typeof window === 'number' && window > 0) {
+        const tokens = (e.context.percent / 100) * window
+        const from = Math.min(COMPACT_FROM, (window * CONTEXT_WARN) / 100)
+        warnAt = (from / window) * 100
+        // First time, or the context got small again (/clear, a resumed session): start over.
+        if (compactNext === 0 || tokens < from) compactNext = from
+        if (tokens >= compactNext) {
+          // Forge shows "Compactar · Luego" on this terminal; left for later, it comes back
+          // a step further on.
+          compactNext = Math.floor(tokens / COMPACT_STEP) * COMPACT_STEP + COMPACT_STEP
+          // Only writes a file: waited for (2 s at most), so nothing is left running.
+          await forge($, ['agent-event', 'compact'], JSON.stringify({ message: `${Math.round(tokens / 1000)}k tokens`, origin: 'Claude Code' }), 2_000).catch(() => undefined)
+        }
+      }
     }
     if (e.changed.includes('rateLimits')) {
       await update($, limits, () => e.rateLimits)
@@ -339,8 +362,10 @@ export const register: Register = on => {
   })
 
   on('session.compact', async ($, e, next) => {
-    // After compacting, the share is about what is still in the context.
+    // After compacting, the share is about what is still in the context, and the offer to
+    // compact starts over.
     await countRead($, null)
+    compactNext = 0
     const result = await next(e)
     const messages = 'messages' in result ? result.messages : undefined
     // The summary is the longest text left after compacting (it may come as a user turn).
@@ -498,7 +523,7 @@ export const register: Register = on => {
       const percent = Math.max(0, Math.min(100, Math.round(w.percentUsed)))
       return [{ label, percent, reset: resetsIn(w.resetsAt, now) }]
     })
-    const full = ctx !== null && ctx >= CONTEXT_WARN
+    const full = ctx !== null && ctx >= warnAt
     if (
       e.props.hasSurvey ||
       (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null)
