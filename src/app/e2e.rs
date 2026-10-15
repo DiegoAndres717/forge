@@ -1541,6 +1541,54 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
     assert_eq!(ws(h.state()).agent_panels("fake").len(), 2);
 }
 
+/// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y
+/// guardarlo con Enter tiene que ser instantáneo y no crear nada en disco.
+#[test]
+fn renaming_a_new_account_is_cheap() {
+    let _serial = serial();
+    let dir = project("account-rename");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let mut h = app_with(store, Some(dir.clone()));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AccountAdd("claude".into()), area);
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    let before = std::fs::read_dir(dir.join(".accounts")).unwrap().count();
+    let start = Instant::now();
+    let new = h.state().store.as_ref().unwrap().accounts("claude")[1]
+        .name
+        .clone();
+    h.query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.value().as_deref() == Some(new.as_str()))
+        .expect("el campo del nombre")
+        .focus();
+    h.run_steps(2);
+    h.input_mut()
+        .events
+        .push(egui::Event::Text(" de la empresa".into()));
+    // El cursor parpadea mientras se escribe: muchos fotogramas seguidos.
+    h.run_steps(120);
+    h.key_press(Key::Enter);
+    h.run_steps(10);
+    let took = start.elapsed();
+    let name = h.state().store.as_ref().unwrap().accounts("claude")[1]
+        .name
+        .clone();
+    assert_eq!(name, format!("{new} de la empresa"));
+    assert!(took < Duration::from_secs(10), "renombrar tardó {took:?}");
+    assert_eq!(
+        std::fs::read_dir(dir.join(".accounts")).unwrap().count(),
+        before,
+        "renombrar no crea carpetas"
+    );
+}
+
 /// Con otra cuenta elegida en el proyecto, un `claude` escrito a mano en una terminal
 /// nueva usa su carpeta (CLAUDE_CONFIG_DIR).
 #[test]
