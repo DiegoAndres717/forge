@@ -79,9 +79,21 @@ pub const CHORES_DELEGATE: &str = "Forge Jev: hand git and GitHub chores (commit
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
 fn instructions(modes: Modes) -> String {
+    instructions_in(modes, crate::i18n::lang())
+}
+
+/// Los planes los lee el dueño en Forge: van en el idioma de su interfaz, no en inglés.
+fn instructions_in(modes: Modes, lang: crate::i18n::Lang) -> String {
+    let language = match lang {
+        crate::i18n::Lang::Es => "Spanish",
+        crate::i18n::Lang::En => "English",
+    };
     let mut out = String::from(
         "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch).",
     );
+    out.push_str(&format!(
+        " Write plans and backlog ideas (titles, notes, phases and tasks) in {language}: the owner reads them in Forge, whose interface is in {language}."
+    ));
     out.push_str("\n\n");
     out.push_str(DELEGATE);
     for (on, text) in [
@@ -1139,6 +1151,14 @@ mod tests {
         // Las skills del usuario no se tocan.
         assert!(dir.join("skills/mine").exists());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn plans_are_written_in_the_owners_language() {
+        use crate::i18n::Lang;
+        assert!(instructions_in(Modes::default(), Lang::Es).contains("in Spanish"));
+        assert!(!instructions_in(Modes::default(), Lang::En).contains("in Spanish"));
+        assert!(instructions_in(Modes::default(), Lang::En).contains("in English"));
     }
 
     #[test]
