@@ -1106,7 +1106,9 @@ pub fn specialist(
             let mut verdict = verdict;
             // Solo lo que bloquearía pasa por el refutador (idea de gentle-ai): menos
             // bloqueos falsos sin gastar en lo informativo.
-            if reviewer.blocking && verdict == AiVerdict::Block {
+            // Bloquear sin hallazgos concretos no tiene nada que desmentir: sigue bloqueando.
+            let had_blocking = findings.iter().any(|f| f.severity == "blocking");
+            if reviewer.blocking && verdict == AiVerdict::Block && had_blocking {
                 findings = refute(
                     config, ctx, reviewer, &diff, findings, spent, local, &mut steps,
                 );
@@ -1138,7 +1140,12 @@ pub fn specialist(
 
 /// Hallazgos graves que se revisan como mucho por revisión (cada uno es una llamada).
 // ponytail: tope fijo; configurable en Ajustes si hiciera falta (plan #42, fase 3).
+// El presupuesto se comprueba por revisor (los de Guard corren en paralelo con el gasto de
+// partida), así que el mes puede pasarse como mucho MAX_REFUTED llamadas por revisor que
+// bloquea; si molesta, reservarlas en `affordable_reviewers`.
 const MAX_REFUTED: usize = 3;
+/// Confianza mínima para que un desmentido cuente.
+const MIN_REFUTE_CONFIDENCE: f64 = 0.7;
 
 /// Otro modelo (la ruta potente) intenta desmentir cada hallazgo bloqueante. Desmentido:
 /// queda como nota; confirmado, dudoso, sin respuesta o sin presupuesto: se mantiene.
@@ -1186,7 +1193,8 @@ fn refute(
             match call(config, &chosen, &prompt, &ctx.repo) {
                 Ok((r, usage)) => {
                     spent += usage.cost_usd;
-                    let refuted = r.verdict == "approve";
+                    // El diff puede intentar convencerlo: solo cuenta un desmentido seguro.
+                    let refuted = r.verdict == "approve" && r.confidence >= MIN_REFUTE_CONFIDENCE;
                     steps.push(Step {
                         route: label,
                         task,
@@ -1749,6 +1757,15 @@ mod tests {
                 local: false,
             },
         );
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
+        // Bloquea sin hallazgos concretos: no hay nada que desmentir, sigue bloqueando.
+        config
+            .providers
+            .insert("potente".into(), fake("approve", 0.9));
+        config
+            .providers
+            .insert("revisor".into(), fake("block", 0.9));
         let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
         assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
     }
