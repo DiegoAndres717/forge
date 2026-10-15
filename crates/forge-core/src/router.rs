@@ -1580,7 +1580,10 @@ mod tests {
         let specs = crate::reviewers::builtins();
         let role = |id: &str| specialist_role(specs.iter().find(|r| r.id == id).unwrap());
         assert!(role("readability").contains(&precision_gate()));
-        assert!(!role("security").contains(&precision_gate()), "bloquea: mejor de más");
+        assert!(
+            !role("security").contains(&precision_gate()),
+            "bloquea: mejor de más"
+        );
 
         // Con el presupuesto casi agotado no se llama a proveedores de pago.
         config.monthly_budget_usd = 0.15;
