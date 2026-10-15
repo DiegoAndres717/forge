@@ -1031,6 +1031,25 @@ pub fn reviewer_route(
     r
 }
 
+/// Filtro de precisión (idea de gentle-ai): solo para los revisores informativos, que si no
+/// llenan la revisión de ruido. Los que bloquean (seguridad…) no se callan por dudar.
+fn precision_gate() -> String {
+    tr!("Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no es un hallazgo salvo que esconda un defecto.").to_string()
+}
+
+fn specialist_role(reviewer: &crate::reviewers::ReviewerSpec) -> String {
+    let role = tr!(
+        "Eres el {p0}. Revisa SOLO {p1}. Ignora lo que no sea de tu área y no repitas observaciones generales.",
+        p0 = reviewer.name.to_lowercase(),
+        p1 = reviewer.focus
+    );
+    if reviewer.blocking {
+        role.to_string()
+    } else {
+        format!("{role} {}", precision_gate())
+    }
+}
+
 /// Una revisión especializada (sin escalado): solo los archivos de su área y su enfoque.
 pub fn specialist(
     config: &RouterConfig,
@@ -1063,11 +1082,7 @@ pub fn specialist(
         Ok(d) => d,
         Err(e) => return incomplete(Vec::new(), tr!("no se pudo preparar el diff: {e}", e = e)),
     };
-    let role = tr!(
-        "Eres el {p0}. Revisa SOLO {p1}. Ignora lo que no sea de tu área y no repitas observaciones generales.",
-        p0 = reviewer.name.to_lowercase(),
-        p1 = reviewer.focus
-    );
+    let role = specialist_role(reviewer);
     let started = Instant::now();
     let label = format!("{} · {} {}", reviewer.name, chosen.provider, chosen.model);
     match call(config, &chosen, &prompt_with(&role, ctx, &diff), &ctx.repo) {
@@ -1558,6 +1573,17 @@ mod tests {
             "el secreto no debe salir hacia el modelo"
         );
         assert!(!sent.contains("SECRET=1"), ".env no debe enviarse");
+        assert!(
+            !sent.contains(&precision_gate()),
+            "la revisión general (que puede bloquear) no se calla por dudar"
+        );
+        let specs = crate::reviewers::builtins();
+        let role = |id: &str| specialist_role(specs.iter().find(|r| r.id == id).unwrap());
+        assert!(role("readability").contains(&precision_gate()));
+        assert!(
+            !role("security").contains(&precision_gate()),
+            "bloquea: mejor de más"
+        );
 
         // Con el presupuesto casi agotado no se llama a proveedores de pago.
         config.monthly_budget_usd = 0.15;
