@@ -178,7 +178,31 @@ fn mcp_server_shares_memory_between_clients() {
         "el servidor termina al cerrarse stdin"
     );
 
-    // Otro cliente (la CLI) ve lo que guardó el agente.
+    // Otro cliente (la CLI) ve lo que guardó el agente. Una búsqueda de un agente por la
+    // CLI cuenta como lectura; la de las sugerencias del mod (--brief), no.
+    let reads = || -> i64 {
+        forge_core::store::Store::open(&db)
+            .unwrap()
+            .memory_reads()
+            .unwrap()
+            .values()
+            .map(|(n, _)| n)
+            .sum()
+    };
+    let before = reads();
+    Command::new(FORGE)
+        .args([
+            "memory",
+            "search",
+            "--brief",
+            "lotes",
+            "--project",
+            &project_arg,
+        ])
+        .env("FORGE_DB", &db)
+        .output()
+        .unwrap();
+    assert_eq!(reads(), before, "las sugerencias no cuentan");
     let cli = Command::new(FORGE)
         .args(["memory", "search", "lotes", "--project", &project_arg])
         .env("FORGE_DB", &db)
@@ -189,6 +213,7 @@ fn mcp_server_shares_memory_between_clients() {
         out.contains("Vacunación por lotes") && out.contains("guardada por claude-code"),
         "{out}"
     );
+    assert!(reads() > before, "la búsqueda de un agente cuenta");
     let add = Command::new(FORGE)
         .args([
             "memory",
