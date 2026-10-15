@@ -19,6 +19,8 @@ pub struct Modes {
     pub ask_first: bool,
     /// «Primero el test»: `--tests-first` o `FORGE_TESTS_FIRST=1`.
     pub tests_first: bool,
+    /// Forge Jev, tareas de git al subagente barato: `--jev-chores` o `FORGE_JEV_CHORES=1`.
+    pub jev_chores: bool,
 }
 
 impl Modes {
@@ -28,6 +30,7 @@ impl Modes {
         Self {
             ask_first: on("FORGE_ASK_FIRST"),
             tests_first: on("FORGE_TESTS_FIRST"),
+            jev_chores: on("FORGE_JEV_CHORES"),
         }
     }
 
@@ -37,6 +40,7 @@ impl Modes {
         Self {
             ask_first: has("--ask-first"),
             tests_first: has("--tests-first"),
+            jev_chores: has("--jev-chores"),
         }
     }
 
@@ -44,6 +48,7 @@ impl Modes {
         [
             self.ask_first.then_some("--ask-first"),
             self.tests_first.then_some("--tests-first"),
+            self.jev_chores.then_some("--jev-chores"),
         ]
         .into_iter()
         .flatten()
@@ -55,6 +60,7 @@ impl Modes {
         Modes {
             ask_first: self.ask_first || other.ask_first,
             tests_first: self.tests_first || other.tests_first,
+            jev_chores: self.jev_chores || other.jev_chores,
         }
     }
 }
@@ -65,6 +71,10 @@ pub const TESTS_FIRST: &str = "Tests-first mode: for every behavior change or bu
 /// Medido en sesiones reales: buscar y leer código es el 8–13 % de toda la entrada, porque
 /// cada resultado se relee en cada turno. Un subagente lo deja fuera del contexto.
 pub const DELEGATE: &str = "Saving tokens: when understanding something will take more than two searches or file reads (shell ones included: rg, grep, find, cat, sed -n), hand the exploration to a subagent on a cheaper model if your tool has one, and keep only its short answer with paths. Everything you read stays in your context and is re-read on every later turn. Likewise, hand full test suites, builds and type checks to such a subagent and keep only what failed and why; run yourself only the single test you are fixing. In Codex and Gemini CLI, Forge's subagents are forge-explorer (exploring) and forge-reviewer (full test suites, builds and reviews) when they are installed: spawn them for that work.";
+
+/// Forge Jev: medido en sesiones reales, las tareas de git y PR son ~25 % del gasto, porque
+/// cada turno relee todo el contexto; el subagente empieza con uno pequeño.
+pub const CHORES_DELEGATE: &str = "Forge Jev: hand git and GitHub chores (commit, push, pull, branch, merge, rebase, changesets, opening or updating a pull request) to Forge's chores subagent on a cheap model (forge:chores in Claude Code, forge-chores in the other agents), with the exact message, branch and texts to use. It starts with a small context, so a chore costs a fraction of doing it here, where every step re-reads this whole conversation. Do a chore yourself only when that subagent isn't available, or when it needs judgment about the code.";
 
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
@@ -77,6 +87,7 @@ fn instructions(modes: Modes) -> String {
     for (on, text) in [
         (modes.ask_first, ASK_FIRST),
         (modes.tests_first, TESTS_FIRST),
+        (modes.jev_chores, CHORES_DELEGATE),
     ] {
         if on {
             out.push_str("\n\n");
@@ -1150,8 +1161,20 @@ mod tests {
         let args = vec!["--project".into(), "x".into(), "--tests-first".into()];
         assert_eq!(Modes::from_args(&args), tests);
         assert_eq!(Modes::from_args(&tests.args()), tests);
-        // El mod de Claude Code dice lo mismo que el servidor.
-        let module = include_str!("../../../claude-plugin/hooks/register.tsx");
+        // Forge Jev: las tareas de git van al subagente barato solo si está encendido.
+        assert!(!plain.contains("forge-chores"));
+        let chores = Modes {
+            jev_chores: true,
+            ..Modes::default()
+        };
+        assert!(instructions(chores).contains(CHORES_DELEGATE));
+        assert_eq!(Modes::from_args(&chores.args()), chores);
+        // El mod de Claude Code dice lo mismo que el servidor, y registra el mismo subagente.
+        // En Windows el checkout puede traerlo con CRLF; el texto de varias líneas, no.
+        let module =
+            include_str!("../../../claude-plugin/hooks/register.tsx").replace("\r\n", "\n");
         assert!(module.contains(TESTS_FIRST));
+        assert!(module.contains(CHORES_DELEGATE));
+        assert!(module.contains(crate::subagents::CHORES.2));
     }
 }

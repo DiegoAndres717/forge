@@ -498,12 +498,13 @@ impl App {
             .collect()
     }
 
-    /// Modos de trabajo de un proyecto: «Primero pregunta» (general) y «Primero el test»
-    /// (general o del proyecto).
-    fn modes(&self, project: &Path) -> forge_core::mcp::Modes {
+    /// Modos de trabajo de un proyecto: «Primero pregunta» (general), «Primero el test»
+    /// (general o del proyecto) y Forge Jev (general).
+    pub(super) fn modes(&self, project: &Path) -> forge_core::mcp::Modes {
         forge_core::mcp::Modes {
             ask_first: self.settings.ask_first,
             tests_first: self.store.as_ref().is_some_and(|s| s.tests_first(project)),
+            jev_chores: self.store.as_ref().is_some_and(|s| s.jev_chores()),
         }
     }
 

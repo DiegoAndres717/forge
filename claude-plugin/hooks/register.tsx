@@ -151,6 +151,20 @@ resisted the obvious fixes.
 // Same text as the MCP server's tests-first instruction (crates/forge-core/src/mcp.rs).
 const TESTS_FIRST = 'Tests-first mode: for every behavior change or bug fix, first write a test that fails for the right reason and run it to see it fail, then write the smallest code that makes it pass, run it again to see it pass, and only then refactor. Say which test you added and show both runs. Skip it only for changes with nothing to test (docs, config, styling) and say so.'
 
+// Forge Jev: the same chores subagent and policy as crates/forge-core (subagents.rs, mcp.rs).
+const CHORES = `You do git and GitHub chores for a senior engineer: commits, pushes, pulls, branches,
+merges, rebases, changesets and pull requests (gh).
+- Do exactly what you were asked, with the message, branch and texts you were given.
+  Do not edit source files.
+- Follow the repository's rules for commits and pull requests (AGENTS.md, CLAUDE.md,
+  CONTRIBUTING) when they exist.
+- Never force-push, rewrite shared history, delete branches or skip hooks unless you
+  were told to.
+- If a hook, a check or a merge fails, stop and report the error; do not fix code.
+- Reply briefly: what you ran and the result (commit hash, pull request URL, error).`
+
+const CHORES_DELEGATE = `Forge Jev: hand git and GitHub chores (commit, push, pull, branch, merge, rebase, changesets, opening or updating a pull request) to Forge's chores subagent on a cheap model (forge:chores in Claude Code, forge-chores in the other agents), with the exact message, branch and texts to use. It starts with a small context, so a chore costs a fraction of doing it here, where every step re-reads this whole conversation. Do a chore yourself only when that subagent isn't available, or when it needs judgment about the code.`
+
 const DELEGATION = `Forge team (subagents on cheaper models). Use them to save tokens
 and keep your context clean:
 - forge:explorer (fast model): any "where is…", "what does … do", finding files,
@@ -244,6 +258,11 @@ export const register: Register = on => {
       { name: 'architect', model: 'opus', effort: 'high', prompt: ARCHITECT, disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
         description: 'Strongest model, for hard design decisions, risky migrations, security-sensitive code and stubborn bugs. Returns a recommendation and a plan.' },
     ]
+    // Forge Jev: git and PR chores on a cheap model, only when the user turned it on.
+    if (await $.env.get('FORGE_JEV_CHORES').catch(() => undefined) === '1') {
+      agents.push({ name: 'chores', model: 'haiku', effort: 'low', prompt: CHORES, tools: ['Bash', 'Read', 'Grep', 'Glob'],
+        description: 'Cheap git and GitHub chores: commit, push, pull, branch, merge, rebase, changesets, opening or updating a pull request with gh. Give it the exact intent (message, branch, title and body); it runs the commands and reports the result.' })
+    }
     for (const agent of agents) {
       await $.agent.register(agent)
     }
@@ -386,6 +405,9 @@ export const register: Register = on => {
     }
     if (await $.env.get('FORGE_TESTS_FIRST').catch(() => undefined) === '1') {
       sections.push({ id: 'forge-tests-first', text: TESTS_FIRST, scope: 'session' as const })
+    }
+    if (await $.env.get('FORGE_JEV_CHORES').catch(() => undefined) === '1') {
+      sections.push({ id: 'forge-jev-chores', text: CHORES_DELEGATE, scope: 'session' as const })
     }
     return { sections }
   })
