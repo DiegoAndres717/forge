@@ -28,6 +28,9 @@ pub struct WorkspaceState {
     /// Grupos de terminales que comparten un hueco (la visible es la que está en `layout`).
     #[serde(default)]
     pub tabs: Vec<Vec<PanelId>>,
+    /// El panel de Guard estaba abierto.
+    #[serde(default)]
+    pub guard_open: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1368,6 +1371,7 @@ impl Workspace {
     }
 
     fn restore(&mut self, ctx: &egui::Context, mut state: WorkspaceState) {
+        self.guard.open = state.guard_open;
         self.layout = state.layout;
         for id in self.layout.ids() {
             let panel = state
@@ -1509,6 +1513,7 @@ impl Workspace {
             focus: self.focus,
             running: self.processes.active_ids(),
             tabs: self.tabs.clone(),
+            guard_open: self.guard.open,
         }
     }
 
@@ -2894,6 +2899,23 @@ mod tests {
         );
         ws.close(id);
         assert!(!file.exists(), "cerrar el panel borra su historial");
+    }
+
+    /// Guard abierto sigue abierto al cerrar y reabrir el proyecto.
+    #[test]
+    fn guard_open_survives_reopen() {
+        let dir = std::env::temp_dir().join(format!("forge-guard-open-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".forge")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let ctx = egui::Context::default();
+        let mut ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), None);
+        ws.guard.open = true;
+        let state = ws.state();
+        drop(ws);
+        let ws = Workspace::open(&ctx, Project::load(&dir).unwrap(), Some(state));
+        assert!(ws.guard.open);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
