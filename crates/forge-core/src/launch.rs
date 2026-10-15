@@ -86,6 +86,13 @@ impl Store {
             && self.launch_pref("forge", "jev_chores", None) != "off"
     }
 
+    /// Forge Jev, el modelo al abrir Claude con un pedido: con el interruptor general, salvo
+    /// que esta parte se apague.
+    pub fn jev_launch(&self) -> bool {
+        self.launch_pref("forge", "jev", None) == "on"
+            && self.launch_pref("forge", "jev_launch", None) != "off"
+    }
+
     /// Lo que se usa al abrir el agente en el proyecto: lo del proyecto si lo hay, si no
     /// lo general. (modelo, esfuerzo).
     pub fn launch_for(&self, program: &str, project: &Path) -> (String, String) {
@@ -99,6 +106,70 @@ impl Store {
         };
         (pick("model"), pick("effort"))
     }
+}
+
+/// Forge Jev: el modelo de Claude para un pedido. Diseño, bugs, investigar o planificar →
+/// `opus`; una tarea corta de git → `haiku`; lo demás → `sonnet`. Medido en sesiones reales,
+/// esta regla da ~80 % del ahorro posible sin bajar nunca de lo que hacía falta (plan #38).
+// ponytail: palabras clave; si la medición de la fase 7 muestra muchos fallos, un modelo.
+pub fn jev_claude_model(prompt: &str) -> &'static str {
+    let text = prompt.to_lowercase();
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let hard_stem = [
+        "diseñ",
+        "design",
+        "architect",
+        "arquitect",
+        "investig",
+        "audit",
+    ];
+    let hard = [
+        "bug",
+        "bugs",
+        "crash",
+        "falla",
+        "fallan",
+        "falló",
+        "fails",
+        "failing",
+        "error",
+        "errores",
+        "plan",
+        "planifica",
+        "planificar",
+        "why",
+    ];
+    let why = words
+        .windows(2)
+        .any(|w| w[0] == "por" && matches!(w[1], "qué" | "que"));
+    if why
+        || words
+            .iter()
+            .any(|w| hard.contains(w) || hard_stem.iter().any(|s| w.starts_with(s)))
+    {
+        return "opus";
+    }
+    let git = [
+        "commit",
+        "push",
+        "pull",
+        "merge",
+        "rebase",
+        "rama",
+        "branch",
+        "pr",
+        "changeset",
+        "tag",
+        "stash",
+        "checkout",
+    ];
+    if prompt.len() < 200 && words.iter().any(|w| git.contains(w)) {
+        return "haiku";
+    }
+    "sonnet"
 }
 
 #[cfg(test)]
@@ -140,6 +211,49 @@ mod tests {
             .set_launch_pref("forge", "jev_chores", None, "off")
             .unwrap();
         assert!(!store.jev_chores());
+    }
+
+    #[test]
+    fn forge_jev_picks_the_claude_model_from_the_prompt() {
+        // Tareas de git cortas: el modelo barato.
+        for p in [
+            "haz commit y push",
+            "abre el PR de esta rama",
+            "merge main into this branch",
+        ] {
+            assert_eq!(jev_claude_model(p), "haiku", "{p}");
+        }
+        // Diseño, bugs que fallan, investigar o planificar: el fuerte.
+        for p in [
+            "¿Por qué falla el login después de actualizar?",
+            "Diseña la arquitectura del sistema de pagos",
+            "Plan a phased migration of the store to SQLite",
+            "investiga este crash en Windows",
+        ] {
+            assert_eq!(jev_claude_model(p), "opus", "{p}");
+        }
+        // Lo demás: el intermedio.
+        for p in [
+            "Añade un botón para exportar a CSV",
+            "rename the field and update the tests",
+        ] {
+            assert_eq!(jev_claude_model(p), "sonnet", "{p}");
+        }
+        // Un commit dentro de un pedido largo no lo vuelve una tarea de git.
+        let long = format!(
+            "{} y luego haz commit",
+            "Implementa la vista de facturas con filtros ".repeat(5)
+        );
+        assert_eq!(jev_claude_model(&long), "sonnet");
+
+        let store = Store::in_memory().unwrap();
+        assert!(!store.jev_launch());
+        store.set_launch_pref("forge", "jev", None, "on").unwrap();
+        assert!(store.jev_launch());
+        store
+            .set_launch_pref("forge", "jev_launch", None, "off")
+            .unwrap();
+        assert!(!store.jev_launch());
     }
 
     #[test]
