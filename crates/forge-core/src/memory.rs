@@ -66,7 +66,12 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
             INSERT INTO memories_fts(memories_fts, rowid, title, body, tags) VALUES ('delete', old.id, old.title, old.body, old.tags);
             INSERT INTO memories_fts(rowid, title, body, tags) VALUES (new.id, new.title, new.body, new.tags);
-        END;",
+        END;
+        CREATE TABLE IF NOT EXISTS memory_reads (
+            memory_id INTEGER PRIMARY KEY,
+            reads     INTEGER NOT NULL,
+            last_read INTEGER NOT NULL
+        );",
     )
 }
 
@@ -120,6 +125,34 @@ fn same_topic(a: &str, b: &str) -> bool {
 }
 
 impl Store {
+    /// Un agente leyó estas memorias (memory_get o un acierto de memory_search). Aparte de
+    /// `memories` para no reindexar la búsqueda en cada lectura.
+    // ponytail: las filas de memorias borradas se quedan; los ids no se reutilizan.
+    pub fn note_memory_reads(&self, ids: &[i64]) -> Result<(), String> {
+        let at = now();
+        for id in ids {
+            self.conn
+                .execute(
+                    "INSERT INTO memory_reads (memory_id, reads, last_read) VALUES (?1, 1, ?2)
+                     ON CONFLICT(memory_id) DO UPDATE SET reads = reads + 1, last_read = ?2",
+                    params![id, at],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Lecturas de cada memoria leída alguna vez: id → (veces, última).
+    pub fn memory_reads(&self) -> Result<std::collections::HashMap<i64, (i64, i64)>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT memory_id, reads, last_read FROM memory_reads")
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([], |r| Ok((r.get(0)?, (r.get(1)?, r.get(2)?))))
+            .and_then(|rows| rows.collect())
+            .map_err(|e| e.to_string())
+    }
+
     pub fn add_memory(
         &self,
         project: &Path,
