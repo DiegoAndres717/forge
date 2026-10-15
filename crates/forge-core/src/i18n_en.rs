@@ -741,8 +741,8 @@ pub const EN: &[(&str, &str)] = &[
     ("código {code}", "exit {code}"),
     ("archivos de su área: {p0}", "files in its area: {p0}"),
     (
-        "{p0} revisores no activados (el diff no toca su área)",
-        "{p0} reviewers not activated (the diff does not touch their area)",
+        "{p0} revisores no activados (el diff no toca su área o el riesgo no los pide)",
+        "{p0} reviewers not activated (the diff does not touch their area or the risk does not call for them)",
     ),
     (
         "no se pudo crear la copia del candidato: {e}",
@@ -996,6 +996,10 @@ pub const EN: &[(&str, &str)] = &[
         "limited change (low or medium risk, few folders)",
     ),
     ("sin rutas configuradas", "no paths configured"),
+    (
+        "Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no es un hallazgo salvo que esconda un defecto.",
+        "Report a finding only if it is a real defect that affects whoever uses the code and that you can defend with concrete evidence from the diff. If in doubt, leave it out. Style is not a finding unless it hides a defect.",
+    ),
     ("Revisor de fiabilidad", "Reliability reviewer"),
     (
         "fiabilidad y tests: cambios de comportamiento sin un test que los cubra, casos límite (vacíos, entradas inválidas, límites, reintentos, rutas de error) y tests que pasan sin probar nada",

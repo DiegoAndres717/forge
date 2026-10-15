@@ -370,7 +370,7 @@ pub fn run(
             }
             if !skipped.is_empty() {
                 let label = tr!(
-                    "{p0} revisores no activados (el diff no toca su área)",
+                    "{p0} revisores no activados (el diff no toca su área o el riesgo no los pide)",
                     p0 = skipped.len()
                 );
                 items.push(item(
