@@ -108,6 +108,47 @@ impl Store {
     }
 }
 
+/// Palabras de la regla de Forge Jev. El mod de Claude Code (register.tsx) tiene las mismas
+/// listas para sugerir el modelo dentro de la sesión; una prueba comprueba que coincidan.
+pub const JEV_HARD_STEMS: [&str; 6] = [
+    "diseñ",
+    "design",
+    "architect",
+    "arquitect",
+    "investig",
+    "audit",
+];
+pub const JEV_HARD: [&str; 14] = [
+    "bug",
+    "bugs",
+    "crash",
+    "falla",
+    "fallan",
+    "falló",
+    "fails",
+    "failing",
+    "error",
+    "errores",
+    "plan",
+    "planifica",
+    "planificar",
+    "why",
+];
+pub const JEV_GIT: [&str; 12] = [
+    "commit",
+    "push",
+    "pull",
+    "merge",
+    "rebase",
+    "rama",
+    "branch",
+    "pr",
+    "changeset",
+    "tag",
+    "stash",
+    "checkout",
+];
+
 /// Forge Jev: el modelo de Claude para un pedido. Diseño, bugs, investigar o planificar →
 /// `opus`; una tarea corta de git → `haiku`; lo demás → `sonnet`. Medido en sesiones reales,
 /// esta regla da ~80 % del ahorro posible sin bajar nunca de lo que hacía falta (plan #38).
@@ -118,55 +159,16 @@ pub fn jev_claude_model(prompt: &str) -> &'static str {
         .split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .collect();
-    let hard_stem = [
-        "diseñ",
-        "design",
-        "architect",
-        "arquitect",
-        "investig",
-        "audit",
-    ];
-    let hard = [
-        "bug",
-        "bugs",
-        "crash",
-        "falla",
-        "fallan",
-        "falló",
-        "fails",
-        "failing",
-        "error",
-        "errores",
-        "plan",
-        "planifica",
-        "planificar",
-        "why",
-    ];
     let why = words
         .windows(2)
         .any(|w| w[0] == "por" && matches!(w[1], "qué" | "que"));
-    if why
-        || words
-            .iter()
-            .any(|w| hard.contains(w) || hard_stem.iter().any(|s| w.starts_with(s)))
-    {
+    let hard = words
+        .iter()
+        .any(|w| JEV_HARD.contains(w) || JEV_HARD_STEMS.iter().any(|s| w.starts_with(s)));
+    if why || hard {
         return "opus";
     }
-    let git = [
-        "commit",
-        "push",
-        "pull",
-        "merge",
-        "rebase",
-        "rama",
-        "branch",
-        "pr",
-        "changeset",
-        "tag",
-        "stash",
-        "checkout",
-    ];
-    if prompt.len() < 200 && words.iter().any(|w| git.contains(w)) {
+    if prompt.len() < 200 && words.iter().any(|w| JEV_GIT.contains(w)) {
         return "haiku";
     }
     "sonnet"
@@ -254,6 +256,12 @@ mod tests {
             .set_launch_pref("forge", "jev_launch", None, "off")
             .unwrap();
         assert!(!store.jev_launch());
+
+        // El mod sugiere el modelo con la misma regla.
+        let module = include_str!("../../../claude-plugin/hooks/register.tsx");
+        for list in [&JEV_HARD_STEMS[..], &JEV_HARD[..], &JEV_GIT[..]] {
+            assert!(module.contains(&format!("{list:?}")), "{list:?}");
+        }
     }
 
     #[test]

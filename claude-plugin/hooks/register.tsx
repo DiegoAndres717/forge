@@ -26,6 +26,8 @@ const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<stri
 const context = atom({ plugin: 'forge', key: 'context' } as const, null as number | null)
 const effort = atom({ plugin: 'forge', key: 'effort' } as const, '')
 /** Searches and reads done by the main loop vs inside subagents (the band shows the share). */
+// Forge Jev: the cheaper model the band suggests for this request ('' = none).
+const jevHint = atom({ plugin: 'forge', key: 'jevHint' } as const, '')
 const delegation = atom({ plugin: 'forge', key: 'delegation' } as const, { main: 0, sub: 0 })
 /** Below this many reads the share says nothing yet. */
 const DELEGATION_FROM = 5
@@ -84,6 +86,23 @@ let exploring = 0
 // one reminder, which says to ignore it for the test being fixed.
 const CHECK_SHELL = /(?:^|&&|;)\s*(?:cargo\s+(?:test|build|clippy|check)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|typecheck|lint)|npx\s+(?:-p\s+\S+\s+)?tsc|tsc|pytest|go\s+(?:test|build|vet)|gradle|\.\/gradlew|mvn|xcodebuild|swift\s+(?:test|build))\b/
 let checkNudged = false
+
+// Forge Jev's rule, the same word lists as crates/forge-core/src/launch.rs (a test checks it).
+const JEV_HARD_STEMS = ["diseñ", "design", "architect", "arquitect", "investig", "audit"]
+const JEV_HARD = ["bug", "bugs", "crash", "falla", "fallan", "falló", "fails", "failing", "error", "errores", "plan", "planifica", "planificar", "why"]
+const JEV_GIT = ["commit", "push", "pull", "merge", "rebase", "rama", "branch", "pr", "changeset", "tag", "stash", "checkout"]
+
+/** opus for design, bugs and plans; haiku for a short git chore; sonnet otherwise. */
+function jevModel(prompt: string) {
+  const words = prompt.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const why = words.some((w, i) => w === 'por' && ['qué', 'que'].includes(words[i + 1] ?? ''))
+  if (why || words.some(w => JEV_HARD.includes(w) || JEV_HARD_STEMS.some(s => w.startsWith(s)))) return 'opus'
+  if (prompt.length < 200 && words.some(w => JEV_GIT.includes(w))) return 'haiku'
+  return 'sonnet'
+}
+// The main loop's model (alias), and whether this session already got its suggestion.
+let mainModel = ''
+let jevOffered = false
 
 /** Models always listed in the band, in this order (others are added when used). */
 const MODELS = ['opus', 'sonnet', 'haiku']
@@ -246,8 +265,9 @@ async function run($: EngineInterface, args: string[]) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    // A new conversation measures its own delegation.
+    // A new conversation measures its own delegation, and gets its own Forge Jev suggestion.
     await countRead($, null)
+    jevOffered = false
     const agents = [
       { name: 'explorer', model: 'haiku', effort: 'low', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
         description: 'Fast, cheap code explorer: where things are, what code does, finding files, symbols and call sites, reading and summarizing several files. Returns a short answer with paths.' },
@@ -362,7 +382,18 @@ export const register: Register = on => {
     exploring = 0
     checkNudged = false
     const text = e.text.trim()
+    if (await read($, jevHint)) await update($, jevHint, () => '')
     if (text.startsWith('/')) return next(e)
+    // Forge Jev: once per session, an Opus/Fable session with a routine request gets a
+    // cheaper model suggested in the band. It never switches by itself.
+    if (!jevOffered && ['opus', 'fable'].includes(mainModel) &&
+      await $.env.get('FORGE_JEV_MODEL').catch(() => undefined) === '1') {
+      const pick = jevModel(text)
+      if (pick !== 'opus') {
+        jevOffered = true
+        await update($, jevHint, () => `/model ${pick}`)
+      }
+    }
     const [found, anchored] = await Promise.all([
       text.length < 12 ? null : forge($, ['memory', 'search', '--brief', text], undefined, 2_000),
       forge($, ['anchor'], undefined, 2_000),
@@ -494,6 +525,7 @@ export const register: Register = on => {
     const result = await next(e)
     const key = e.agentId ?? 'main'
     await update($, active, ({ [key]: _done, ...rest }) => rest)
+    if (e.usage && key === 'main') mainModel = alias(e.usage.model)
     if (e.usage) {
       // Cache reads cost a fraction of new tokens: counted apart so the band is honest.
       const fresh = e.usage.input_tokens + e.usage.output_tokens + e.usage.cache_creation_input_tokens
@@ -535,6 +567,7 @@ export const register: Register = on => {
     const reads = await read($, delegation)
     const total = reads.main + reads.sub
     const delegated = total >= DELEGATION_FROM ? Math.round((reads.sub / total) * 100) : null
+    const hint = await read($, jevHint)
     const now = Date.now()
     const windows = await read($, limits)
     // The Forge account this session runs with (only set when there are several).
@@ -548,7 +581,7 @@ export const register: Register = on => {
     const full = ctx !== null && ctx >= warnAt
     if (
       e.props.hasSurvey ||
-      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null)
+      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null && !hint)
     )
       return next(e)
     const { Text } = $.ui.resolve(e)
@@ -605,6 +638,12 @@ export const register: Register = on => {
             <Text dimColor> · </Text>
             <Text color={ctx >= 85 ? 'error' : 'warning'}>{`context ${ctx}%`}</Text>
             <Text dimColor> /compact</Text>
+          </Text>
+        ) : null}
+        {hint ? (
+          <Text>
+            <Text dimColor> · Forge Jev </Text>
+            <Text color="warning">{hint}</Text>
           </Text>
         ) : null}
         {delegated !== null ? (
