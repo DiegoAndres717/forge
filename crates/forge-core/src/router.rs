@@ -588,7 +588,10 @@ fn prompt_with(role: &str, ctx: &ReviewContext, diff: &str) -> String {
          {{\"verdict\": \"approve\" | \"changes\" | \"block\", \"confidence\": 0.0-1.0, \"risk\": \"low\" | \"medium\" | \"high\", \
          \"summary\": \"una o dos frases en español\", \
          \"findings\": [{{\"severity\": \"info\" | \"warning\" | \"blocking\", \"file\": \"ruta\", \"line\": 0, \"message\": \"en español\"}}]}}\n\
-         Usa \"block\" solo para defectos graves (seguridad, pérdida de datos, roturas seguras).",
+         Usa \"block\" solo para defectos graves (seguridad, pérdida de datos, roturas seguras).\n\
+         Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que \
+         puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no \
+         es un hallazgo salvo que esconda un defecto.",
         ctx.project,
         ctx.stage.label(),
         ctx.risk.level.label(),
@@ -1558,6 +1561,10 @@ mod tests {
             "el secreto no debe salir hacia el modelo"
         );
         assert!(!sent.contains("SECRET=1"), ".env no debe enviarse");
+        assert!(
+            sent.contains("Si dudas, no lo reportes"),
+            "filtro de precisión en el prompt"
+        );
 
         // Con el presupuesto casi agotado no se llama a proveedores de pago.
         config.monthly_budget_usd = 0.15;

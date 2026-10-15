@@ -996,6 +996,25 @@ pub const EN: &[(&str, &str)] = &[
         "limited change (low or medium risk, few folders)",
     ),
     ("sin rutas configuradas", "no paths configured"),
+    ("Revisor de fiabilidad", "Reliability reviewer"),
+    (
+        "fiabilidad y tests: cambios de comportamiento sin un test que los cubra, casos límite (vacíos, entradas inválidas, límites, reintentos, rutas de error) y tests que pasan sin probar nada",
+        "reliability and tests: behavior changes with no test covering them, edge cases (empty, invalid input, boundaries, retries, error paths) and tests that pass without testing anything",
+    ),
+    ("Revisor de legibilidad", "Readability reviewer"),
+    (
+        "legibilidad: lógica duplicada, código muerto, números mágicos, nombres que esconden la intención y funciones demasiado largas o con demasiados parámetros",
+        "readability: duplicated logic, dead code, magic numbers, names that hide intent and functions that are too long or take too many parameters",
+    ),
+    ("Revisor de resiliencia", "Resilience reviewer"),
+    (
+        "resiliencia: fallos sin manejar o tragados en silencio, operaciones sin forma de deshacer, falta de registro donde un fallo pasaría inadvertido, tiempos de espera y reintentos",
+        "resilience: unhandled or silently swallowed failures, operations with no way to undo, missing logging where a failure would go unnoticed, timeouts and retries",
+    ),
+    (
+        "el riesgo del cambio no pide esta lente",
+        "the change's risk does not call for this lens",
+    ),
     ("{p0} archivos cambiados", "{p0} files changed"),
     ("{lines} líneas", "{lines} lines"),
     (
