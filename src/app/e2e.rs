@@ -1555,6 +1555,18 @@ fn renaming_a_new_account_is_cheap() {
     let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
     h.state_mut()
         .apply(&ctx, UiCmd::AccountAdd("claude".into()), area);
+    // Las cuentas solo se ven con `claude` instalado (en CI no lo está): tras la detección
+    // de fondo, que no lo vuelva a pisar.
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.state().agents.lock().unwrap().insert(
+        "claude".into(),
+        agents::Detection {
+            path: Some("/usr/local/bin/claude".into()),
+            version: None,
+        },
+    );
     h.key_press_modifiers(CMD, Key::Comma);
     h.run_steps(3);
     h.get_by_label_contains("Agentes").click();
