@@ -24,6 +24,28 @@ pub enum Detector {
     Security,
     Database,
     Frontend,
+    /// Lente general (todo el diff), según la profundidad que pide el riesgo.
+    Lens,
+}
+
+/// Profundidad de la revisión según el riesgo: ligera sin lentes, estándar con la de
+/// fiabilidad, completa con todas.
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+pub enum Depth {
+    Light,
+    Standard,
+    Full,
+}
+
+/// Lentes generales en el orden en que se activan (la primera ya en profundidad estándar).
+pub const LENSES: [&str; 3] = ["reliability", "readability", "resilience"];
+
+pub fn depth(risk: &Risk) -> Depth {
+    match risk.level {
+        RiskLevel::Low => Depth::Light,
+        RiskLevel::Medium => Depth::Standard,
+        RiskLevel::High | RiskLevel::Critical => Depth::Full,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -96,6 +118,36 @@ pub fn builtins() -> Vec<ReviewerSpec> {
             Detector::Frontend,
             tr!(
                 "frontend: accesibilidad (contraste, foco, etiquetas), regresiones visuales, estado, rendimiento de renderizado y textos"
+            ),
+        ),
+        reviewer(
+            "reliability",
+            tr!("Revisor de fiabilidad"),
+            Tier::Balanced,
+            false,
+            Detector::Lens,
+            tr!(
+                "fiabilidad y tests: cambios de comportamiento sin un test que los cubra, casos límite (vacíos, entradas inválidas, límites, reintentos, rutas de error) y tests que pasan sin probar nada"
+            ),
+        ),
+        reviewer(
+            "readability",
+            tr!("Revisor de legibilidad"),
+            Tier::Cheap,
+            false,
+            Detector::Lens,
+            tr!(
+                "legibilidad: lógica duplicada, código muerto, números mágicos, nombres que esconden la intención y funciones demasiado largas o con demasiados parámetros"
+            ),
+        ),
+        reviewer(
+            "resilience",
+            tr!("Revisor de resiliencia"),
+            Tier::Balanced,
+            false,
+            Detector::Lens,
+            tr!(
+                "resiliencia: fallos sin manejar o tragados en silencio, operaciones sin forma de deshacer, falta de registro donde un fallo pasaría inadvertido, tiempos de espera y reintentos"
             ),
         ),
     ]
@@ -269,6 +321,18 @@ pub fn activate(
                         tr!("cambio acotado (riesgo bajo o medio, pocas carpetas)"),
                     )
                 }
+                Some(Detector::Lens) => {
+                    let rank = LENSES.iter().position(|l| *l == r.id).unwrap_or(0);
+                    let on = match depth(risk) {
+                        Depth::Light => false,
+                        Depth::Standard => rank == 0,
+                        Depth::Full => true,
+                    };
+                    (
+                        if on { pick(&|_| true) } else { Vec::new() },
+                        tr!("el riesgo del cambio no pide esta lente"),
+                    )
+                }
                 None => (Vec::new(), tr!("sin rutas configuradas")),
             }
         };
@@ -348,6 +412,45 @@ mod tests {
         assert!(
             active.iter().any(|a| a.reviewer.id == "architecture"),
             "riesgo alto activa arquitectura"
+        );
+    }
+
+    #[test]
+    fn lenses_follow_the_risk_depth() {
+        let at = |level| Risk {
+            score: 0,
+            level,
+            signals: vec![],
+            security: false,
+        };
+        assert_eq!(depth(&at(RiskLevel::Low)), Depth::Light);
+        assert_eq!(depth(&at(RiskLevel::Medium)), Depth::Standard);
+        assert_eq!(depth(&at(RiskLevel::High)), Depth::Full);
+        assert_eq!(depth(&at(RiskLevel::Critical)), Depth::Full);
+
+        let lenses = |level| {
+            let (active, skipped) = activate(&builtins(), &[file("src/lib/fechas.ts")], &at(level));
+            let ids: Vec<String> = active
+                .into_iter()
+                .map(|a| a.reviewer.id)
+                .filter(|id| LENSES.contains(&id.as_str()))
+                .collect();
+            (ids, skipped)
+        };
+        // Riesgo bajo: ninguna lente (no se gasta en cambios pequeños).
+        let (ids, skipped) = lenses(RiskLevel::Low);
+        assert!(ids.is_empty());
+        assert!(
+            skipped
+                .iter()
+                .any(|(n, why)| n.contains("fiabilidad") && why.contains("no pide esta lente"))
+        );
+        // Medio: solo la de fiabilidad (tests y casos límite), con todos los archivos.
+        assert_eq!(lenses(RiskLevel::Medium).0, ["reliability"]);
+        // Alto: todas.
+        assert_eq!(
+            lenses(RiskLevel::High).0,
+            ["reliability", "readability", "resilience"]
         );
     }
 

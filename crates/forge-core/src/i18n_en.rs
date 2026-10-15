@@ -741,8 +741,8 @@ pub const EN: &[(&str, &str)] = &[
     ("código {code}", "exit {code}"),
     ("archivos de su área: {p0}", "files in its area: {p0}"),
     (
-        "{p0} revisores no activados (el diff no toca su área)",
-        "{p0} reviewers not activated (the diff does not touch their area)",
+        "{p0} revisores no activados (el diff no toca su área o el riesgo no los pide)",
+        "{p0} reviewers not activated (the diff does not touch their area or the risk does not call for them)",
     ),
     (
         "no se pudo crear la copia del candidato: {e}",
@@ -996,6 +996,29 @@ pub const EN: &[(&str, &str)] = &[
         "limited change (low or medium risk, few folders)",
     ),
     ("sin rutas configuradas", "no paths configured"),
+    (
+        "Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no es un hallazgo salvo que esconda un defecto.",
+        "Report a finding only if it is a real defect that affects whoever uses the code and that you can defend with concrete evidence from the diff. If in doubt, leave it out. Style is not a finding unless it hides a defect.",
+    ),
+    ("Revisor de fiabilidad", "Reliability reviewer"),
+    (
+        "fiabilidad y tests: cambios de comportamiento sin un test que los cubra, casos límite (vacíos, entradas inválidas, límites, reintentos, rutas de error) y tests que pasan sin probar nada",
+        "reliability and tests: behavior changes with no test covering them, edge cases (empty, invalid input, boundaries, retries, error paths) and tests that pass without testing anything",
+    ),
+    ("Revisor de legibilidad", "Readability reviewer"),
+    (
+        "legibilidad: lógica duplicada, código muerto, números mágicos, nombres que esconden la intención y funciones demasiado largas o con demasiados parámetros",
+        "readability: duplicated logic, dead code, magic numbers, names that hide intent and functions that are too long or take too many parameters",
+    ),
+    ("Revisor de resiliencia", "Resilience reviewer"),
+    (
+        "resiliencia: fallos sin manejar o tragados en silencio, operaciones sin forma de deshacer, falta de registro donde un fallo pasaría inadvertido, tiempos de espera y reintentos",
+        "resilience: unhandled or silently swallowed failures, operations with no way to undo, missing logging where a failure would go unnoticed, timeouts and retries",
+    ),
+    (
+        "el riesgo del cambio no pide esta lente",
+        "the change's risk does not call for this lens",
+    ),
     ("{p0} archivos cambiados", "{p0} files changed"),
     ("{lines} líneas", "{lines} lines"),
     (
