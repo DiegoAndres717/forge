@@ -2457,6 +2457,18 @@ pub const EN: &[(&str, &str)] = &[
         "Test que falla antes del código (TDD)",
         "Failing test before the code (TDD)",
     ),
+    (
+        "Manda cada trabajo al modelo más barato que lo hace bien. Medido en sesiones reales: commits, push, ramas y PR son una cuarta parte del gasto, porque cada paso relee toda la conversación con el modelo caro; un subagente barato empieza con un contexto pequeño. Apagado de serie; se aplica a los agentes que abras a partir de ahora. En Codex, Gemini, OpenCode y Qwen hace falta tener añadidos los subagentes.",
+        "Sends each job to the cheapest model that does it well. Measured on real sessions: commits, pushes, branches and PRs are a quarter of the spend, because every step re-reads the whole conversation on the expensive model; a cheap subagent starts with a small context. Off by default; applies to the agents you open from now on. Codex, Gemini, OpenCode and Qwen need the subagents added.",
+    ),
+    (
+        "Elegir el modelo más barato que sirva",
+        "Pick the cheapest model that works",
+    ),
+    (
+        "Tareas de git a un subagente barato (forge-chores)",
+        "Git chores to a cheap subagent (forge-chores)",
+    ),
     ("Siempre", "Always"),
     ("Nunca", "Never"),
     ("Última sesión de {name}:", "Last session in {name}:"),

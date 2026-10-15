@@ -924,6 +924,9 @@ impl Workspace {
         if self.modes.tests_first {
             env.insert("FORGE_TESTS_FIRST".into(), "1".into());
         }
+        if self.modes.jev_chores {
+            env.insert("FORGE_JEV_CHORES".into(), "1".into());
+        }
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
@@ -3096,9 +3099,11 @@ mod agent_tests {
         ws.set_modes(forge_core::mcp::Modes {
             ask_first: true,
             tests_first: true,
+            jev_chores: true,
         });
         assert!(args(&ws).contains(&"--ask-first".to_string()));
         assert!(args(&ws).contains(&"--tests-first".to_string()));
+        assert!(args(&ws).contains(&"--jev-chores".to_string()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

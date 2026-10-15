@@ -1,5 +1,5 @@
 import type { AgentSpawnInput, CommandRunInput, RenderPropsOf, TurnCompleteInput, TurnStepInput, TurnUsage } from 'claude-code'
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 // The engine fills in the fields a test leaves out (ids, origin, parent model…).
 const spawn = (fields: Partial<AgentSpawnInput>) => fields as AgentSpawnInput
@@ -136,6 +136,39 @@ test('tests first adds its instruction only when it is on', async ($, on) => {
   const section = result.sections.find(s => s.id === 'forge-tests-first')
   expect(section?.text).toContain('fails for the right reason')
   expect(result.sections.map(s => s.id)).not.toContain('forge-ask-first')
+})
+
+// Forge Jev on or off: the chores subagent, and its policy in the system prompt.
+async function jevSession($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], env: Record<string, string>) {
+  // The engine's side of what the session start and compose ask for.
+  on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+  on('command.register', () => ({ value: {} }) as never)
+  on('prompt.compose', () => ({ sections: [] }))
+  const registered: string[] = []
+  on('agent.register', ($, e) => {
+    registered.push(e.name)
+    return { value: {} } as never
+  })
+  mock.env(on, env)
+  await $.session.start({ cwd: '/p', surface: 'terminal', isInteractive: true })
+  const { sections } = await $.prompt.compose({
+    model: 'claude-sonnet-5-5', promptModel: 'claude-sonnet-5-5', surfaces: ['terminal'],
+    tools: [], outputStyle: null, traits: [],
+  })
+  return { registered, chores: sections.find(s => s.id === 'forge-jev-chores') }
+}
+
+test('without Forge Jev there is no chores subagent', async ($, on) => {
+  const { registered, chores } = await jevSession($, on, {})
+  expect(registered).toContain('explorer')
+  expect(registered).not.toContain('chores')
+  expect(chores).toBeUndefined()
+})
+
+test('Forge Jev hands git chores to a cheap subagent', async ($, on) => {
+  const { registered, chores } = await jevSession($, on, { FORGE_JEV_CHORES: '1' })
+  expect(registered).toContain('chores')
+  expect(chores?.text).toContain('forge:chores')
 })
 
 test('the band brands Forge with its symbol and an orange gradient', async ($, on) => {

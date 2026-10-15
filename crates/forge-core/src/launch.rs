@@ -79,6 +79,13 @@ impl Store {
         value == "on"
     }
 
+    /// Forge Jev, tareas de git a un subagente barato: con el interruptor general encendido,
+    /// salvo que esta parte se apague. Apagado de serie.
+    pub fn jev_chores(&self) -> bool {
+        self.launch_pref("forge", "jev", None) == "on"
+            && self.launch_pref("forge", "jev_chores", None) != "off"
+    }
+
     /// Lo que se usa al abrir el agente en el proyecto: lo del proyecto si lo hay, si no
     /// lo general. (modelo, esfuerzo).
     pub fn launch_for(&self, program: &str, project: &Path) -> (String, String) {
@@ -111,6 +118,28 @@ mod tests {
             .unwrap();
         assert!(!store.tests_first(a), "el proyecto manda");
         assert!(store.tests_first(b), "otro proyecto: lo general");
+    }
+
+    #[test]
+    fn forge_jev_is_off_by_default_and_its_parts_need_the_master_switch() {
+        let store = Store::in_memory().unwrap();
+        assert!(!store.jev_chores());
+        // Encender la parte sola no basta: manda el interruptor general.
+        store
+            .set_launch_pref("forge", "jev_chores", None, "on")
+            .unwrap();
+        assert!(!store.jev_chores());
+        store.set_launch_pref("forge", "jev", None, "on").unwrap();
+        assert!(store.jev_chores());
+        // Con Forge Jev encendido, cada parte está encendida salvo que se apague.
+        store
+            .set_launch_pref("forge", "jev_chores", None, "")
+            .unwrap();
+        assert!(store.jev_chores());
+        store
+            .set_launch_pref("forge", "jev_chores", None, "off")
+            .unwrap();
+        assert!(!store.jev_chores());
     }
 
     #[test]

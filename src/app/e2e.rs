@@ -721,6 +721,34 @@ fn settings_tabs_show_their_options_with_help() {
     assert!(h.query_by_label_contains("Idioma").is_none());
 }
 
+/// Forge Jev se enciende en Ajustes → Agentes, apagado de serie, y llega a los agentes que
+/// se abran después (FORGE_JEV_CHORES / --jev-chores).
+#[test]
+fn forge_jev_is_off_by_default_and_turns_on_from_settings() {
+    let _serial = serial();
+    let dir = project("forge-jev");
+    let mut h = app(dir.clone());
+    assert!(!h.state().modes(&dir).jev_chores);
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Tareas de git a un subagente barato")
+            .is_none(),
+        "la parte se ve solo con Forge Jev encendido"
+    );
+    h.get_by_label("Elegir el modelo más barato que sirva")
+        .click();
+    h.run_steps(3);
+    assert!(h.state().modes(&dir).jev_chores);
+    // Apagar la parte la quita aunque Forge Jev siga encendido.
+    h.get_by_label_contains("Tareas de git a un subagente barato")
+        .click();
+    h.run_steps(3);
+    assert!(!h.state().modes(&dir).jev_chores);
+}
+
 #[test]
 fn an_agent_that_only_redraws_does_not_raise_an_alert() {
     let _serial = serial();

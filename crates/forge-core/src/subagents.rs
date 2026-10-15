@@ -31,6 +31,25 @@ report the cause, not the full log.
     ),
 ];
 
+/// Forge Jev: las tareas de git y GitHub en un modelo barato. Empieza con un contexto pequeño,
+/// así que un commit o un PR cuesta una fracción de hacerlo en la sesión principal. Solo se
+/// instala con Forge Jev encendido; el mod de Claude Code registra el mismo texto.
+pub const CHORES: (&str, &str, &str, &str) = (
+    "forge-chores",
+    "Cheap git and GitHub chores: commit, push, pull, branch, merge, rebase, changesets, opening or updating a pull request with gh. Give it the exact intent (message, branch, title and body); it runs the commands and reports the result. Use it instead of doing these chores yourself.",
+    "You do git and GitHub chores for a senior engineer: commits, pushes, pulls, branches,
+merges, rebases, changesets and pull requests (gh).
+- Do exactly what you were asked, with the message, branch and texts you were given.
+  Do not edit source files.
+- Follow the repository's rules for commits and pull requests (AGENTS.md, CLAUDE.md,
+  CONTRIBUTING) when they exist.
+- Never force-push, rewrite shared history, delete branches or skip hooks unless you
+  were told to.
+- If a hook, a check or a merge fails, stop and report the error; do not fix code.
+- Reply briefly: what you ran and the result (commit hash, pull request URL, error).",
+    "low",
+);
+
 /// Gemini: el modelo rápido.
 // ponytail: id fijo; si Google lo retira, cambiarlo aquí (o leerlo de `gemini` si un día
 // publica su catálogo como `codex debug models`).
@@ -82,9 +101,11 @@ pub fn cheap_codex_model(catalog: &str) -> Option<String> {
 
 /// Los archivos de cada subagente: (nombre de archivo, contenido).
 /// `model`: el de los subagentes (Codex sin él hereda el principal; Gemini, el de serie).
-pub fn files(agent: Agent, model: Option<&str>) -> Vec<(String, String)> {
+/// `chores`: con Forge Jev, también el de las tareas de git.
+pub fn files(agent: Agent, model: Option<&str>, chores: bool) -> Vec<(String, String)> {
     AGENTS
         .iter()
+        .chain(chores.then_some(&CHORES))
         .map(|(name, description, prompt, effort)| {
             let text = match agent {
                 // Las cadenas van como JSON, que también es una cadena TOML válida.
@@ -134,7 +155,7 @@ pub fn files(agent: Agent, model: Option<&str>) -> Vec<(String, String)> {
         .collect()
 }
 
-pub fn install(agent: Agent, home: &Path, model: Option<&str>) -> Result<(), String> {
+pub fn install(agent: Agent, home: &Path, model: Option<&str>, chores: bool) -> Result<(), String> {
     // Un nombre de modelo («gpt-5-mini», «gemini-3-flash-preview»): nada que pueda meter
     // campos en el TOML o en la cabecera YAML.
     if let Some(m) = model
@@ -148,15 +169,19 @@ pub fn install(agent: Agent, home: &Path, model: Option<&str>) -> Result<(), Str
     }
     let dir = agent.dir(home);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    for (file, text) in files(agent, model) {
+    for (file, text) in files(agent, model, chores) {
         std::fs::write(dir.join(file), text).map_err(|e| e.to_string())?;
+    }
+    let stale = dir.join(agent.file(CHORES.0));
+    if !chores && stale.exists() {
+        std::fs::remove_file(stale).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 /// Borra solo los archivos de Forge.
 pub fn remove(agent: Agent, home: &Path) -> Result<(), String> {
-    for (name, ..) in AGENTS {
+    for (name, ..) in AGENTS.iter().chain([&CHORES]) {
         let path = agent.dir(home).join(agent.file(name));
         if path.exists() {
             std::fs::remove_file(path).map_err(|e| e.to_string())?;
@@ -197,7 +222,7 @@ mod tests {
             std::env::temp_dir().join(format!("forge-subagents-more-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         for agent in [Agent::OpenCode, Agent::Qwen] {
-            install(agent, &home, None).unwrap();
+            install(agent, &home, None, false).unwrap();
             assert!(installed(agent, &home));
         }
         let opencode =
@@ -210,7 +235,7 @@ mod tests {
         // Qwen trae un alias para su modelo rápido; OpenCode sin modelo hereda el suyo.
         assert_eq!(installed_model(Agent::Qwen, &home).as_deref(), Some("fast"));
         assert_eq!(installed_model(Agent::OpenCode, &home), None);
-        install(Agent::OpenCode, &home, Some("opencode/big-pickle")).unwrap();
+        install(Agent::OpenCode, &home, Some("opencode/big-pickle"), false).unwrap();
         assert_eq!(
             installed_model(Agent::OpenCode, &home).as_deref(),
             Some("opencode/big-pickle")
@@ -223,32 +248,59 @@ mod tests {
     }
 
     #[test]
+    fn the_chores_subagent_comes_only_with_forge_jev() {
+        let home =
+            std::env::temp_dir().join(format!("forge-subagent-chores-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let chores = |agent: Agent| agent.dir(&home).join(agent.file(CHORES.0));
+        for agent in [Agent::Codex, Agent::Gemini, Agent::OpenCode, Agent::Qwen] {
+            install(agent, &home, None, false).unwrap();
+            assert!(installed(agent, &home) && !chores(agent).exists());
+            install(agent, &home, None, true).unwrap();
+            let text = std::fs::read_to_string(chores(agent)).unwrap();
+            // Codex lo guarda escapado (JSON) y OpenCode toma el nombre del archivo: basta la
+            // primera frase.
+            assert!(text.contains("You do git and GitHub chores"), "{text}");
+            // Apagarlo lo quita; quitar los subagentes se lo lleva también.
+            install(agent, &home, None, false).unwrap();
+            assert!(!chores(agent).exists());
+            install(agent, &home, None, true).unwrap();
+            remove(agent, &home).unwrap();
+            assert!(!chores(agent).exists() && !installed(agent, &home));
+        }
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn the_installed_model_can_be_read_and_chosen_by_hand() {
         let home =
             std::env::temp_dir().join(format!("forge-subagent-model-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
         // Codex sin modelo barato en el catálogo: hereda el principal (y Ajustes avisa).
-        install(Agent::Codex, &home, None).unwrap();
+        install(Agent::Codex, &home, None, false).unwrap();
         assert_eq!(installed_model(Agent::Codex, &home), None);
-        install(Agent::Codex, &home, Some("gpt-mini")).unwrap();
+        install(Agent::Codex, &home, Some("gpt-mini"), false).unwrap();
         assert_eq!(
             installed_model(Agent::Codex, &home).as_deref(),
             Some("gpt-mini")
         );
         // Gemini: el de serie, o el que se elija.
-        install(Agent::Gemini, &home, None).unwrap();
+        install(Agent::Gemini, &home, None, false).unwrap();
         assert_eq!(
             installed_model(Agent::Gemini, &home).as_deref(),
             Some(GEMINI_MODEL)
         );
-        install(Agent::Gemini, &home, Some("gemini-x-lite")).unwrap();
+        install(Agent::Gemini, &home, Some("gemini-x-lite"), false).unwrap();
         assert_eq!(
             installed_model(Agent::Gemini, &home).as_deref(),
             Some("gemini-x-lite")
         );
         // Un nombre de modelo, no texto libre: no puede meter campos en el archivo.
         for bad in ["x\nsandbox: none", "a: b", "", "# nada"] {
-            assert!(install(Agent::Gemini, &home, Some(bad)).is_err(), "{bad:?}");
+            assert!(
+                install(Agent::Gemini, &home, Some(bad), false).is_err(),
+                "{bad:?}"
+            );
         }
         assert_eq!(
             installed_model(Agent::Gemini, &home).as_deref(),
@@ -279,7 +331,7 @@ mod tests {
             assert!(!installed(agent, &home));
             // El modelo de Codex; Gemini se queda con el de serie.
             let model = matches!(agent, Agent::Codex).then_some("gpt-6-luna");
-            install(agent, &home, model).unwrap();
+            install(agent, &home, model, false).unwrap();
             assert!(installed(agent, &home));
         }
         let codex =

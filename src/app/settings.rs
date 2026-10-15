@@ -288,6 +288,7 @@ impl App {
                 },
             );
             self.tests_first_ui(ui);
+            self.jev_ui(ui);
         });
         if ask != self.settings.ask_first {
             self.settings.ask_first = ask;
@@ -387,6 +388,57 @@ impl App {
         }
     }
 
+    /// Forge Jev: el modelo más barato que sirva para cada trabajo. Cada parte aparece con su
+    /// función (hoy, las tareas de git a un subagente barato).
+    fn jev_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let mut on = store.launch_pref("forge", "jev", None) == "on";
+        let mut chores = store.launch_pref("forge", "jev_chores", None) != "off";
+        let (was_on, was_chores) = (on, chores);
+        row(
+            ui,
+            "Forge Jev",
+            tr!(
+                "Manda cada trabajo al modelo más barato que lo hace bien. Medido en sesiones reales: commits, push, ramas y PR son una cuarta parte del gasto, porque cada paso relee toda la conversación con el modelo caro; un subagente barato empieza con un contexto pequeño. Apagado de serie; se aplica a los agentes que abras a partir de ahora. En Codex, Gemini, OpenCode y Qwen hace falta tener añadidos los subagentes."
+            ),
+            |ui| {
+                ui.checkbox(&mut on, tr!("Elegir el modelo más barato que sirva"));
+                if on {
+                    ui.checkbox(
+                        &mut chores,
+                        tr!("Tareas de git a un subagente barato (forge-chores)"),
+                    );
+                }
+            },
+        );
+        if (on, chores) == (was_on, was_chores) {
+            return;
+        }
+        let saved = store
+            .set_launch_pref("forge", "jev", None, if on { "on" } else { "off" })
+            .and_then(|()| {
+                store.set_launch_pref("forge", "jev_chores", None, if chores { "" } else { "off" })
+            });
+        // Los subagentes ya añadidos ganan o pierden forge-chores, con el mismo modelo.
+        let chores = store.jev_chores();
+        let refreshed = forge_core::home_dir().map_or(Ok(()), |home| {
+            use forge_core::subagents::{self, Agent};
+            [Agent::Codex, Agent::Gemini, Agent::OpenCode, Agent::Qwen]
+                .into_iter()
+                .filter(|a| subagents::installed(*a, &home))
+                .try_for_each(|a| {
+                    let model = subagents::installed_model(a, &home);
+                    subagents::install(a, &home, model.as_deref(), chores)
+                })
+        });
+        if let Err(e) = saved.and(refreshed) {
+            self.error = Some(e);
+        }
+        self.sync_accounts();
+    }
+
     /// Los comandos de Forge en Codex (`$forge-plans`…): skills en ~/.codex/skills,
     /// solo si el usuario lo pide (es su carpeta; las demás cuentas la comparten).
     fn codex_skills_ui(&mut self, ui: &mut egui::Ui, codex: &std::path::Path) {
@@ -426,6 +478,7 @@ impl App {
             return;
         };
         let installed = subagents::installed(agent, &home);
+        let chores = self.store.as_ref().is_some_and(|s| s.jev_chores());
         let mut result = None;
         // Tras instalar o quitar, el campo vuelve a mostrar el modelo instalado.
         let mut reseed = false;
@@ -472,7 +525,7 @@ impl App {
                             )
                             .clicked()
                         {
-                            result = Some(subagents::install(agent, &home, Some(&wanted)));
+                            result = Some(subagents::install(agent, &home, Some(&wanted), chores));
                             reseed = true;
                         }
                     });
@@ -492,7 +545,7 @@ impl App {
                         .and_then(|o| {
                             subagents::cheap_codex_model(&String::from_utf8_lossy(&o.stdout))
                         });
-                    result = Some(subagents::install(agent, &home, model.as_deref()));
+                    result = Some(subagents::install(agent, &home, model.as_deref(), chores));
                 }
             },
         );
