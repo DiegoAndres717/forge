@@ -1170,7 +1170,9 @@ mod tests {
         assert!(instructions(chores).contains(CHORES_DELEGATE));
         assert_eq!(Modes::from_args(&chores.args()), chores);
         // El mod de Claude Code dice lo mismo que el servidor, y registra el mismo subagente.
-        let module = include_str!("../../../claude-plugin/hooks/register.tsx");
+        // En Windows el checkout puede traerlo con CRLF; el texto de varias líneas, no.
+        let module =
+            include_str!("../../../claude-plugin/hooks/register.tsx").replace("\r\n", "\n");
         assert!(module.contains(TESTS_FIRST));
         assert!(module.contains(CHORES_DELEGATE));
         assert!(module.contains(crate::subagents::CHORES.2));
