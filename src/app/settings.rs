@@ -965,7 +965,10 @@ fn account_row(
         if edit.lost_focus() {
             if !text.trim().is_empty() && text.trim() != a.name {
                 cmds.push(UiCmd::AccountRename(program.into(), a.id, text.clone()));
-                ui.data_mut(|d| d.insert_temp(saved, ui.input(|i| i.time)));
+                // La hora antes: `ui.input` dentro de `data_mut` vuelve a pedir el cerrojo
+                // del contexto y Forge se queda esperándose a sí mismo.
+                let now = ui.input(|i| i.time);
+                ui.data_mut(|d| d.insert_temp(saved, now));
             }
             ui.data_mut(|d| d.remove::<String>(id));
         }
