@@ -930,8 +930,13 @@ impl Workspace {
         if self.modes.jev_chores {
             env.insert("FORGE_JEV_CHORES".into(), "1".into());
         }
-        // El mod sugiere en la banda un modelo más barato para un pedido rutinario.
-        if self.jev_launch {
+        // El mod sugiere en la banda un modelo más barato para un pedido rutinario, salvo que
+        // el usuario eligiera el modelo de Claude en Ajustes.
+        let chosen = self
+            .launch
+            .get("claude")
+            .is_some_and(|(m, _)| !m.is_empty());
+        if self.jev_launch && !chosen {
             env.insert("FORGE_JEV_MODEL".into(), "1".into());
         }
         if let Some(spec) = &spec {

@@ -110,31 +110,45 @@ impl Store {
 
 /// Palabras de la regla de Forge Jev. El mod de Claude Code (register.tsx) tiene las mismas
 /// listas para sugerir el modelo dentro de la sesión; una prueba comprueba que coincidan.
-pub const JEV_HARD_STEMS: [&str; 6] = [
+pub const JEV_HARD_STEMS: &[&str] = &[
     "diseñ",
     "design",
     "architect",
     "arquitect",
     "investig",
     "audit",
+    "migra",
+    "refactor",
 ];
-pub const JEV_HARD: [&str; 14] = [
+pub const JEV_HARD: &[&str] = &[
     "bug",
     "bugs",
     "crash",
     "falla",
     "fallan",
     "falló",
+    "fallo",
+    "fallos",
     "fails",
     "failing",
     "error",
     "errores",
+    "broken",
+    "roto",
+    "rota",
+    "regression",
+    "regresión",
+    "deadlock",
+    "race",
     "plan",
+    "plans",
+    "planes",
     "planifica",
     "planificar",
     "why",
 ];
-pub const JEV_GIT: [&str; 12] = [
+/// Haiku pide al menos dos distintas: «merge sort» o «checkout button» no son tareas de git.
+pub const JEV_GIT: &[&str] = &[
     "commit",
     "push",
     "pull",
@@ -150,7 +164,7 @@ pub const JEV_GIT: [&str; 12] = [
 ];
 
 /// Forge Jev: el modelo de Claude para un pedido. Diseño, bugs, investigar o planificar →
-/// `opus`; una tarea corta de git → `haiku`; lo demás → `sonnet`. Medido en sesiones reales,
+/// `opus`; una tarea corta de git (dos palabras de git o más) → `haiku`; lo demás → `sonnet`. Medido en sesiones reales,
 /// esta regla da ~80 % del ahorro posible sin bajar nunca de lo que hacía falta (plan #38).
 // ponytail: palabras clave; si la medición de la fase 7 muestra muchos fallos, un modelo.
 pub fn jev_claude_model(prompt: &str) -> &'static str {
@@ -168,7 +182,10 @@ pub fn jev_claude_model(prompt: &str) -> &'static str {
     if why || hard {
         return "opus";
     }
-    if prompt.len() < 200 && words.iter().any(|w| JEV_GIT.contains(w)) {
+    let mut git: Vec<&&str> = words.iter().filter(|w| JEV_GIT.contains(w)).collect();
+    git.sort();
+    git.dedup();
+    if prompt.chars().count() < 200 && git.len() >= 2 {
         return "haiku";
     }
     "sonnet"
@@ -241,6 +258,25 @@ mod tests {
         ] {
             assert_eq!(jev_claude_model(p), "sonnet", "{p}");
         }
+        // Una sola palabra de git en un pedido normal no lo manda a Haiku (revisión).
+        for p in [
+            "Add a tag field to the product form",
+            "fix the checkout button color",
+            "implement merge sort",
+            "add pull-to-refresh",
+            "implement push notifications",
+            "Añade un campo rama al formulario",
+        ] {
+            assert_eq!(jev_claude_model(p), "sonnet", "{p}");
+        }
+        // Un defecto pesa más que la tarea de git.
+        for p in [
+            "merge and fix the broken test",
+            "push el arreglo de la regresión",
+            "migra la base a Postgres",
+        ] {
+            assert_eq!(jev_claude_model(p), "opus", "{p}");
+        }
         // Un commit dentro de un pedido largo no lo vuelve una tarea de git.
         let long = format!(
             "{} y luego haz commit",
@@ -259,7 +295,7 @@ mod tests {
 
         // El mod sugiere el modelo con la misma regla.
         let module = include_str!("../../../claude-plugin/hooks/register.tsx");
-        for list in [&JEV_HARD_STEMS[..], &JEV_HARD[..], &JEV_GIT[..]] {
+        for list in [JEV_HARD_STEMS, JEV_HARD, JEV_GIT] {
             assert!(module.contains(&format!("{list:?}")), "{list:?}");
         }
     }

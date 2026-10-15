@@ -88,16 +88,16 @@ const CHECK_SHELL = /(?:^|&&|;)\s*(?:cargo\s+(?:test|build|clippy|check)|(?:npm|
 let checkNudged = false
 
 // Forge Jev's rule, the same word lists as crates/forge-core/src/launch.rs (a test checks it).
-const JEV_HARD_STEMS = ["diseñ", "design", "architect", "arquitect", "investig", "audit"]
-const JEV_HARD = ["bug", "bugs", "crash", "falla", "fallan", "falló", "fails", "failing", "error", "errores", "plan", "planifica", "planificar", "why"]
+const JEV_HARD_STEMS = ["diseñ", "design", "architect", "arquitect", "investig", "audit", "migra", "refactor"]
+const JEV_HARD = ["bug", "bugs", "crash", "falla", "fallan", "falló", "fallo", "fallos", "fails", "failing", "error", "errores", "broken", "roto", "rota", "regression", "regresión", "deadlock", "race", "plan", "plans", "planes", "planifica", "planificar", "why"]
 const JEV_GIT = ["commit", "push", "pull", "merge", "rebase", "rama", "branch", "pr", "changeset", "tag", "stash", "checkout"]
 
-/** opus for design, bugs and plans; haiku for a short git chore; sonnet otherwise. */
+/** opus for design, bugs and plans; haiku for a short git chore (two git words or more); sonnet otherwise. */
 function jevModel(prompt: string) {
   const words = prompt.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
   const why = words.some((w, i) => w === 'por' && ['qué', 'que'].includes(words[i + 1] ?? ''))
   if (why || words.some(w => JEV_HARD.includes(w) || JEV_HARD_STEMS.some(s => w.startsWith(s)))) return 'opus'
-  if (prompt.length < 200 && words.some(w => JEV_GIT.includes(w))) return 'haiku'
+  if ([...prompt].length < 200 && new Set(words.filter(w => JEV_GIT.includes(w))).size >= 2) return 'haiku'
   return 'sonnet'
 }
 // The main loop's model (alias), and whether this session already got its suggestion.
@@ -268,6 +268,8 @@ export const register: Register = on => {
     // A new conversation measures its own delegation, and gets its own Forge Jev suggestion.
     await countRead($, null)
     jevOffered = false
+    mainModel = ''
+
     const agents = [
       { name: 'explorer', model: 'haiku', effort: 'low', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
         description: 'Fast, cheap code explorer: where things are, what code does, finding files, symbols and call sites, reading and summarizing several files. Returns a short answer with paths.' },
