@@ -1277,6 +1277,45 @@ fn maximized_panel_lists_the_hidden_ones() {
     assert_eq!(ws(h.state()).maximized(), None, "vuelven a verse todos");
 }
 
+/// Un plan del backlog que ya tiene fases ofrece «Empezar con {agente}» (sin fases, el de
+/// siempre: «Planificar con…»).
+#[test]
+fn a_planned_backlog_item_offers_to_start_it_with_an_agent() {
+    use forge_core::ideas::Phase;
+    let _serial = serial();
+    let dir = project("start-plan");
+    let mut h = app(dir.clone());
+    // Un agente que sabe planificar, instalado (simulado): el CI no tiene ninguno.
+    for program in ["claude", "codex"] {
+        h.state().agents.lock().unwrap().insert(
+            program.into(),
+            forge_core::agents::Detection {
+                path: Some(format!("/bin/{program}").into()),
+                version: None,
+            },
+        );
+    }
+    h.state_mut()
+        .db(|s| {
+            s.add_plan(
+                Some(&dir),
+                "Carrito offline",
+                "",
+                &[Phase::new("Sincronizar")],
+                "x",
+            )
+        })
+        .unwrap();
+    h.state_mut()
+        .db(|s| s.add_idea(Some(&dir), "Exportar a CSV", "", "x"))
+        .unwrap();
+    h.key_press_modifiers(CMD_SHIFT, Key::I);
+    h.run_steps(4);
+    // Qué agente (el de la terminal enfocada o el de serie) lo prueba `planner_agent`.
+    h.get_by_label_contains("Empezar con");
+    h.get_by_label_contains("Planificar con");
+}
+
 /// "Planificar con…": sin el agente abierto se abre con la petición como primer mensaje;
 /// con él abierto, se le escribe en su panel (sin abrir otro).
 #[test]
