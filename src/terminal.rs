@@ -99,11 +99,16 @@ impl Metrics {
 
 /// Alto de la franja de tarjetas de adjuntos.
 const ATTACH_STRIP: f32 = 52.0;
+/// Ancho aproximado de una tarjeta (para saber cuántas caben).
+const CARD_WIDTH: f32 = 230.0;
 
 /// Miniatura de una imagen para su tarjeta (None si no es una imagen legible).
 fn thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
     let ext = path.extension()?.to_str()?.to_lowercase();
-    if !["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&ext.as_str()) {
+    // Los formatos que Forge sabe leer; uno enorme no se lee (congelaría la ventana).
+    if !["png", "jpg", "jpeg"].contains(&ext.as_str())
+        || std::fs::metadata(path).ok()?.len() > 20 * 1024 * 1024
+    {
         return None;
     }
     let image = image::open(path).ok()?.thumbnail(96, 96).to_rgba8();
@@ -155,6 +160,11 @@ pub struct Terminal {
     attachments: Vec<PathBuf>,
     /// Miniaturas ya cargadas (None: no es una imagen o no se pudo leer).
     thumbs: HashMap<PathBuf, Option<egui::TextureHandle>>,
+    /// El shell está en su prompt (el agente terminó): ahí se pega la ruta, sin tarjetas.
+    at_prompt: bool,
+    /// Enter retenido tras pegar las rutas de las tarjetas: se manda un instante después,
+    /// para que el agente no lo tome como parte de lo pegado.
+    pending_enter: Option<Instant>,
     mouse_down: Option<u8>,
     /// Clic principal en una app que captura el ratón, aún sin enviar: si se arrastra, es
     /// una selección de Forge; si se suelta quieto, va a la app (línea, columna).
@@ -404,6 +414,8 @@ impl Terminal {
             attach_mode: false,
             attachments: Vec::new(),
             thumbs: HashMap::new(),
+            at_prompt: false,
+            pending_enter: None,
             mouse_down: None,
             held: None,
             selecting: false,
@@ -559,20 +571,22 @@ impl Terminal {
                 UiEvent::ResetTitle => self.title = None,
                 UiEvent::Clipboard(text) => ctx.copy_text(text),
                 UiEvent::Line(line) => {
+                    self.at_prompt = line.is_some();
                     let home = forge_core::home_dir().unwrap_or_default();
                     self.suggest = line.and_then(|l| crate::suggest::suggest(&l, &home));
                 }
             }
         }
 
-        // Con tarjetas de adjuntos, una franja al pie y la terminal encima (no tapa el
-        // cuadro de texto del agente).
-        let full = rect;
-        let rect = if self.attachments.is_empty() {
-            rect
-        } else {
-            Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - ATTACH_STRIP))
-        };
+        // El Enter retenido (ver `pending_enter`).
+        if let Some(at) = self.pending_enter {
+            if at.elapsed() >= Duration::from_millis(60) {
+                self.pending_enter = None;
+                self.send(b"\r");
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(20));
+            }
+        }
         let size = Size {
             cols: ((rect.width() / m.cell.x) as usize).max(2),
             rows: ((rect.height() / m.cell.y) as usize).max(1),
@@ -648,10 +662,16 @@ impl Terminal {
         self.scroll_overlay(ui, rect, id);
         self.suggest_overlay(ui, rect, id, m);
         self.copy_overlay(ui, rect, id);
+        // Las tarjetas, en una franja arriba sobre la salida antigua: no se cambia el tamaño
+        // de la terminal (un agente que redibuja al redimensionar se descoloca) ni se tapa el
+        // cuadro de texto del agente, que está abajo.
         if !self.attachments.is_empty() {
-            let strip = Rect::from_min_max(egui::pos2(full.min.x, rect.max.y), full.max);
+            let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ATTACH_STRIP));
             self.attachments_ui(ui, strip, id);
         }
+        // Miniaturas de tarjetas que ya no están: fuera.
+        let attachments = &self.attachments;
+        self.thumbs.retain(|path, _| attachments.contains(path));
         response
     }
 
@@ -877,7 +897,7 @@ impl Terminal {
 
     /// Archivos para el mensaje: en una terminal de agente, tarjetas; si no, sus rutas.
     pub fn attach(&mut self, paths: &[PathBuf]) {
-        if !self.attach_mode {
+        if !self.attach_mode || self.at_prompt {
             self.paste(&crate::paste::drop_text(paths));
             return;
         }
@@ -911,8 +931,11 @@ impl Terminal {
             .order(egui::Order::Middle)
             .show(ui.ctx(), |area| {
                 area.set_max_size(inner.size());
+                // Sin pisar el panel de al lado: las que no caben se cuentan en «+N».
+                area.set_clip_rect(strip);
+                let fit = ((inner.width() - 48.0) / CARD_WIDTH).floor().max(1.0) as usize;
                 area.horizontal(|child| {
-                    for (i, path) in attachments.iter().enumerate() {
+                    for (i, path) in attachments.iter().enumerate().take(fit) {
                         let thumb = thumbs
                             .entry(path.clone())
                             .or_insert_with(|| thumbnail(child.ctx(), path))
@@ -978,6 +1001,13 @@ impl Terminal {
                                 });
                             });
                     }
+                    if attachments.len() > fit {
+                        child.label(
+                            egui::RichText::new(format!("+{}", attachments.len() - fit))
+                                .size(12.0)
+                                .color(crate::theme::TEXT_2),
+                        );
+                    }
                 });
             });
         if let Some(i) = remove {
@@ -1020,16 +1050,25 @@ impl Terminal {
         {
             self.attach(&[path]);
         }
-        // Enter envía el mensaje: antes van las rutas de las tarjetas, al final del texto.
-        let enter = events.iter().any(|e| {
-            matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if modifiers.is_none())
-        });
-        if enter && !self.attachments.is_empty() && self.suggest.is_none() {
-            let paths = std::mem::take(&mut self.attachments);
-            self.paste(&format!(" {}", crate::paste::drop_text(&paths).trim_end()));
-        }
         for event in events {
             match event {
+                // Enter envía el mensaje: antes, las rutas de las tarjetas al final del texto
+                // (en el orden de lo escrito) y el Enter un instante después.
+                egui::Event::Key {
+                    key: Key::Enter,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if modifiers.is_none()
+                    && !self.attachments.is_empty()
+                    && !self.at_prompt
+                    && self.suggest.is_none() =>
+                {
+                    let paths = std::mem::take(&mut self.attachments);
+                    self.paste(&format!(" {}", crate::paste::drop_text(&paths).trim_end()));
+                    self.pending_enter = Some(Instant::now());
+                    ctx.request_repaint_after(Duration::from_millis(60));
+                }
                 // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra. Enter
                 // acepta solo si se eligió con ↑↓; si no, ejecuta lo escrito (p. ej. `cd x/`).
                 egui::Event::Key {
