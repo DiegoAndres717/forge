@@ -1119,7 +1119,13 @@ fn memory_cli(
     let found = match action {
         // --brief: lo que hace el mod en cada mensaje; pocas referencias y nada si no hay.
         "search" if brief => store.recall_memories(project, &rest.join(" "), 3)?,
-        "search" => store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?,
+        // Un agente buscando por la CLI (skills, /forge-memory): cuenta como lectura.
+        "search" => {
+            let found = store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?;
+            let ids: Vec<i64> = found.iter().map(|m| m.id).collect();
+            let _ = store.note_memory_reads(&ids);
+            found
+        }
         "list" => store.list_memories(project, kind.as_deref(), 30)?,
         "add" => {
             let [k, title, body @ ..] = rest else {

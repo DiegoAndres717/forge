@@ -184,7 +184,7 @@ fn ui_preview() {
             store.touch(&p, name).unwrap();
             store.conn.execute("UPDATE projects SET last_opened = last_opened - ?1, is_open = 0 WHERE path = ?2", rusqlite::params![ago, p.to_string_lossy()]).unwrap();
         }
-        store
+        let stripe = store
             .add_memory(
                 &project,
                 "decision",
@@ -194,6 +194,8 @@ fn ui_preview() {
                 "claude-code",
             )
             .unwrap();
+        // Los agentes la han leído: el panel lo muestra al lado del título.
+        store.note_memory_reads(&[stripe; 3]).unwrap();
         store
             .add_memory(
                 &project,

@@ -309,6 +309,8 @@ pub struct MemoryView {
     /// Etiquetas que hay en la memoria del proyecto y cuántas memorias tiene cada una.
     pub tags: Vec<(String, usize)>,
     pub results: Vec<forge_core::memory::Memory>,
+    /// Lecturas de los agentes por memoria: id → (veces, última).
+    pub reads: std::collections::HashMap<i64, (i64, i64)>,
     pub count: i64,
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).
     pub dirty: bool,

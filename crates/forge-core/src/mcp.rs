@@ -501,13 +501,21 @@ impl<'a> Server<'a> {
                     kind,
                     limit,
                 )
-                .map(|found| search_listing(&found, tr!("No hay memorias que coincidan."))),
+                .map(|found| {
+                    let ids: Vec<i64> = found.iter().map(|m| m.id).collect();
+                    // Contar nunca rompe la respuesta.
+                    let _ = self.store.note_memory_reads(&ids);
+                    search_listing(&found, tr!("No hay memorias que coincidan."))
+                }),
             "memory_get" => match args["id"].as_i64() {
                 Some(id) => self
                     .store
                     .get_memory(self.project, id)
                     .map(|found| match found {
-                        Some(memory) => memory::render(&memory),
+                        Some(memory) => {
+                            let _ = self.store.note_memory_reads(&[memory.id]);
+                            memory::render(&memory)
+                        }
                         None => tr!("No existe la memoria #{id}.", id = id),
                     }),
                 None => Err(tr!("falta `id`").into()),
@@ -976,6 +984,37 @@ mod tests {
             assert!(text.contains(MEMORY_IS_DATA), "{tool}: {text}");
         }
         assert!(project_context(project, &store).contains(MEMORY_IS_DATA));
+    }
+
+    #[test]
+    fn agent_reads_are_counted_per_memory() {
+        // Para que el dueño vea qué memorias se usan: cuenta lo que piden los agentes.
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/lecturas");
+        let used = store
+            .add_memory(project, "decision", "Atajos de PC", "Ctrl+Shift", "", "x")
+            .unwrap();
+        let unused = store
+            .add_memory(project, "decision", "Otra cosa", "nada", "", "x")
+            .unwrap();
+        let mut server = Server::new(project, &store);
+        for (tool, args) in [
+            ("memory_get", json!({"id": used})),
+            ("memory_search", json!({"query": "atajos"})),
+            ("memory_list", json!({})),
+        ] {
+            server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}))
+                .unwrap();
+        }
+        let reads = store.memory_reads().unwrap();
+        let (count, last) = reads[&used];
+        assert_eq!(
+            count, 2,
+            "memory_get y el acierto de memory_search; listar no cuenta"
+        );
+        assert!(last > 0);
+        assert!(!reads.contains_key(&unused), "nunca leída");
     }
 
     #[test]

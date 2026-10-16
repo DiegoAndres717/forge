@@ -268,8 +268,23 @@ impl App {
                             .color(theme::TEXT_3),
                     );
                     for m in entries {
-                        // El tipo ya lo dice el grupo.
-                        let header = RichText::new(&m.title);
+                        // El tipo ya lo dice el grupo; al lado, si los agentes la usan.
+                        let read = ws.memory.reads.get(&m.id).copied();
+                        let mut header = egui::text::LayoutJob::default();
+                        header.append(
+                            &m.title,
+                            0.0,
+                            egui::TextFormat::simple(FontId::proportional(13.0), theme::TEXT),
+                        );
+                        header.append(
+                            &match read {
+                                Some((1, _)) => tr!("1 lectura").into(),
+                                Some((n, _)) => tr!("{n} lecturas", n = n),
+                                None => tr!("sin leer").into(),
+                            },
+                            8.0,
+                            egui::TextFormat::simple(FontId::proportional(11.0), theme::TEXT_3),
+                        );
                         egui::CollapsingHeader::new(header)
                             .id_salt(("memory", m.id))
                             .show(ui, |ui| {
@@ -277,11 +292,17 @@ impl App {
                                     ui.label(highlighted(snippet));
                                 }
                                 ui.label(&m.body);
-                                let tags = if m.tags.is_empty() {
+                                let mut tags = if m.tags.is_empty() {
                                     String::new()
                                 } else {
                                     format!(" · {}", m.tags)
                                 };
+                                if let Some((_, last)) = read {
+                                    tags.push_str(&tr!(
+                                        " · leída por última vez {p0}",
+                                        p0 = store::ago_precise(last)
+                                    ));
+                                }
                                 ui.horizontal(|ui| {
                                     ui.label(
                                         RichText::new(format!(
