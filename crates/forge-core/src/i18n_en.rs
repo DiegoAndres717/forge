@@ -731,6 +731,8 @@ pub const EN: &[(&str, &str)] = &[
         "runs once the deterministic checks pass",
     ),
     ("Revisión de IA", "AI review"),
+    ("Quitar {p0}", "Remove {p0}"),
+    ("Imagen pegada", "Pasted image"),
     (
         "{who} pide permiso: {cmd}",
         "{who} asks for permission: {cmd}",

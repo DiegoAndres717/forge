@@ -97,6 +97,42 @@ impl Metrics {
     }
 }
 
+/// Alto de la franja de tarjetas de adjuntos.
+const ATTACH_STRIP: f32 = 52.0;
+
+/// Miniatura de una imagen para su tarjeta (None si no es una imagen legible).
+fn thumbnail(ctx: &egui::Context, path: &Path) -> Option<egui::TextureHandle> {
+    let ext = path.extension()?.to_str()?.to_lowercase();
+    if !["png", "jpg", "jpeg", "gif", "webp", "bmp"].contains(&ext.as_str()) {
+        return None;
+    }
+    let image = image::open(path).ok()?.thumbnail(96, 96).to_rgba8();
+    let size = [image.width() as usize, image.height() as usize];
+    let pixels = egui::ColorImage::from_rgba_unmultiplied(size, &image.into_raw());
+    Some(ctx.load_texture(path.to_string_lossy(), pixels, egui::TextureOptions::LINEAR))
+}
+
+/// Icono de un archivo que no es imagen, según su tipo.
+fn file_icon(path: &Path) -> &'static str {
+    use egui_phosphor::regular as i;
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .as_deref()
+    {
+        Some("pdf") => i::FILE_PDF,
+        Some("csv" | "xlsx" | "xls") => i::FILE_CSV,
+        Some("zip" | "gz" | "tar") => i::FILE_ZIP,
+        Some("rs" | "ts" | "tsx" | "js" | "py" | "go" | "swift" | "java" | "rb" | "c" | "h") => {
+            i::FILE_CODE
+        }
+        Some("md" | "txt") => i::FILE_TEXT,
+        _ if path.is_dir() => i::FOLDER,
+        _ => i::FILE,
+    }
+}
+
 pub struct Terminal {
     term: Arc<Mutex<Term<Listener>>>,
     writer: Writer,
@@ -112,6 +148,13 @@ pub struct Terminal {
     had_focus: bool,
     /// Se vio la pulsación de V (para reconocer un ⌘V que egui se tragó).
     v_down: bool,
+    /// Terminal de agente: lo que se pega o se suelta va como tarjeta, no como ruta.
+    pub attach_mode: bool,
+    /// Tarjetas de adjuntos (como en la extensión de VS Code): sus rutas se añaden al
+    /// mensaje al pulsar Enter.
+    attachments: Vec<PathBuf>,
+    /// Miniaturas ya cargadas (None: no es una imagen o no se pudo leer).
+    thumbs: HashMap<PathBuf, Option<egui::TextureHandle>>,
     mouse_down: Option<u8>,
     /// Clic principal en una app que captura el ratón, aún sin enviar: si se arrastra, es
     /// una selección de Forge; si se suelta quieto, va a la app (línea, columna).
@@ -358,6 +401,9 @@ impl Terminal {
             scroll_acc: 0.0,
             had_focus: true,
             v_down: false,
+            attach_mode: false,
+            attachments: Vec::new(),
+            thumbs: HashMap::new(),
             mouse_down: None,
             held: None,
             selecting: false,
@@ -519,6 +565,14 @@ impl Terminal {
             }
         }
 
+        // Con tarjetas de adjuntos, una franja al pie y la terminal encima (no tapa el
+        // cuadro de texto del agente).
+        let full = rect;
+        let rect = if self.attachments.is_empty() {
+            rect
+        } else {
+            Rect::from_min_max(rect.min, egui::pos2(rect.max.x, rect.max.y - ATTACH_STRIP))
+        };
         let size = Size {
             cols: ((rect.width() / m.cell.x) as usize).max(2),
             rows: ((rect.height() / m.cell.y) as usize).max(1),
@@ -594,6 +648,10 @@ impl Terminal {
         self.scroll_overlay(ui, rect, id);
         self.suggest_overlay(ui, rect, id, m);
         self.copy_overlay(ui, rect, id);
+        if !self.attachments.is_empty() {
+            let strip = Rect::from_min_max(egui::pos2(full.min.x, rect.max.y), full.max);
+            self.attachments_ui(ui, strip, id);
+        }
         response
     }
 
@@ -817,6 +875,116 @@ impl Terminal {
         }
     }
 
+    /// Archivos para el mensaje: en una terminal de agente, tarjetas; si no, sus rutas.
+    pub fn attach(&mut self, paths: &[PathBuf]) {
+        if !self.attach_mode {
+            self.paste(&crate::paste::drop_text(paths));
+            return;
+        }
+        for path in paths {
+            if !self.attachments.contains(path) {
+                self.attachments.push(path.clone());
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn preview_attachments(&mut self, paths: &[PathBuf]) {
+        self.attach_mode = true;
+        self.attachments = paths.to_vec();
+    }
+
+    #[cfg(test)]
+    pub fn attachments(&self) -> &[PathBuf] {
+        &self.attachments
+    }
+
+    /// Franja de tarjetas al pie (miniatura o icono, nombre y ✕).
+    fn attachments_ui(&mut self, ui: &egui::Ui, strip: Rect, id: egui::Id) {
+        ui.painter().rect_filled(strip, 0.0, crate::theme::TOOLBAR);
+        let mut remove = None;
+        let inner = strip.shrink2(Vec2::new(8.0, 6.0));
+        let attachments = self.attachments.clone();
+        let thumbs = &mut self.thumbs;
+        egui::Area::new(id.with("attachments"))
+            .fixed_pos(inner.min)
+            .order(egui::Order::Middle)
+            .show(ui.ctx(), |area| {
+                area.set_max_size(inner.size());
+                area.horizontal(|child| {
+                    for (i, path) in attachments.iter().enumerate() {
+                        let thumb = thumbs
+                            .entry(path.clone())
+                            .or_insert_with(|| thumbnail(child.ctx(), path))
+                            .clone();
+                        // Una imagen pegada (⌘V) tiene un nombre de archivo sin interés.
+                        let pasted = path
+                            .parent()
+                            .is_some_and(|d| d.ends_with(crate::paste::PASTE_DIR));
+                        let name = if pasted {
+                            forge_core::tr!("Imagen pegada").to_string()
+                        } else {
+                            path.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        };
+                        egui::Frame::new()
+                            .fill(crate::theme::SURFACE)
+                            .stroke(egui::Stroke::new(1.0, crate::theme::SEPARATOR))
+                            .corner_radius(8.0)
+                            .inner_margin(egui::Margin::symmetric(6, 4))
+                            .show(child, |ui| {
+                                ui.horizontal(|ui| {
+                                    match &thumb {
+                                        Some(texture) => {
+                                            ui.add(
+                                                egui::Image::new(texture)
+                                                    .fit_to_exact_size(Vec2::splat(32.0))
+                                                    .corner_radius(4.0),
+                                            );
+                                        }
+                                        None => {
+                                            ui.label(
+                                                egui::RichText::new(file_icon(path))
+                                                    .size(22.0)
+                                                    .color(crate::theme::TEXT_2),
+                                            );
+                                        }
+                                    }
+                                    let short: String = if name.chars().count() > 28 {
+                                        format!("{}…", name.chars().take(27).collect::<String>())
+                                    } else {
+                                        name.clone()
+                                    };
+                                    ui.label(
+                                        egui::RichText::new(short)
+                                            .size(12.0)
+                                            .color(crate::theme::TEXT),
+                                    )
+                                    .on_hover_text(path.display().to_string());
+                                    let close = ui.add(
+                                        egui::Button::new(
+                                            egui::RichText::new(egui_phosphor::regular::X)
+                                                .size(11.0),
+                                        )
+                                        .frame(false),
+                                    );
+                                    if close
+                                        .on_hover_text(forge_core::tr!("Quitar {p0}", p0 = name))
+                                        .clicked()
+                                    {
+                                        remove = Some(i);
+                                    }
+                                });
+                            });
+                    }
+                });
+            });
+        if let Some(i) = remove {
+            self.attachments.remove(i);
+        }
+    }
+
     /// Pega texto como Terminal.app: saltos de línea normalizados y, si el programa lo pide,
     /// entre marcas de pegado (así un agente no lo toma por teclas sueltas).
     pub fn paste(&mut self, text: &str) {
@@ -850,7 +1018,15 @@ impl Terminal {
         if crate::paste::swallowed_paste(&events, &mut self.v_down)
             && let Some(path) = crate::paste::clipboard_image()
         {
-            self.paste(&crate::paste::drop_text(&[path]));
+            self.attach(&[path]);
+        }
+        // Enter envía el mensaje: antes van las rutas de las tarjetas, al final del texto.
+        let enter = events.iter().any(|e| {
+            matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. } if modifiers.is_none())
+        });
+        if enter && !self.attachments.is_empty() && self.suggest.is_none() {
+            let paths = std::mem::take(&mut self.attachments);
+            self.paste(&format!(" {}", crate::paste::drop_text(&paths).trim_end()));
         }
         for event in events {
             match event {

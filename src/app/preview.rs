@@ -310,6 +310,22 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "1-workspace");
 
+    // Tarjetas de adjuntos en una terminal de agente (como en la extensión de VS Code).
+    {
+        let shots = out.join("adjuntos");
+        let rgba: Vec<u8> = (0..64 * 40)
+            .flat_map(|i| [(i % 64 * 4) as u8, 90, 200, 255])
+            .collect();
+        let image = crate::paste::save_png(64, 40, &rgba, &shots).unwrap();
+        let pdf = shots.join("informe-de-ventas-octubre.pdf");
+        std::fs::write(&pdf, b"%PDF").unwrap();
+        harness.state_mut().workspaces[0].preview_attachments(&[image, pdf]);
+        settle(&mut harness);
+        save(&mut harness, &out, "21-adjuntos");
+        harness.state_mut().workspaces[0].preview_attachments(&[]);
+        settle(&mut harness);
+    }
+
     // Linux y Windows: sin semáforos y con el botón ☰ de los menús, abierto en Ver.
     harness.state_mut().traffic_end = 0.0;
     harness.state_mut().menu_button = true;
