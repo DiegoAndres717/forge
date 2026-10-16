@@ -6,6 +6,8 @@ use forge_core::tr;
 /// Barra lateral y Ajustes (y el botón ☰ fuera de macOS).
 const WINDOW_BUTTONS_WIDTH: f32 = 58.0;
 const MENU_BUTTON_WIDTH: f32 = 28.0;
+/// «Forge» junto a los botones de la ventana, sin barra de menús nativa.
+const APP_NAME_WIDTH: f32 = 50.0;
 
 impl App {
     /// Inicio: proyectos recientes como lista agrupada, con abrir y arrastrar carpeta.
@@ -244,7 +246,7 @@ impl App {
     fn window_buttons_width(&self) -> f32 {
         WINDOW_BUTTONS_WIDTH
             + if self.menu_button {
-                MENU_BUTTON_WIDTH
+                MENU_BUTTON_WIDTH + APP_NAME_WIDTH
             } else {
                 0.0
             }
@@ -289,6 +291,16 @@ impl App {
         .clicked()
         {
             self.settings_open = !self.settings_open;
+        }
+        // Sin barra de menús nativa (Windows, Linux) nada dice qué app es: su nombre aquí.
+        if self.menu_button {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new("Forge")
+                    .size(13.0)
+                    .strong()
+                    .color(theme::TEXT_2),
+            );
         }
     }
 
