@@ -309,10 +309,11 @@ impl App {
                             8.0,
                             egui::TextFormat::simple(FontId::proportional(11.0), theme::TEXT_3),
                         );
-                        egui::CollapsingHeader::new(header)
+                        let cut = title != m.title;
+                        let note = egui::CollapsingHeader::new(header)
                             .id_salt(("memory", m.id))
                             .show(ui, |ui| {
-                                if title != m.title {
+                                if cut {
                                     ui.add(
                                         egui::Label::new(RichText::new(&m.title).strong()).wrap(),
                                     );
@@ -348,6 +349,9 @@ impl App {
                                     }
                                 });
                             });
+                        if cut {
+                            note.header_response.on_hover_text(&m.title);
+                        }
                     }
                 }
             });
