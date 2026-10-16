@@ -110,6 +110,8 @@ pub struct Terminal {
     size: Size,
     scroll_acc: f32,
     had_focus: bool,
+    /// Se vio la pulsación de V (para reconocer un ⌘V que egui se tragó).
+    v_down: bool,
     mouse_down: Option<u8>,
     /// Clic principal en una app que captura el ratón, aún sin enviar: si se arrastra, es
     /// una selección de Forge; si se suelta quieto, va a la app (línea, columna).
@@ -355,6 +357,7 @@ impl Terminal {
             size,
             scroll_acc: 0.0,
             had_focus: true,
+            v_down: false,
             mouse_down: None,
             held: None,
             selecting: false,
@@ -841,6 +844,14 @@ impl Terminal {
             }
         }
 
+        // ⌘V con solo una imagen en el portapapeles: egui se traga la pulsación (no hay texto)
+        // y solo llega la suelta. Se guarda como PNG y se pega su ruta, que todos los
+        // agentes saben leer.
+        if crate::paste::swallowed_paste(&events, &mut self.v_down)
+            && let Some(path) = crate::paste::clipboard_image()
+        {
+            self.paste(&crate::paste::drop_text(&[path]));
+        }
         for event in events {
             match event {
                 // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra. Enter
@@ -881,16 +892,7 @@ impl Terminal {
                 // ⌘V con solo una imagen en el portapapeles: egui no da evento al pulsar (no
                 // hay texto), pero sí al soltar. Se guarda como PNG y se pega su ruta, que
                 // todos los agentes saben leer.
-                egui::Event::Key {
-                    key: Key::V,
-                    pressed: false,
-                    modifiers,
-                    ..
-                } if modifiers.command => {
-                    if let Some(path) = crate::paste::clipboard_image() {
-                        self.paste(&crate::paste::drop_text(&[path]));
-                    }
-                }
+
                 // Ctrl+X en PC llega como «cortar»: es del shell (nano sale con él).
                 egui::Event::Cut if !cfg!(target_os = "macos") => self.send(b"\x18"),
                 egui::Event::Copy => {
