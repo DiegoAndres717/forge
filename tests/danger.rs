@@ -184,6 +184,8 @@ fn forge_zsh_puts_shims_first() {
         ])
         .env("ZDOTDIR", &zdotdir)
         .env("FORGE_SHIMS", &shims)
+        // Dentro de una terminal de Forge vendrían los de la app de verdad (backlog #12).
+        .env_remove("FORGE_READ_SHIMS")
         .output()
         .unwrap();
     let text = String::from_utf8_lossy(&out.stdout);

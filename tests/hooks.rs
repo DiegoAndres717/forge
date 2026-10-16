@@ -33,13 +33,13 @@ impl Repo {
     }
 
     fn run(&self, program: &str, args: &[&str]) -> Output {
-        Command::new(program)
-            .args(args)
+        let mut cmd = Command::new(program);
+        cmd.args(args)
             .current_dir(&self.dir)
             // Base de datos propia: los tests no tocan la de la app.
-            .env("FORGE_DB", &self.db)
-            .output()
-            .unwrap()
+            .env("FORGE_DB", &self.db);
+        isolate(&mut cmd);
+        cmd.output().unwrap()
     }
 
     fn ok(&self, program: &str, args: &[&str]) -> String {
@@ -85,6 +85,38 @@ fn text(out: &Output) -> String {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     )
+}
+
+/// Corriendo `cargo test` dentro de una terminal de Forge, los procesos heredarían la conexión
+/// con la app de verdad (sus solicitudes de autorización le llegarían al usuario y la prueba
+/// esperaría su respuesta) y los shims de Guard en el PATH (backlog #12): se quitan.
+fn isolate(cmd: &mut Command) {
+    for var in [
+        "FORGE_APPROVALS",
+        "FORGE_APP_PID",
+        "FORGE_SHIMS",
+        "FORGE_READ_SHIMS",
+        "FORGE_EVENTS",
+        "FORGE_PROJECT",
+        "FORGE_ORIGIN",
+        "FORGE_GUARD_COMMANDS",
+        "FORGE_BASHRC",
+        "BASH_ENV",
+    ] {
+        cmd.env_remove(var);
+    }
+    let shims: Vec<String> = ["FORGE_SHIMS", "FORGE_READ_SHIMS"]
+        .iter()
+        .filter_map(|v| std::env::var(v).ok())
+        .collect();
+    if let Some(path) = std::env::var_os("PATH") {
+        let kept: Vec<PathBuf> = std::env::split_paths(&path)
+            .filter(|p| !shims.iter().any(|s| p == Path::new(s)))
+            .collect();
+        if let Ok(path) = std::env::join_paths(kept) {
+            cmd.env("PATH", path);
+        }
+    }
 }
 
 #[test]
