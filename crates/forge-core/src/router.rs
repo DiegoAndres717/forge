@@ -1265,8 +1265,18 @@ fn refute(
         .collect()
 }
 
-/// Decide la revisión de nivel 2 o 3 más alta que respondió: una clasificación de nivel 1
-/// sola nunca aprueba un cambio.
+/// Ruta de los jueces: la de nivel 3 con el modelo de los jueces (con Claude), salvo que el
+/// usuario fijara una en routing.toml, que se respeta siempre.
+fn judge_route(config: &RouterConfig, local: bool) -> Route {
+    let mut chosen = route(config, Task::Architecture, local);
+    if !config.tasks.contains_key(Task::Architecture.key())
+        && matches!(chosen.provider.as_str(), "anthropic" | "claude")
+    {
+        chosen.model = config.judge_model.clone();
+    }
+    chosen
+}
+
 /// Juicio: dos jueces a ciegas, en paralelo.
 pub fn judgment(
     config: &RouterConfig,
@@ -1276,10 +1286,7 @@ pub fn judgment(
     local: bool,
     on_step: &dyn Fn(&str),
 ) -> AiOutcome {
-    let mut chosen = route(config, Task::Architecture, local);
-    if matches!(chosen.provider.as_str(), "anthropic" | "claude") {
-        chosen.model = config.judge_model.clone();
-    }
+    let chosen = judge_route(config, local);
     let paid = config.provider(&chosen.provider).is_some_and(|p| !p.local);
     if paid && month_spent + 2.0 * config.max_cost_per_call_usd > config.monthly_budget_usd {
         return finish(
@@ -1326,7 +1333,19 @@ pub fn judgment(
             })
             .into_iter()
             .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
+        handles
+            .into_iter()
+            .map(|h| {
+                h.join().unwrap_or_else(|_| Step {
+                    route: chosen.label(),
+                    task,
+                    review: None,
+                    error: Some(tr!("el juez falló").into()),
+                    usage: None,
+                    seconds: 0.0,
+                })
+            })
+            .collect()
     });
     let (verdict, findings) = merge_judges(steps[0].review.as_ref(), steps[1].review.as_ref());
     let summary = steps
@@ -1335,8 +1354,11 @@ pub fn judgment(
         .map(|r| r.summary.clone())
         .collect::<Vec<_>>()
         .join(" · ");
-    let reason = (verdict == AiVerdict::Incomplete)
-        .then(|| tr!("ningún juez dio una respuesta válida").to_string());
+    let reason = match steps.iter().filter(|s| s.review.is_none()).count() {
+        0 => None,
+        1 => Some(tr!("un juez no respondió: no se puede aprobar con uno solo").to_string()),
+        _ => Some(tr!("ningún juez dio una respuesta válida").to_string()),
+    };
     AiOutcome {
         verdict,
         summary,
@@ -1382,7 +1404,11 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
     };
     let empty = Vec::new();
     let others = b.map_or(&empty, |b| &b.findings);
-    let near = |x: &Finding, y: &Finding| x.file == y.file && x.line.abs_diff(y.line) <= 5;
+    // Solo con ubicación: dos hallazgos sin archivo («faltan tests», «sin autorización») no
+    // son el mismo.
+    let near = |x: &Finding, y: &Finding| {
+        !x.file.is_empty() && x.file == y.file && x.line.abs_diff(y.line) <= 5
+    };
     let rank = |s: &str| match s {
         "blocking" => 2,
         "warning" => 1,
@@ -1391,7 +1417,8 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
     let (mut confirmed, mut suspects) = (Vec::new(), Vec::new());
     let mut matched = vec![false; others.len()];
     for x in &a.findings {
-        match others.iter().position(|y| near(x, y)) {
+        // Uno a uno: cada hallazgo del otro juez confirma uno solo.
+        match (0..others.len()).find(|&i| !matched[i] && near(x, &others[i])) {
             Some(i) => {
                 matched[i] = true;
                 let y = &others[i];
@@ -1425,6 +1452,9 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
     let verdict = if confirmed.iter().any(|f| rank(&f.severity) == 2) {
         AiVerdict::Block
     } else if b.is_none()
+        // Un juez que no aprueba, aunque no dé hallazgos, no deja aprobar.
+        || a.verdict != "approve"
+        || b.is_some_and(|b| b.verdict != "approve")
         || confirmed
             .iter()
             .chain(&suspects)
@@ -1438,6 +1468,8 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
     (verdict, confirmed)
 }
 
+/// Decide la revisión de nivel 2 o 3 más alta que respondió: una clasificación de nivel 1
+/// sola nunca aprueba un cambio.
 fn finish(steps: Vec<Step>, reason: Option<String>) -> AiOutcome {
     let decided = steps
         .iter()
@@ -2000,6 +2032,50 @@ mod tests {
         // Un juez falló: lo del otro es sospecha y no aprueba solo.
         assert_eq!(merge_judges(Some(&clean), None).0, AiVerdict::Changes);
         assert_eq!(merge_judges(None, None).0, AiVerdict::Incomplete);
+
+        // Sin archivo no se emparejan: «faltan tests» y «sin autorización» son dos sospechas.
+        let a = judge("block", vec![f("blocking", "", 0, "faltan tests")]);
+        let b = judge("block", vec![f("blocking", "", 0, "sin autorización")]);
+        let (verdict, findings) = merge_judges(Some(&a), Some(&b));
+        assert_eq!(verdict, AiVerdict::Changes, "{findings:?}");
+        assert!(findings.iter().all(|f| f.message.contains("1 de 2")));
+        // Un juez que no aprueba, aunque no dé hallazgos, no deja aprobar.
+        let (verdict, _) = merge_judges(Some(&judge("block", vec![])), Some(&clean));
+        assert_eq!(verdict, AiVerdict::Changes);
+        // Emparejamiento uno a uno: dos hallazgos de A cerca de uno de B → uno confirmado y
+        // una sospecha (B vio un solo problema).
+        let a = judge(
+            "block",
+            vec![
+                f("blocking", "x.ts", 10, "uno"),
+                f("blocking", "x.ts", 12, "dos"),
+            ],
+        );
+        let b = judge("block", vec![f("blocking", "x.ts", 11, "uno")]);
+        let (_, findings) = merge_judges(Some(&a), Some(&b));
+        let confirmed = findings
+            .iter()
+            .filter(|f| f.message.contains("2 de 2"))
+            .count();
+        assert_eq!((confirmed, findings.len()), (1, 2), "{findings:?}");
+    }
+
+    #[test]
+    fn judges_use_the_judge_model_unless_the_user_pinned_one() {
+        let mut config = RouterConfig::default();
+        assert_eq!(judge_route(&config, false).model, "sonnet");
+        config.judge_model = "opus".into();
+        assert_eq!(judge_route(&config, false).model, "opus");
+        // Una ruta elegida en routing.toml se respeta siempre.
+        config.tasks.insert(
+            "architecture".into(),
+            TaskRoute {
+                provider: "anthropic".into(),
+                model: "claude-opus-4-9".into(),
+                effort: None,
+            },
+        );
+        assert_eq!(judge_route(&config, false).model, "claude-opus-4-9");
     }
 
     #[test]

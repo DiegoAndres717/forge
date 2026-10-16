@@ -733,6 +733,11 @@ pub const EN: &[(&str, &str)] = &[
     ("Revisión de IA", "AI review"),
     ("Quitar {p0}", "Remove {p0}"),
     ("Imagen pegada", "Pasted image"),
+    ("el juez falló", "the judge crashed"),
+    (
+        "un juez no respondió: no se puede aprobar con uno solo",
+        "a judge didn't answer: one alone can't approve",
+    ),
     ("{p0}  Juicio", "{p0}  Judgment"),
     (
         "Dos jueces con Sonnet (o el modelo de Ajustes) revisan el cambio a ciegas leyendo el proyecto: doble clic, estados vacíos, errores, concurrencia, seguridad, tests… Lo que ven los dos bloquea; lo que ve uno queda como sospecha. Gasta más que «Revisar cambios».",
