@@ -92,6 +92,14 @@ const STOPWORDS: [&str; 16] = [
 ];
 
 /// Palabras significativas de un título: minúsculas, sin tildes, de 3 letras o más.
+/// La nota de la última sesión (`save_session_summary`), en cualquiera de los dos idiomas.
+fn is_session_note(m: &Memory) -> bool {
+    m.kind == "note"
+        && ["Resumen de la última sesión", "Summary of the last session"]
+            .iter()
+            .any(|t| m.title.starts_with(t))
+}
+
 fn words(text: &str) -> Vec<String> {
     let folded: String = text
         .to_lowercase()
@@ -202,25 +210,46 @@ impl Store {
         self.fts_memories(project, &fts, kind, limit)
     }
 
-    /// Memorias que pueden venir al caso para un mensaje libre: basta con que coincida
-    /// alguna palabra significativa (sin tildes ni palabras de relleno), y se ordenan por
-    /// relevancia. Sin palabras útiles, ninguna.
-    // ponytail: sin umbral de relevancia; las primeras `limit` (pocas) bastan como pista.
+    /// Memorias que vienen al caso para un mensaje libre (las pistas del mod en cada mensaje).
+    /// Cada palabra significativa del mensaje suma 2 si está en el título o las etiquetas y 1
+    /// si solo está en el texto; hacen falta 2 puntos: una palabra suelta en un texto largo no
+    /// basta. La nota de la última sesión nunca: casi cualquier mensaje coincide con ella.
     pub fn recall_memories(
         &self,
         project: &Path,
         text: &str,
         limit: usize,
     ) -> Result<Vec<Memory>, String> {
-        let terms: Vec<String> = words(text)
-            .into_iter()
-            .take(12)
-            .map(|w| format!("\"{w}\"*"))
-            .collect();
+        // Las más largas primero: son las más específicas.
+        let mut terms = words(text);
+        terms.sort_by_key(|w| std::cmp::Reverse(w.chars().count()));
+        terms.truncate(12);
         if terms.is_empty() {
             return Ok(Vec::new());
         }
-        self.fts_memories(project, &terms.join(" OR "), None, limit)
+        let query: Vec<String> = terms.iter().map(|w| format!("\"{w}\"*")).collect();
+        let found = self.fts_memories(project, &query.join(" OR "), None, limit * 5)?;
+        let has = |haystack: &[String], term: &str| haystack.iter().any(|w| w.starts_with(term));
+        Ok(found
+            .into_iter()
+            .filter(|m| !is_session_note(m))
+            .filter(|m| {
+                let head = words(&format!("{} {}", m.title, m.tags));
+                let body = words(&m.body);
+                let score: usize = terms
+                    .iter()
+                    .map(|t| {
+                        if has(&head, t) {
+                            2
+                        } else {
+                            usize::from(has(&body, t))
+                        }
+                    })
+                    .sum();
+                score >= 2
+            })
+            .take(limit)
+            .collect())
     }
 
     fn fts_memories(
@@ -467,6 +496,63 @@ pub fn render_title(m: &Memory) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn suggestions_skip_the_session_note_and_loose_matches() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/pistas");
+        let shortcuts = store
+            .add_memory(
+                p,
+                "decision",
+                "Atajos de PC",
+                "Cmd es Ctrl+Shift fuera de macOS",
+                "teclado",
+                "x",
+            )
+            .unwrap();
+        store
+            .add_memory(
+                p,
+                "error",
+                "Guard en Windows",
+                "El commit tardaba por los shims del proyecto",
+                "",
+                "x",
+            )
+            .unwrap();
+        // La nota de sesión es larga y comparte palabras con casi cualquier mensaje.
+        store
+            .save_session_summary(
+                p,
+                "Hicimos commit de los cambios del proyecto, revisamos los atajos y el panel de memoria.",
+                Some("Claude Code"),
+            )
+            .unwrap();
+        let titles = |text: &str| {
+            store
+                .recall_memories(p, text, 3)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.title)
+                .collect::<Vec<_>>()
+        };
+        // Nunca la nota de sesión, aunque coincida.
+        assert!(
+            titles("haz commit de los cambios del proyecto")
+                .iter()
+                .all(|t| !t.contains("sesión")),
+        );
+        // Una palabra suelta en el cuerpo no basta…
+        assert!(titles("los shims tardan").is_empty());
+        // …una del título sí, y dos del cuerpo también.
+        assert_eq!(titles("¿qué atajos usamos?"), ["Atajos de PC"]);
+        assert_eq!(
+            titles("el commit va lento por los shims"),
+            ["Guard en Windows"]
+        );
+        let _ = shortcuts;
+    }
 
     #[test]
     fn search_ignores_accents_uses_prefixes_and_filters() {
