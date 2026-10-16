@@ -1562,8 +1562,8 @@ pub const EN: &[(&str, &str)] = &[
         "The agent marks the first phase in progress, creates its branch and starts working on it",
     ),
     (
-        "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde main) y trabaja en ella tachando las tareas al terminarlas.",
-        "Start plan #{id} from the Forge plans (\"{title}\"): read its phases with plans_list, mark the first one in_progress with plan_update (and its branch, if it has one, creating it from main) and work on it, ticking tasks as you finish them.",
+        "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde la rama principal) y trabaja en ella tachando las tareas al terminarlas.",
+        "Start plan #{id} from the Forge plans (\"{title}\"): read its phases with plans_list, mark the first one in_progress with plan_update (and its branch, if it has one, creating it from the default branch) and work on it, ticking tasks as you finish them.",
     ),
     ("Planificar con {agent}", "Plan with {agent}"),
     ("Plegar fases", "Collapse phases"),

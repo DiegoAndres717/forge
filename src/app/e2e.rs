@@ -1268,6 +1268,16 @@ fn a_planned_backlog_item_offers_to_start_it_with_an_agent() {
     let _serial = serial();
     let dir = project("start-plan");
     let mut h = app(dir.clone());
+    // Un agente que sabe planificar, instalado (simulado): el CI no tiene ninguno.
+    for program in ["claude", "codex"] {
+        h.state().agents.lock().unwrap().insert(
+            program.into(),
+            forge_core::agents::Detection {
+                path: Some(format!("/bin/{program}").into()),
+                version: None,
+            },
+        );
+    }
     h.state_mut()
         .db(|s| {
             s.add_plan(

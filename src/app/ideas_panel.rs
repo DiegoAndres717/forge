@@ -437,7 +437,7 @@ impl App {
             )
         } else {
             tr!(
-                "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde main) y trabaja en ella tachando las tareas al terminarlas.",
+                "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde la rama principal) y trabaja en ella tachando las tareas al terminarlas.",
                 id = id,
                 title = idea.title
             )
