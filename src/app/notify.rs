@@ -222,7 +222,56 @@ pub(super) fn play(sound: &str, volume: f32) {
     });
 }
 
+/// Un comando peligroso espera tu permiso: (sonido, notificación). Usa el aviso «Pide
+/// permiso» de Ajustes; suena también con Forge al frente y notifica si estás en otra app.
+pub(super) fn approval_alert(
+    alerts: &Alerts,
+    notifications: bool,
+    focused: bool,
+) -> (Option<String>, bool) {
+    if !notifications || alerts.quiet {
+        return (None, false);
+    }
+    let prefs = alerts.get(Alert::Approval);
+    if focused && !prefs.foreground {
+        return (None, false);
+    }
+    let sound = (!prefs.sound.is_empty()).then_some(prefs.sound);
+    (sound, prefs.notify && !focused)
+}
+
 impl App {
+    /// Avisa (sonido y notificación) de una solicitud de autorización nueva.
+    pub(super) fn alert_approval(
+        &mut self,
+        ctx: &egui::Context,
+        request: &forge_core::danger::Request,
+    ) {
+        let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+        let (sound, show) = approval_alert(&self.alerts, self.notifications, focused);
+        if let Some(sound) = sound {
+            play(&sound, self.alerts.volume);
+        }
+        if show {
+            let who = request.origin.clone().unwrap_or_else(|| "Forge".into());
+            let path = request
+                .project
+                .clone()
+                .unwrap_or_else(|| request.cwd.clone());
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let text = tr!(
+                "{who} pide permiso: {cmd}",
+                who = who,
+                cmd = request.command
+            );
+            let (clicked, ctx) = (self.notification_click.clone(), ctx.clone());
+            notify(name, path, text, clicked, ctx);
+        }
+    }
+
     pub(super) fn notify_tick(&mut self, ctx: &egui::Context) {
         self.notification_clicked(ctx);
         // Eventos de los agentes (hooks), cada medio segundo.
@@ -436,6 +485,28 @@ fn notify(_: String, _: PathBuf, _: String, _: Arc<Mutex<Option<PathBuf>>>, _: e
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_approval_request_rings_and_notifies() {
+        let alerts = Alerts::default();
+        // Fuera de Forge: sonido y notificación (si no, el usuario no se entera).
+        assert_eq!(
+            approval_alert(&alerts, true, false),
+            (Some("Ping".to_string()), true)
+        );
+        // Con Forge al frente: el sonido igual (pide permiso), sin notificación.
+        assert_eq!(
+            approval_alert(&alerts, true, true),
+            (Some("Ping".to_string()), false)
+        );
+        // No molestar o avisos apagados: nada.
+        let quiet = Alerts {
+            quiet: true,
+            ..Alerts::default()
+        };
+        assert_eq!(approval_alert(&quiet, true, false), (None, false));
+        assert_eq!(approval_alert(&alerts, false, false), (None, false));
+    }
 
     #[test]
     fn linux_plays_the_freedesktop_sound_closest_to_each_macos_one() {

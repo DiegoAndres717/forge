@@ -731,6 +731,10 @@ pub const EN: &[(&str, &str)] = &[
         "runs once the deterministic checks pass",
     ),
     ("Revisión de IA", "AI review"),
+    (
+        "{who} pide permiso: {cmd}",
+        "{who} asks for permission: {cmd}",
+    ),
     ("Revisar cambios con IA", "Review changes with AI"),
     ("No se pudo buscar", "Couldn't check"),
     (
