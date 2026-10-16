@@ -396,6 +396,43 @@ fn review_command_forces_the_ai_review() {
     assert!(!clean.contains("Revisión de IA"), "{clean}");
 }
 
+/// Una revisión pedida a mano (`forge review`) corre aunque algo determinista bloquee (un
+/// posible secreto, demasiados archivos): quien la pide quiere la revisión. Medido en
+/// dtplatform-v1: 2 de 5 PR no llegaban a los jueces. En el commit normal se sigue esperando.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+)]
+fn manual_review_runs_even_when_deterministic_checks_block() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
+    let repo = Repo::new("review-blocked");
+    let provider = "cat > /dev/null; echo '{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}'";
+    repo.write(
+        ".forge/routing.toml",
+        &format!(
+            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
+             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
+             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
+        ),
+    );
+    repo.write("a.txt", "uno\n");
+    repo.ok("git", &["add", "."]);
+    repo.ok("git", &["commit", "-m", "base"]);
+    let key = ["sk-ant-", "api03-abcdefghijklmnopqrstuvwxyz0123456789"].concat();
+    repo.write("a.txt", &format!("uno\nconst k = '{key}';\n"));
+    let reviewed = text(&repo.forge(&["review"]));
+    assert!(
+        reviewed.contains("BLOQUEADO"),
+        "el secreto sigue bloqueando: {reviewed}"
+    );
+    assert!(reviewed.contains("Revisión de IA: aprobada"), "{reviewed}");
+}
+
 /// Plan #49: `forge review --judgment` pasa el cambio por dos jueces a ciegas; lo que ven los
 /// dos bloquea.
 #[test]

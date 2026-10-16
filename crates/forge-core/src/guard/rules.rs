@@ -12,6 +12,10 @@ pub struct Rules {
     pub push: StageRules,
     pub pull_request: StageRules,
     pub checks: Vec<Check>,
+    /// Revisión pedida a mano («Revisar cambios», «Juicio», `forge review`): corre aunque
+    /// algo determinista bloquee, porque quien la pide quiere la revisión.
+    #[serde(skip)]
+    pub manual_review: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -197,6 +201,7 @@ impl Rules {
         };
         s.enabled = true;
         s.require_ai_review = true;
+        self.manual_review = true;
         self
     }
 

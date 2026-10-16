@@ -573,7 +573,7 @@ impl AiRun<'_> {
                 .collect::<Vec<_>>();
             (blocked, passed)
         };
-        if blocked {
+        if blocked && !self.rules.manual_review {
             let mut st = s.lock().unwrap();
             for (n, _) in &wanted {
                 st.items[*n].details = vec![
