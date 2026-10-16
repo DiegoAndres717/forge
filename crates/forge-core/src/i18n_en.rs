@@ -733,6 +733,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Revisión de IA", "AI review"),
     ("Quitar {p0}", "Remove {p0}"),
     ("Imagen pegada", "Pasted image"),
+    ("captura", "screenshot"),
     ("Todas", "All"),
     ("Filtrar por etiqueta", "Filter by tag"),
     ("Etiquetas", "Tags"),

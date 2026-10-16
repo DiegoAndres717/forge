@@ -49,14 +49,42 @@ pub fn swallowed_paste(events: &[egui::Event], v_down: &mut bool) -> bool {
 /// Guarda una imagen RGBA del portapapeles como PNG en `dir` y devuelve su ruta.
 pub fn save_png(width: usize, height: usize, rgba: &[u8], dir: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let path = dir.join(format!("imagen-{stamp}.png"));
     let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba.to_vec())
         .ok_or("imagen del portapapeles con un tamaño que no cuadra")?;
-    image.save(&path).map_err(|e| e.to_string())?;
-    Ok(path)
+    // Nombre corto (captura-1.png, captura-2.png…): el primer número libre. `create_new`
+    // evita pisar otra pegada simultánea (otra ventana de Forge).
+    let name = forge_core::tr!("captura");
+    for n in 1.. {
+        let path = dir.join(format!("{name}-{n}.png"));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                image
+                    .write_to(&mut file, image::ImageFormat::Png)
+                    .map_err(|e| e.to_string())?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    unreachable!()
+}
+
+/// Las rutas dentro de `base` (la carpeta del agente), relativas: más cortas y legibles en
+/// el mensaje, y todos los agentes las entienden. Las de fuera, enteras.
+pub fn relative_to(paths: &[PathBuf], base: Option<&Path>) -> Vec<PathBuf> {
+    paths
+        .iter()
+        .map(|p| {
+            base.and_then(|b| p.strip_prefix(b).ok())
+                .filter(|r| !r.as_os_str().is_empty())
+                .map_or_else(|| p.clone(), Path::to_path_buf)
+        })
+        .collect()
 }
 
 /// Carpeta (dentro de la temporal) de las imágenes pegadas.
@@ -137,8 +165,30 @@ mod tests {
         let image = image::open(&path).unwrap().to_rgba8();
         assert_eq!((image.width(), image.height()), (2, 1));
         assert_eq!(image.into_raw(), rgba);
-        // Dos pegados seguidos no se pisan.
-        assert_ne!(save_png(2, 1, &rgba, &dir).unwrap(), path);
+        // Dos pegados seguidos no se pisan, y el nombre es corto y legible.
+        let second = save_png(2, 1, &rgba, &dir).unwrap();
+        assert_eq!(path.file_name().unwrap(), "captura-1.png");
+        assert_eq!(second.file_name().unwrap(), "captura-2.png");
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn project_files_are_sent_relative_to_the_agent_folder() {
+        let base = Path::new("/proj");
+        let paths = [
+            PathBuf::from("/proj/src/main.rs"),
+            PathBuf::from("/tmp/forge-paste/captura-1.png"),
+            PathBuf::from("/project/x.rs"),
+        ];
+        assert_eq!(
+            relative_to(&paths, Some(base)),
+            [
+                PathBuf::from("src/main.rs"),
+                PathBuf::from("/tmp/forge-paste/captura-1.png"),
+                PathBuf::from("/project/x.rs"),
+            ]
+        );
+        // Sin carpeta conocida, las rutas tal cual.
+        assert_eq!(relative_to(&paths, None), paths);
     }
 }

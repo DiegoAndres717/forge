@@ -1091,6 +1091,7 @@ impl Terminal {
                     && self.suggest.is_none() =>
                 {
                     let paths = std::mem::take(&mut self.attachments);
+                    let paths = crate::paste::relative_to(&paths, self.cwd().as_deref());
                     self.paste(&format!(" {}", crate::paste::drop_text(&paths).trim_end()));
                     self.pending_enter = Some(Instant::now());
                     ctx.request_repaint_after(Duration::from_millis(60));
