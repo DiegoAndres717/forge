@@ -4,6 +4,7 @@ mod cli;
 #[cfg(any(target_os = "linux", test))]
 mod desktop_entry;
 mod layout;
+mod paste;
 mod processes;
 mod suggest;
 mod terminal;

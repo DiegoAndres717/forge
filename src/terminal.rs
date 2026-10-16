@@ -110,6 +110,8 @@ pub struct Terminal {
     size: Size,
     scroll_acc: f32,
     had_focus: bool,
+    /// Se vio la pulsación de V (para reconocer un ⌘V que egui se tragó).
+    v_down: bool,
     mouse_down: Option<u8>,
     /// Clic principal en una app que captura el ratón, aún sin enviar: si se arrastra, es
     /// una selección de Forge; si se suelta quieto, va a la app (línea, columna).
@@ -355,6 +357,7 @@ impl Terminal {
             size,
             scroll_acc: 0.0,
             had_focus: true,
+            v_down: false,
             mouse_down: None,
             held: None,
             selecting: false,
@@ -814,6 +817,20 @@ impl Terminal {
         }
     }
 
+    /// Pega texto como Terminal.app: saltos de línea normalizados y, si el programa lo pide,
+    /// entre marcas de pegado (así un agente no lo toma por teclas sueltas).
+    pub fn paste(&mut self, text: &str) {
+        let mode = *self.term.lock().unwrap().mode();
+        self.scroll_to_bottom();
+        let text = text.replace("\r\n", "\r").replace('\n', "\r");
+        if mode.contains(TermMode::BRACKETED_PASTE) {
+            let text = text.replace('\x1b', "");
+            self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
+        } else {
+            self.send(text.as_bytes());
+        }
+    }
+
     fn keyboard(&mut self, ctx: &egui::Context, m: &Metrics) {
         let mode = *self.term.lock().unwrap().mode();
         let (events, window_focused, alt) =
@@ -827,6 +844,14 @@ impl Terminal {
             }
         }
 
+        // ⌘V con solo una imagen en el portapapeles: egui se traga la pulsación (no hay texto)
+        // y solo llega la suelta. Se guarda como PNG y se pega su ruta, que todos los
+        // agentes saben leer.
+        if crate::paste::swallowed_paste(&events, &mut self.v_down)
+            && let Some(path) = crate::paste::clipboard_image()
+        {
+            self.paste(&crate::paste::drop_text(&[path]));
+        }
         for event in events {
             match event {
                 // Con sugerencias a la vista: Tab acepta, ↑↓ eligen y Esc las cierra. Enter
@@ -863,17 +888,11 @@ impl Terminal {
                     self.scroll_to_bottom();
                     self.send(text.as_bytes());
                 }
-                egui::Event::Paste(text) => {
-                    self.scroll_to_bottom();
-                    // Normaliza saltos de línea como Terminal.app/iTerm.
-                    let text = text.replace("\r\n", "\r").replace('\n', "\r");
-                    if mode.contains(TermMode::BRACKETED_PASTE) {
-                        let text = text.replace('\x1b', "");
-                        self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
-                    } else {
-                        self.send(text.as_bytes());
-                    }
-                }
+                egui::Event::Paste(text) => self.paste(&text),
+                // ⌘V con solo una imagen en el portapapeles: egui no da evento al pulsar (no
+                // hay texto), pero sí al soltar. Se guarda como PNG y se pega su ruta, que
+                // todos los agentes saben leer.
+
                 // Ctrl+X en PC llega como «cortar»: es del shell (nano sale con él).
                 egui::Event::Cut if !cfg!(target_os = "macos") => self.send(b"\x18"),
                 egui::Event::Copy => {

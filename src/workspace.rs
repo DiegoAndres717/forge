@@ -604,6 +604,26 @@ impl Workspace {
         }
     }
 
+    /// Lo que se ve en la terminal enfocada (para las pruebas).
+    #[cfg(test)]
+    pub fn focus_screen(&self) -> String {
+        match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) => t.screen_text(50).unwrap_or_default(),
+            _ => String::new(),
+        }
+    }
+
+    /// Pega texto en la terminal enfocada (rutas de archivos soltados). false si no hay.
+    pub fn paste_into_focus(&mut self, text: &str) -> bool {
+        match self.panels.get_mut(&self.focus).map(|p| &mut p.content) {
+            Some(Content::Shell(t)) => {
+                t.paste(text);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Estado para guardar (el de antes de dormir si está dormido).
     pub fn saved_state(&self) -> Option<WorkspaceState> {
         match &self.dormant {

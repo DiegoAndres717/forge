@@ -1315,11 +1315,13 @@ name = "forge"
 version = "0.7.7"
 dependencies = [
  "alacritty_terminal",
+ "arboard",
  "base64",
  "eframe",
  "egui-phosphor",
  "egui_kittest",
  "forge-core",
+ "image",
  "libc",
  "mac-notification-sys",
  "muda",
