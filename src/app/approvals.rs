@@ -40,6 +40,8 @@ impl App {
         // Una sola vez por solicitud: traer Forge al frente y avisar en el Dock.
         if self.approval_seen.as_deref() != Some(request.id.as_str()) {
             self.approval_seen = Some(request.id.clone());
+            // Si estás en otra app no ves el diálogo: suena y llega una notificación.
+            self.alert_approval(ctx, &request);
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
                 egui::UserAttentionType::Critical,
