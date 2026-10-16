@@ -125,10 +125,31 @@ pub fn powershell_line(line: &str) -> String {
     format!("& {{ $PSNativeCommandArgumentPassing = 'Legacy'; {line} }}")
 }
 
+/// ¿El OpenCode instalado admite `--standalone`? Lo apunta `detect` con su versión; hasta
+/// entonces se supone que sí (la versión actual).
+static OPENCODE_STANDALONE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+/// `--standalone` llegó con el servicio de fondo de OpenCode 2; la 1.x no lo conoce y, con
+/// él, solo imprime la ayuda. Sin versión legible se supone que sí.
+pub fn opencode_has_standalone(version: &str) -> bool {
+    let major = version
+        .split(|c: char| !c.is_ascii_digit())
+        .find(|p| !p.is_empty())
+        .and_then(|p| p.parse::<u32>().ok());
+    major.is_none_or(|m| m >= 2)
+}
+
 impl AgentSpec {
     /// Comando con el servidor MCP conectado (los flags van justo tras el programa,
     /// así sirven también para subcomandos como `codex resume --last`).
     pub fn with_mcp(&self, command: &str, server: &McpServer) -> String {
+        let standalone = OPENCODE_STANDALONE.load(std::sync::atomic::Ordering::Relaxed);
+        self.with_mcp_for(command, server, standalone)
+    }
+
+    /// Como `with_mcp`, diciendo si OpenCode admite `--standalone`.
+    pub fn with_mcp_for(&self, command: &str, server: &McpServer, standalone: bool) -> String {
         let Some(style) = self.mcp_style else {
             return command.to_string();
         };
@@ -142,6 +163,7 @@ impl AgentSpec {
                 command_line.extend(server.args.iter().cloned());
                 let config = serde_json::json!({"mcp": {&server.name: {"type": "local", "command": command_line, "enabled": true}}});
                 let flagged = match command.split_once(' ') {
+                    _ if !standalone => command.to_string(),
                     Some((program, rest)) => format!("{program} --standalone {rest}"),
                     None => format!("{command} --standalone"),
                 };
@@ -668,8 +690,16 @@ pub fn detect(programs: &[String]) -> HashMap<String, Detection> {
                     out.lines()
                         .map(str::trim)
                         .find(|l| !l.is_empty())
-                        .map(|l| l.chars().take(40).collect())
+                        .map(|l| l.chars().take(40).collect::<String>())
                 });
+                if program == "opencode"
+                    && let Some(v) = &version
+                {
+                    OPENCODE_STANDALONE.store(
+                        opencode_has_standalone(v),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
                 (program, Detection { path, version })
             })
         })
@@ -740,6 +770,38 @@ pub fn default_agent<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_opencode_opens_without_standalone() {
+        // OpenCode 1.x no conoce `--standalone`: con él solo imprime la ayuda y no arranca.
+        for (version, has) in [
+            ("2.0.20", true),
+            ("v2.1.0", true),
+            ("opencode v3.0.0", true),
+            ("1.4.7", false),
+            ("0.15.2", false),
+            ("", true),
+            ("sin versión", true),
+        ] {
+            assert_eq!(opencode_has_standalone(version), has, "{version:?}");
+        }
+        let server = McpServer {
+            name: "forge".into(),
+            command: "/f".into(),
+            args: vec![],
+        };
+        let opencode = builtins().into_iter().find(|a| a.id == "opencode").unwrap();
+        let old = opencode.with_mcp_for("opencode --continue", &server, false);
+        assert!(
+            !old.contains("--standalone") && old.ends_with(" opencode --continue"),
+            "{old}"
+        );
+        assert!(
+            opencode
+                .with_mcp_for("opencode", &server, true)
+                .ends_with(" opencode --standalone")
+        );
+    }
 
     #[test]
     fn agents_get_their_event_hooks() {
