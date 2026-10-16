@@ -733,6 +733,9 @@ pub const EN: &[(&str, &str)] = &[
     ("Revisión de IA", "AI review"),
     ("Quitar {p0}", "Remove {p0}"),
     ("Imagen pegada", "Pasted image"),
+    ("Todas", "All"),
+    ("Filtrar por etiqueta", "Filter by tag"),
+    ("Etiquetas", "Tags"),
     (
         "{who} pide permiso: {cmd}",
         "{who} asks for permission: {cmd}",
@@ -2323,7 +2326,6 @@ pub const EN: &[(&str, &str)] = &[
         "Compartida con los agentes que abres desde Forge (MCP).",
         "Shared with the agents you open from Forge (MCP).",
     ),
-    ("Filtrar por esta etiqueta", "Filter by this tag"),
     ("Cómo trabajan", "How they work"),
     (
         "Ante una petición grande, el agente hace hasta tres preguntas para aclarar lo imprescindible y luego crea el plan por fases antes de escribir código. Vale para todos los agentes y se aplica a los que abras a partir de ahora.",

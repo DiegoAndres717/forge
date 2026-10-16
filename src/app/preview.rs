@@ -196,6 +196,17 @@ fn ui_preview() {
             .unwrap();
         // Los agentes la han leído: el panel lo muestra al lado del título.
         store.note_memory_reads(&[stripe; 3]).unwrap();
+        // Un título largo y muchas etiquetas: el panel no debe desbordarse.
+        store
+            .add_memory(
+                &project,
+                "decision",
+                "Checkout keeps the cart in local storage and syncs it with the server when the connection comes back, resolving conflicts by last write",
+                "Mobile users lose signal in the middle of checkout; keeping the cart local avoids losing it.",
+                "mobile, offline, cart, sync, checkout, storage, conflicts, payments, ux, network, retry, cache",
+                "codex",
+            )
+            .unwrap();
         store
             .add_memory(
                 &project,

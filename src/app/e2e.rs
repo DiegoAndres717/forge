@@ -347,7 +347,15 @@ fn memory_note_created_from_the_panel_is_searchable() {
     assert_eq!(found[0].title, "Vacunación por lotes");
     h.get_by_label_contains("Vacunación por lotes");
 
-    // Las etiquetas existentes salen como botones: un clic filtra, otro lo quita.
+    // Las etiquetas están en un desplegable (con muchas, los botones llenaban el panel).
+    assert!(
+        h.query_by_label_contains("#vacunas").is_none(),
+        "cerrado, no se ven"
+    );
+    // Un desplegable de egui lleva lo elegido como valor, no como etiqueta.
+    h.get_by(|n| n.value().is_some_and(|v| v.contains("Etiquetas")))
+        .click();
+    h.run_steps(2);
     h.get_by_label_contains("#vacunas").click();
     h.run_steps(3);
     assert_eq!(
