@@ -15,21 +15,30 @@ pub struct Release {
     pub checksum: Option<String>,
 }
 
-/// Última versión publicada.
-pub fn latest(repo_url: &str) -> Option<Release> {
+/// Última versión publicada. Un error (sin internet, sin curl, GitHub sin responder) se
+/// devuelve como tal: a mano no puede parecer «está al día».
+pub fn latest(repo_url: &str) -> Result<Release, String> {
     let repo = repo_url
         .trim_end_matches('/')
-        .strip_prefix("https://github.com/")?;
+        .strip_prefix("https://github.com/")
+        .ok_or_else(|| {
+            crate::tr!("{p0}: no es un repositorio de GitHub", p0 = repo_url).to_string()
+        })?;
     let api = format!("repos/{repo}/releases/latest");
-    // La app abierta desde el Finder no tiene el PATH de la terminal: rutas habituales.
+    // La app abierta desde el Finder no tiene el PATH de la terminal: rutas habituales, y
+    // luego el PATH (Windows, Linux).
     let gh = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh"]
         .into_iter()
-        .find(|p| std::path::Path::new(p).exists());
-    let json = gh
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+        .or_else(|| (!cfg!(target_os = "macos")).then(|| PathBuf::from("gh")));
+    let from_gh = gh
         .and_then(|gh| Command::new(gh).args(["api", &api]).output().ok())
-        .filter(|o| o.status.success())
-        .or_else(|| {
-            Command::new("/usr/bin/curl")
+        .filter(|o| o.status.success());
+    let json = match from_gh {
+        Some(o) => o.stdout,
+        None => {
+            let o = Command::new(curl_program())
                 .args([
                     "-fsSL",
                     "-m",
@@ -37,11 +46,30 @@ pub fn latest(repo_url: &str) -> Option<Release> {
                     &format!("https://api.github.com/{api}"),
                 ])
                 .output()
-                .ok()
-                .filter(|o| o.status.success())
-        })?
-        .stdout;
-    let v: serde_json::Value = serde_json::from_slice(&json).ok()?;
+                .map_err(|e| format!("curl: {e}"))?;
+            if !o.status.success() {
+                return Err(String::from_utf8_lossy(&o.stderr).trim().to_string());
+            }
+            o.stdout
+        }
+    };
+    parse_release(&json)
+}
+
+/// curl del sistema: el de macOS en su ruta (la app del Finder no tiene PATH); en Windows
+/// 10+ y Linux, el del PATH.
+fn curl_program() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "/usr/bin/curl"
+    } else {
+        "curl"
+    }
+}
+
+/// La respuesta de la API de GitHub (`releases/latest`).
+fn parse_release(json: &[u8]) -> Result<Release, String> {
+    let v: serde_json::Value = serde_json::from_slice(json)
+        .map_err(|_| crate::tr!("respuesta inesperada de GitHub").to_string())?;
     let asset = |suffix: &str| {
         v["assets"]
             .as_array()
@@ -51,9 +79,14 @@ pub fn latest(repo_url: &str) -> Option<Release> {
             .find(|u| u.ends_with(suffix))
             .map(str::to_string)
     };
-    Some(Release {
-        tag: v["tag_name"].as_str()?.to_string(),
-        page: v["html_url"].as_str()?.to_string(),
+    let field = |k: &str| {
+        v[k].as_str()
+            .map(str::to_string)
+            .ok_or_else(|| crate::tr!("respuesta inesperada de GitHub").to_string())
+    };
+    Ok(Release {
+        tag: field("tag_name")?,
+        page: field("html_url")?,
         dmg: asset(".dmg"),
         checksum: asset(".dmg.sha256"),
     })
@@ -158,6 +191,30 @@ pub fn is_newer(tag: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_check_is_an_error_not_up_to_date() {
+        // Sin respuesta (sin internet, sin curl…) no puede parecer «está al día».
+        assert!(latest("no es un repo").is_err());
+        let json =
+            br#"{"tag_name":"v0.7.7","html_url":"https://github.com/o/r/releases/tag/v0.7.7",
+            "assets":[{"browser_download_url":"https://x/forge-v0.7.7-windows-x86_64.zip"},
+                      {"browser_download_url":"https://x/Forge-0.7.7.dmg"},
+                      {"browser_download_url":"https://x/Forge-0.7.7.dmg.sha256"}]}"#;
+        let release = parse_release(json).unwrap();
+        assert_eq!(release.tag, "v0.7.7");
+        assert_eq!(release.dmg.as_deref(), Some("https://x/Forge-0.7.7.dmg"));
+        assert!(parse_release(b"<html>rate limited</html>").is_err());
+        // En Windows y Linux, el curl del sistema (en el PATH); /usr/bin/curl es de macOS.
+        assert_eq!(
+            curl_program(),
+            if cfg!(target_os = "macos") {
+                "/usr/bin/curl"
+            } else {
+                "curl"
+            }
+        );
+    }
 
     #[test]
     fn compares_versions() {
