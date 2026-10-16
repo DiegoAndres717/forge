@@ -1251,6 +1251,7 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
             &reviewers,
             &guard::counted_files(&rules, &diff.files),
             &risk,
+            &config,
         );
         out.line(&out.paint("1", tr!("Revisores especializados")));
         for a in &active {

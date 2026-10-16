@@ -1004,6 +1004,51 @@ pub const EN: &[(&str, &str)] = &[
         "Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no es un hallazgo salvo que esconda un defecto.",
         "Report a finding only if it is a real defect that affects whoever uses the code and that you can defend with concrete evidence from the diff. If in doubt, leave it out. Style is not a finding unless it hides a defect.",
     ),
+    ("Profundidad de la revisión", "Review depth"),
+    (
+        "Además de los revisores de cada área (seguridad, base de datos, interfaz…), unas lentes generales revisan todo el cambio. Cuantas más, más se encuentra y más se gasta.",
+        "Besides the reviewers for each area (security, database, UI…), general lenses review the whole change. The more lenses, the more they find and the more it costs.",
+    ),
+    ("Según el riesgo", "By risk"),
+    (
+        "Cambio de riesgo bajo: ninguna lente. Medio: la primera elegida. Alto: todas.",
+        "Low-risk change: no lens. Medium: the first one chosen. High: all of them.",
+    ),
+    ("Siempre ligera", "Always light"),
+    (
+        "Nunca usa lentes: solo los revisores de cada área.",
+        "Never uses lenses: only the reviewers for each area.",
+    ),
+    ("Siempre completa", "Always full"),
+    (
+        "Usa todas las lentes elegidas en cada cambio, aunque sea pequeño.",
+        "Uses every chosen lens on every change, even a small one.",
+    ),
+    ("Fiabilidad y tests", "Reliability and tests"),
+    (
+        "Cambios sin un test que los cubra, casos límite y tests que pasan sin probar nada.",
+        "Changes with no test covering them, edge cases and tests that pass without testing anything.",
+    ),
+    ("Legibilidad", "Readability"),
+    (
+        "Lógica duplicada, código muerto, números mágicos y nombres que esconden la intención.",
+        "Duplicated logic, dead code, magic numbers and names that hide intent.",
+    ),
+    ("Resiliencia", "Resilience"),
+    (
+        "Fallos sin manejar o tragados en silencio, operaciones sin forma de deshacer y fallos que pasarían inadvertidos.",
+        "Unhandled or silently swallowed failures, operations with no way to undo and failures that would go unnoticed.",
+    ),
+    ("Refutar antes de bloquear", "Refute before blocking"),
+    (
+        "Cuando un revisor iba a bloquear, otro modelo intenta desmentir cada hallazgo grave con el diff. Lo desmentido queda como nota y deja de bloquear; si duda, se mantiene. Cuesta una llamada por hallazgo (3 como máximo).",
+        "When a reviewer is about to block, another model tries to disprove each serious finding against the diff. What it disproves becomes a note and stops blocking; if in doubt, it stands. Costs one call per finding (3 at most).",
+    ),
+    (
+        "Cuándo se revisa: en «Revisión con IA» de cada paso de Project Guard (commit, push, PR).",
+        "When it runs: under \"AI review\" in each Project Guard step (commit, push, PR).",
+    ),
+    ("apagada en Ajustes", "turned off in Settings"),
     ("{p0} · refutador", "{p0} · refuter"),
     (
         "Desmentido por el refutador: {m}",
