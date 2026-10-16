@@ -18,6 +18,7 @@ Uso:
   forge [carpeta]                       abre la app (y ese proyecto)
   forge guard commit|push|pr            comprueba si el proyecto está listo
   forge review                          Guard del commit con revisión con IA, aunque rules.toml no la pida
+  forge review --judgment               lo mismo con el Juicio: dos jueces a ciegas que leen el proyecto
   forge guard status                    reglas, hooks y excepciones del proyecto
   forge guard explain [commit|push|pr]  qué se exige en cada etapa
   forge guard allow <regla> --reason \"motivo\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -64,6 +65,7 @@ Usage:
   forge [folder]                        opens the app (and that project)
   forge guard commit|push|pr            checks whether the project is ready
   forge review                          commit Guard with the AI review, even if rules.toml doesn't ask for it
+  forge review --judgment               the same with the Judgment: two blind judges that read the project
   forge guard status                    project rules, hooks and exceptions
   forge guard explain [commit|push|pr]  what each stage requires
   forge guard allow <rule> --reason \"reason\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -204,8 +206,16 @@ pub fn run(args: &[String]) -> i32 {
             Stage::parse(stage).unwrap_or(Stage::Commit),
             hook,
             false,
+            false,
         ),
-        (Some("review"), _) => gate(&out, &project, Stage::Commit, hook, true),
+        (Some("review"), _) => gate(
+            &out,
+            &project,
+            Stage::Commit,
+            hook,
+            true,
+            args.iter().any(|a| a == "--judgment"),
+        ),
         (Some("guard"), Some("status")) => status(&out, &project),
         (Some("guard"), Some("explain")) => {
             explain(&out, &project, pos.get(2).and_then(|s| Stage::parse(s)))
@@ -345,6 +355,7 @@ fn gate(
     stage: Stage,
     hook: bool,
     review: bool,
+    judgment: bool,
 ) -> Result<i32, String> {
     let project = Project::load(project_dir)?;
     let mut rules = Rules::load(project_dir)?.unwrap_or_default();
@@ -400,7 +411,13 @@ fn gate(
         push_range,
         evidence,
         name: project.name(),
-        routing: Some(forge_core::router::RouterConfig::load(project_dir)?),
+        routing: Some({
+            let mut config = forge_core::router::RouterConfig::load(project_dir)?;
+            if judgment {
+                config.review_depth = forge_core::reviewers::DepthMode::Judgment;
+            }
+            config
+        }),
         month_spent: store
             .as_ref()
             .ok()

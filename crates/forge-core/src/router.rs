@@ -52,6 +52,8 @@ pub struct RouterConfig {
     pub lenses: Vec<String>,
     /// Otro modelo intenta desmentir los hallazgos que bloquearían.
     pub refuter: bool,
+    /// Modelo de los dos jueces del Juicio (con Claude).
+    pub judge_model: String,
 }
 
 impl Default for RouterConfig {
@@ -69,6 +71,7 @@ impl Default for RouterConfig {
             review_depth: crate::reviewers::DepthMode::Risk,
             lenses: crate::reviewers::LENSES.map(String::from).to_vec(),
             refuter: true,
+            judge_model: "sonnet".into(),
         }
     }
 }
@@ -1264,6 +1267,177 @@ fn refute(
 
 /// Decide la revisión de nivel 2 o 3 más alta que respondió: una clasificación de nivel 1
 /// sola nunca aprueba un cambio.
+/// Juicio: dos jueces a ciegas, en paralelo.
+pub fn judgment(
+    config: &RouterConfig,
+    rules: &Rules,
+    ctx: &ReviewContext,
+    month_spent: f64,
+    local: bool,
+    on_step: &dyn Fn(&str),
+) -> AiOutcome {
+    let mut chosen = route(config, Task::Architecture, local);
+    if matches!(chosen.provider.as_str(), "anthropic" | "claude") {
+        chosen.model = config.judge_model.clone();
+    }
+    let paid = config.provider(&chosen.provider).is_some_and(|p| !p.local);
+    if paid && month_spent + 2.0 * config.max_cost_per_call_usd > config.monthly_budget_usd {
+        return finish(
+            Vec::new(),
+            Some(format!(
+                "presupuesto mensual agotado (${month_spent:.2} de ${:.2}); sube monthly_budget_usd o usa un modelo local",
+                config.monthly_budget_usd
+            )),
+        );
+    }
+    on_step(&tr!("2 jueces · {p0}", p0 = chosen.label()));
+    let task = Task::Architecture;
+    let diff = match reduced_diff(&ctx.repo, &ctx.range, rules, task.context_budget(), &[]) {
+        Ok(d) => d,
+        Err(e) => {
+            return finish(
+                Vec::new(),
+                Some(tr!("no se pudo preparar el diff: {e}", e = e)),
+            );
+        }
+    };
+    // A ciegas: el mismo diff y criterio, cada uno sin ver al otro.
+    let steps: Vec<Step> = std::thread::scope(|scope| {
+        let handles: Vec<_> = ["A", "B"]
+            .map(|judge| {
+                let (chosen, diff) = (&chosen, &diff);
+                scope.spawn(move || {
+                    let started = Instant::now();
+                    let prompt = prompt_with(&judge_role(judge), ctx, diff);
+                    let result = call(config, chosen, &prompt, &ctx.repo);
+                    let (review, error, usage) = match result {
+                        Ok((r, u)) => (Some(r), None, Some(u)),
+                        Err(e) => (None, Some(e), None),
+                    };
+                    Step {
+                        route: tr!("{p0} · juez {judge}", p0 = chosen.label(), judge = judge),
+                        task,
+                        review,
+                        error,
+                        usage,
+                        seconds: started.elapsed().as_secs_f64(),
+                    }
+                })
+            })
+            .into_iter()
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let (verdict, findings) = merge_judges(steps[0].review.as_ref(), steps[1].review.as_ref());
+    let summary = steps
+        .iter()
+        .filter_map(|s| s.review.as_ref())
+        .map(|r| r.summary.clone())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let reason = (verdict == AiVerdict::Incomplete)
+        .then(|| tr!("ningún juez dio una respuesta válida").to_string());
+    AiOutcome {
+        verdict,
+        summary,
+        findings,
+        steps,
+        reason,
+    }
+}
+
+/// Instrucciones de cada juez: adversarial y con los casos que hay que recorrer (las que
+/// hacen buena la revisión de gentle-ai: leer el proyecto y asumir que hay fallos).
+fn judge_role(judge: &str) -> String {
+    format!(
+        "Eres el Juez {judge} de un Juicio: otro juez revisa el mismo cambio a ciegas y solo \
+         cuenta lo que veáis los dos. Sé exhaustivo y adversarial: asume que el cambio tiene \
+         fallos hasta demostrar lo contrario. Recorre, uno por uno, los casos que apliquen:\n\
+         - Corrección: ¿hace lo que pretende? Caminos felices y no felices.\n\
+         - Interacción: doble clic o envío doble, clic mientras carga, no hacer nada, cancelar a \
+           medias, volver atrás, recargar.\n\
+         - Estados: vacío, cargando, error, sin permisos, sin conexión, datos a medias.\n\
+         - Datos: nulos o ausentes, vacíos, muy largos, duplicados, formato inválido, límites \
+           (0, 1, máximo), zonas horarias y monedas.\n\
+         - Errores: excepciones sin capturar, errores tragados, mensajes al usuario, reintentos.\n\
+         - Concurrencia: dos peticiones a la vez, condiciones de carrera, orden de respuestas.\n\
+         - Seguridad: autorización en el servidor, inyección, datos sensibles, secretos.\n\
+         - Rendimiento: consultas N+1, bucles costosos, renders o peticiones de más.\n\
+         - Tests: ¿cubren estos casos? Falta de tests para lo nuevo.\n\
+         - Convenciones del proyecto.\n\
+         Cada hallazgo con archivo y línea, y la evidencia concreta (qué pasa y cuándo). \
+         \"blocking\" para lo que rompe algo a quien lo usa; \"warning\" para lo que debería \
+         arreglarse; \"info\" para el resto."
+    )
+}
+
+/// Junta los dos jueces del Juicio (como Judgment Day de gentle-ai): un hallazgo que los dos
+/// ven (mismo archivo, líneas a 5 o menos) se confirma y bloquea si es grave; lo que ve uno
+/// solo es sospecha: avisa, nunca bloquea. Con un juez caído no se aprueba.
+pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerdict, Vec<Finding>) {
+    let (a, b) = match (a, b) {
+        (None, None) => return (AiVerdict::Incomplete, Vec::new()),
+        (Some(x), None) | (None, Some(x)) => (x, None),
+        (Some(a), Some(b)) => (a, Some(b)),
+    };
+    let empty = Vec::new();
+    let others = b.map_or(&empty, |b| &b.findings);
+    let near = |x: &Finding, y: &Finding| x.file == y.file && x.line.abs_diff(y.line) <= 5;
+    let rank = |s: &str| match s {
+        "blocking" => 2,
+        "warning" => 1,
+        _ => 0,
+    };
+    let (mut confirmed, mut suspects) = (Vec::new(), Vec::new());
+    let mut matched = vec![false; others.len()];
+    for x in &a.findings {
+        match others.iter().position(|y| near(x, y)) {
+            Some(i) => {
+                matched[i] = true;
+                let y = &others[i];
+                let mut f = x.clone();
+                if rank(&y.severity) > rank(&x.severity) {
+                    f.severity = y.severity.clone();
+                }
+                f.message = tr!(
+                    "{p0} (2 de 2 jueces; el otro: {p1})",
+                    p0 = x.message,
+                    p1 = y.message
+                );
+                confirmed.push(f);
+            }
+            None => suspects.push(x.clone()),
+        }
+    }
+    suspects.extend(
+        others
+            .iter()
+            .zip(&matched)
+            .filter(|(_, m)| !**m)
+            .map(|(y, _)| y.clone()),
+    );
+    for f in &mut suspects {
+        if rank(&f.severity) == 2 {
+            f.severity = "warning".into();
+        }
+        f.message = tr!("Sospecha (1 de 2 jueces): {p0}", p0 = f.message);
+    }
+    let verdict = if confirmed.iter().any(|f| rank(&f.severity) == 2) {
+        AiVerdict::Block
+    } else if b.is_none()
+        || confirmed
+            .iter()
+            .chain(&suspects)
+            .any(|f| rank(&f.severity) >= 1)
+    {
+        AiVerdict::Changes
+    } else {
+        AiVerdict::Approve
+    };
+    confirmed.extend(suspects);
+    (verdict, confirmed)
+}
+
 fn finish(steps: Vec<Step>, reason: Option<String>) -> AiOutcome {
     let decided = steps
         .iter()
@@ -1312,7 +1486,8 @@ const TEMPLATE: &str = "# Router de modelos: qué modelo revisa según la tarea 
                 allow_escalation = true\n\
                 max_cost_per_call_usd = 0.50\n\
                 best_effort = false             # true: sin proveedor o sin respuesta, avisa y no bloquea\n\
-                review_depth = \"risk\"           # risk | light | full: cuántas lentes según el riesgo\n\
+                review_depth = \"risk\"           # risk | light | full | judgment (2 jueces): cuántas lentes según el riesgo\n\
+                judge_model = \"sonnet\"         # modelo de los jueces del Juicio (con Claude)\n\
                 lenses = [\"reliability\", \"readability\", \"resilience\"]\n\
                 refuter = true                  # otro modelo intenta desmentir lo que bloquearía\n\n\
                 # Cada tarea puede fijar proveedor (anthropic, openai, opencode, local), modelo y esfuerzo.\n\
@@ -1338,6 +1513,8 @@ pub struct RoutingForm {
     pub review_depth: crate::reviewers::DepthMode,
     pub lenses: Vec<String>,
     pub refuter: bool,
+    /// Modelo de los jueces del Juicio.
+    pub judge_model: String,
 }
 
 /// Las tareas de nivel 2–3 que «Revisar en local» lleva a Ollama.
@@ -1367,6 +1544,7 @@ impl RoutingForm {
             review_depth: c.review_depth,
             lenses: c.lenses,
             refuter: c.refuter,
+            judge_model: c.judge_model.clone(),
         })
     }
 
@@ -1394,6 +1572,11 @@ impl RoutingForm {
             crate::reviewers::DepthMode::Risk => "risk",
             crate::reviewers::DepthMode::Light => "light",
             crate::reviewers::DepthMode::Full => "full",
+            crate::reviewers::DepthMode::Judgment => "judgment",
+        });
+        r["judge_model"] = toml_edit::value(match self.judge_model.trim() {
+            "" => "sonnet",
+            m => m,
         });
         r["lenses"] = toml_edit::value(self.lenses.iter().collect::<toml_edit::Array>());
         r["refuter"] = toml_edit::value(self.refuter);
@@ -1688,6 +1871,135 @@ mod tests {
             range: vec![],
         };
         assert!(prompt_with("Revisa.", &ctx, "").contains("abre los archivos"));
+    }
+
+    #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+    )]
+    fn judgment_runs_two_blind_judges_in_parallel() {
+        let dir = std::env::temp_dir().join(format!("forge-judgment-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ok = Command::new("sh")
+            .args(["-c", "git init -q -b main && git config user.email t@t && git config user.name t && echo a > a.txt && git add . && git commit -qm x && printf 'a\\nb\\nc\\n' > a.txt && git add a.txt"])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        // Cada juez responde según su letra; los dos ven el mismo fallo en a.txt.
+        let json = |line: u32| {
+            format!(
+                "{{\\\"verdict\\\":\\\"block\\\",\\\"confidence\\\":0.9,\\\"summary\\\":\\\"x\\\",\\\"findings\\\":[{{\\\"severity\\\":\\\"blocking\\\",\\\"file\\\":\\\"a.txt\\\",\\\"line\\\":{line},\\\"message\\\":\\\"doble clic\\\"}}]}}"
+            )
+        };
+        let mut config = RouterConfig::default();
+        config.providers.insert(
+            "juez".into(),
+            ProviderDef {
+                command: format!(
+                    "p=$(cat); case \"$p\" in *'Juez A'*) echo \"{}\";; *'Juez B'*) echo \"{}\";; esac",
+                    json(2),
+                    json(3)
+                ),
+                format: OutputFormat::Text,
+                cost_per_call_usd: 0.10,
+                local: false,
+            },
+        );
+        config.tasks.insert(
+            "architecture".into(),
+            TaskRoute {
+                provider: "juez".into(),
+                model: "m".into(),
+                effort: None,
+            },
+        );
+        let ctx = ReviewContext {
+            project: "x".into(),
+            stage: Stage::Commit,
+            risk: assess(&[], 0),
+            deterministic: vec![],
+            files: vec![],
+            repo: dir.clone(),
+            range: vec!["--cached".into()],
+        };
+        let outcome = judgment(&config, &Rules::default(), &ctx, 0.0, false, &|_| {});
+        assert_eq!(outcome.steps.len(), 2, "{:?}", outcome.details());
+        assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
+        assert_eq!(outcome.findings.len(), 1);
+        assert!((outcome.cost() - 0.20).abs() < 1e-9);
+        // Sin presupuesto para los dos jueces: incompleto, sin llamar a nadie.
+        config.monthly_budget_usd = 0.5;
+        let poor = judgment(&config, &Rules::default(), &ctx, 0.2, false, &|_| {});
+        assert_eq!(poor.verdict, AiVerdict::Incomplete);
+        assert!(poor.steps.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_judges_confirm_what_both_see_and_suspect_the_rest() {
+        let f = |severity: &str, file: &str, line: u64, message: &str| Finding {
+            severity: severity.into(),
+            file: file.into(),
+            line,
+            message: message.into(),
+        };
+        let judge = |verdict: &str, findings| ModelReview {
+            verdict: verdict.into(),
+            confidence: 0.8,
+            risk: None,
+            summary: String::new(),
+            findings,
+        };
+        // Los dos ven el doble clic (líneas cercanas): confirmado, bloquea. Solo uno ve lo
+        // del estado vacío: sospecha, que avisa pero no bloquea.
+        let a = judge(
+            "block",
+            vec![
+                f("blocking", "Button.tsx", 12, "doble clic envía dos veces"),
+                f("blocking", "List.tsx", 40, "sin estado vacío"),
+            ],
+        );
+        let b = judge(
+            "block",
+            vec![f(
+                "blocking",
+                "Button.tsx",
+                14,
+                "no se desactiva mientras carga",
+            )],
+        );
+        let (verdict, findings) = merge_judges(Some(&a), Some(&b));
+        assert_eq!(verdict, AiVerdict::Block);
+        assert_eq!(findings.len(), 2, "{findings:?}");
+        assert_eq!(findings[0].severity, "blocking");
+        assert!(findings[0].message.contains("doble clic"));
+        assert!(
+            findings[0].message.contains("2 de 2"),
+            "{}",
+            findings[0].message
+        );
+        assert_eq!(findings[1].severity, "warning");
+        assert!(
+            findings[1].message.contains("1 de 2"),
+            "{}",
+            findings[1].message
+        );
+
+        // Solo sospechas: pide cambios, no bloquea.
+        let (verdict, _) = merge_judges(Some(&a), Some(&judge("approve", vec![])));
+        assert_eq!(verdict, AiVerdict::Changes);
+        // Los dos aprueban sin hallazgos: aprobado.
+        let clean = judge("approve", vec![]);
+        assert_eq!(
+            merge_judges(Some(&clean), Some(&clean)).0,
+            AiVerdict::Approve
+        );
+        // Un juez falló: lo del otro es sospecha y no aprueba solo.
+        assert_eq!(merge_judges(Some(&clean), None).0, AiVerdict::Changes);
+        assert_eq!(merge_judges(None, None).0, AiVerdict::Incomplete);
     }
 
     #[test]

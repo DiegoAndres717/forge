@@ -345,6 +345,7 @@ impl App {
                     (DepthMode::Risk, tr!("Según el riesgo"), tr!("Cambio de riesgo bajo: ninguna lente. Medio: la primera elegida. Alto: todas.")),
                     (DepthMode::Light, tr!("Siempre ligera"), tr!("Nunca usa lentes: solo los revisores de cada área.")),
                     (DepthMode::Full, tr!("Siempre completa"), tr!("Usa todas las lentes elegidas en cada cambio, aunque sea pequeño.")),
+                    (DepthMode::Judgment, tr!("Juicio (2 jueces)"), tr!("Dos jueces revisan a ciegas leyendo el proyecto y recorren los casos límite (doble clic, vacíos, errores, concurrencia…). Lo que ven los dos bloquea. Sustituye a las lentes; gasta más.")),
                 ] {
                     if ui
                         .selectable_label(g.form.review_depth == d, name)
@@ -356,6 +357,20 @@ impl App {
                     }
                 }
             });
+            if g.form.review_depth == DepthMode::Judgment {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(tr!("Modelo de los jueces")).color(theme::TEXT_2));
+                    for (model, name) in [("sonnet", "Sonnet"), ("opus", "Opus")] {
+                        if ui
+                            .selectable_label(g.form.judge_model == model, name)
+                            .clicked()
+                        {
+                            g.form.judge_model = model.into();
+                            changed = true;
+                        }
+                    }
+                });
+            }
             for (id, name, help) in [
                 (
                     "reliability",

@@ -601,21 +601,34 @@ impl AiRun<'_> {
             .cloned()
         {
             let security = rule == "security-review";
+            // Juicio (plan #49): dos jueces a ciegas hacen la revisión de IA.
+            let judgment =
+                !security && self.config.review_depth == crate::reviewers::DepthMode::Judgment;
             let title = if security {
                 tr!("Revisión de seguridad")
+            } else if judgment {
+                tr!("Juicio")
             } else {
                 tr!("Revisión de IA")
             };
             // Firma de la ruta: si cambia el perfil o los modelos, la aprobación previa no vale.
-            let signature = format!(
-                "{:?}|{}",
-                self.config.profile,
-                router::plan(self.config, &risk, security)
-                    .iter()
-                    .map(|t| router::route(self.config, *t, local).label())
-                    .collect::<Vec<_>>()
-                    .join(",")
-            );
+            let signature = if judgment {
+                format!(
+                    "judgment|{}|{}",
+                    router::route(self.config, router::Task::Architecture, local).label(),
+                    self.config.judge_model
+                )
+            } else {
+                format!(
+                    "{:?}|{}",
+                    self.config.profile,
+                    router::plan(self.config, &risk, security)
+                        .iter()
+                        .map(|t| router::route(self.config, *t, local).label())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            };
             if let Some(e) = evidence
                 .iter()
                 .filter(|e| {
@@ -638,15 +651,19 @@ impl AiRun<'_> {
                     tr!("{title} · {step}…", title = title, step = step);
                 (self.notify)();
             };
-            let outcome = router::review(
-                self.config,
-                self.rules,
-                &ctx,
-                security,
-                spent,
-                local,
-                &on_step,
-            );
+            let outcome = if judgment {
+                router::judgment(self.config, self.rules, &ctx, spent, local, &on_step)
+            } else {
+                router::review(
+                    self.config,
+                    self.rules,
+                    &ctx,
+                    security,
+                    spent,
+                    local,
+                    &on_step,
+                )
+            };
             spent += outcome
                 .steps
                 .iter()
