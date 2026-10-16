@@ -414,7 +414,9 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     let s = rules.stage(stage);
     // Se ejecutan al final, solo si pasan los controles deterministas (router de modelos).
     let waiting = vec![tr!("se ejecuta cuando pasen los controles deterministas").to_string()];
-    if s.require_ai_review {
+    // Sin archivos no hay nada que revisar: no se llama (ni se paga) a ningún modelo.
+    let has_changes = !diff.files.is_empty();
+    if s.require_ai_review && has_changes {
         items.push(item(
             "ai-review",
             Level::Pending,
@@ -422,7 +424,7 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
             waiting.clone(),
         ));
     }
-    if s.require_security_review {
+    if s.require_security_review && has_changes {
         items.push(item(
             "security-review",
             Level::Pending,

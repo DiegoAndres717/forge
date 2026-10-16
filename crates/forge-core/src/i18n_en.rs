@@ -734,8 +734,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Revisar cambios con IA", "Review changes with AI"),
     ("{p0}  Revisar cambios", "{p0}  Review changes"),
     (
-        "Revisores con IA (seguridad, base de datos, lentes…) sobre lo que hay sin commit. El resultado sale en Guard.",
-        "AI reviewers (security, database, lenses…) on what isn't committed yet. The result shows in Guard.",
+        "Valida el commit con los revisores con IA (seguridad, base de datos, lentes…), aunque Guard no los pida: lo preparado o, si no hay nada preparado, todo lo que hay sin commit. El resultado sale en Guard.",
+        "Validates the commit with the AI reviewers (security, database, lenses…) even if Guard doesn't ask for them: what's staged or, if nothing is staged, everything not committed yet. The result shows in Guard.",
     ),
     ("Revisión de seguridad", "Security review"),
     ("Commit", "Commit"),

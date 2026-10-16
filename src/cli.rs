@@ -17,7 +17,7 @@ Forge — workspace de proyectos con terminales, agentes y Project Guard
 Uso:
   forge [carpeta]                       abre la app (y ese proyecto)
   forge guard commit|push|pr            comprueba si el proyecto está listo
-  forge review                          revisa con IA los cambios sin commit (aunque rules.toml no la pida)
+  forge review                          Guard del commit con revisión con IA, aunque rules.toml no la pida
   forge guard status                    reglas, hooks y excepciones del proyecto
   forge guard explain [commit|push|pr]  qué se exige en cada etapa
   forge guard allow <regla> --reason \"motivo\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -63,7 +63,7 @@ Forge — project workspace with terminals, agents and Project Guard
 Usage:
   forge [folder]                        opens the app (and that project)
   forge guard commit|push|pr            checks whether the project is ready
-  forge review                          AI review of the uncommitted changes (even if rules.toml doesn't ask for it)
+  forge review                          commit Guard with the AI review, even if rules.toml doesn't ask for it
   forge guard status                    project rules, hooks and exceptions
   forge guard explain [commit|push|pr]  what each stage requires
   forge guard allow <rule> --reason \"reason\" [--scope commit|pull-request|session] [--stage commit|push|pr]

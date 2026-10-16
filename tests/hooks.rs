@@ -358,6 +358,10 @@ fn review_command_forces_the_ai_review() {
     assert!(!plain.contains("Revisión de IA"), "sin pedirla: {plain}");
     let reviewed = text(&repo.forge(&["review"]));
     assert!(reviewed.contains("Revisión de IA: aprobada"), "{reviewed}");
+    // Sin cambios no se llama (ni se paga) a ningún modelo.
+    repo.ok("git", &["commit", "-am", "dos"]);
+    let clean = text(&repo.forge(&["review"]));
+    assert!(!clean.contains("Revisión de IA"), "{clean}");
 }
 
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.

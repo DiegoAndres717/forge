@@ -228,7 +228,7 @@ impl App {
                             theme::secondary(ui, tr!("{p0}  Revisar cambios", p0 = icon::SHIELD_CHECK))
                         })
                         .inner
-                        .on_hover_text(tr!("Revisores con IA (seguridad, base de datos, lentes…) sobre lo que hay sin commit. El resultado sale en Guard."))
+                        .on_hover_text(tr!("Valida el commit con los revisores con IA (seguridad, base de datos, lentes…), aunque Guard no los pida: lo preparado o, si no hay nada preparado, todo lo que hay sin commit. El resultado sale en Guard."))
                         .clicked()
                     {
                         cmds.push(UiCmd::GuardReview);

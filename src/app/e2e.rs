@@ -159,7 +159,7 @@ fn review_changes_runs_guard_with_the_ai_review() {
     h.run_steps(2);
     h.get_by_label_contains("Revisar cambios").click();
     h.run_steps(2);
-    wait_until(&mut h, "revisión con IA", |a| has_ai_in(a));
+    wait_until(&mut h, "revisión con IA", has_ai_in);
     if let Some(run) = &ws(h.state()).guard.run {
         run.cancel();
     }
