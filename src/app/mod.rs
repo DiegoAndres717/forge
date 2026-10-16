@@ -1346,9 +1346,9 @@ impl eframe::App for App {
             .map(|f| f.path().to_path_buf())
             .partition(|p| p.is_dir());
         let pasted = !files.is_empty()
-            && self.active.is_some_and(|i| {
-                self.workspaces[i].paste_into_focus(&crate::paste::drop_text(&files))
-            });
+            && self
+                .active
+                .is_some_and(|i| self.workspaces[i].attach_to_focus(&files));
         for path in folders {
             cmds.push(UiCmd::Open(path));
         }

@@ -613,14 +613,44 @@ impl Workspace {
         }
     }
 
-    /// Pega texto en la terminal enfocada (rutas de archivos soltados). false si no hay.
-    pub fn paste_into_focus(&mut self, text: &str) -> bool {
+    /// Archivos soltados en la terminal enfocada: tarjeta si es de agente, ruta si no.
+    /// false si no hay terminal enfocada.
+    pub fn attach_to_focus(&mut self, paths: &[PathBuf]) -> bool {
         match self.panels.get_mut(&self.focus).map(|p| &mut p.content) {
             Some(Content::Shell(t)) => {
-                t.paste(text);
+                t.attach(paths);
                 true
             }
             _ => false,
+        }
+    }
+
+    /// Captura: la terminal enfocada como de agente, con estas tarjetas (vacío: sin ellas).
+    #[cfg(test)]
+    pub fn preview_attachments(&mut self, paths: &[PathBuf]) {
+        // La enfocada si es terminal; si no (un proceso), la primera terminal.
+        let id = std::iter::once(self.focus)
+            .chain(self.layout.ids())
+            .find(|id| {
+                matches!(
+                    self.panels.get(id).map(|p| &p.content),
+                    Some(Content::Shell(_))
+                )
+            });
+        if let Some(Content::Shell(t)) = id
+            .and_then(|id| self.panels.get_mut(&id))
+            .map(|p| &mut p.content)
+        {
+            t.preview_attachments(paths);
+        }
+    }
+
+    /// Las tarjetas de adjuntos de la terminal enfocada.
+    #[cfg(test)]
+    pub fn focus_attachments(&self) -> Vec<PathBuf> {
+        match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) => t.attachments().to_vec(),
+            _ => Vec::new(),
         }
     }
 
@@ -1019,7 +1049,9 @@ impl Workspace {
             (_, typed, _) => typed,
         };
         match Terminal::spawn(ctx, &cwd, typed.as_deref(), &env) {
-            Ok(terminal) => {
+            Ok(mut terminal) => {
+                // Con un agente, lo que se pega o se suelta va como tarjeta (ver `attach`).
+                terminal.attach_mode = state.agent.is_some();
                 let command = spec.as_ref().map(|s| s.command.clone()).or(state.command);
                 let panel = Panel {
                     content: Content::Shell(Box::new(terminal)),

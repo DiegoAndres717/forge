@@ -165,6 +165,65 @@ fn review_changes_runs_guard_with_the_ai_review() {
     }
 }
 
+/// En una terminal de agente, soltar un archivo no escribe su ruta: queda como tarjeta (como
+/// en la extensión de VS Code) y la ruta se añade al mensaje al pulsar Enter.
+#[test]
+fn dropped_files_become_cards_in_an_agent_terminal_and_go_with_enter() {
+    #[derive(Debug)]
+    struct Dropped(std::path::PathBuf);
+    impl egui::DroppedFile for Dropped {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            Ok(Vec::new())
+        }
+    }
+    let _serial = serial();
+    let dir = project("cards");
+    // Un "agente" que es un shell: lo que llega al pulsar Enter se ve en pantalla.
+    let shell = if cfg!(windows) { "powershell" } else { "sh" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!("[[agents]]\nid = \"fake\"\nname = \"Agente\"\ncommand = \"{shell}\"\n"),
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "echo", area);
+    wait_until(&mut h, "agente abierto", |a| ws(a).panel_count() == 2);
+    wait_until(&mut h, "agente listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let file = dir.join("informe.pdf");
+    std::fs::write(&file, b"%PDF").unwrap();
+    h.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Dropped(file)));
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focus_attachments().len(), 1, "una tarjeta");
+    h.get_by_label_contains("informe.pdf");
+    assert!(
+        !ws(h.state()).focus_screen().contains("informe"),
+        "sin ruta escrita"
+    );
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "la ruta va con el mensaje", |a| {
+        ws(a)
+            .focus_screen()
+            .replace('\n', "")
+            .contains("informe.pdf")
+    });
+    assert!(
+        ws(h.state()).focus_attachments().is_empty(),
+        "Enter vacía las tarjetas"
+    );
+}
+
 /// Soltar un archivo sobre la ventana pega su ruta en la terminal enfocada (una imagen para
 /// el agente); soltar una carpeta abre su proyecto.
 #[test]

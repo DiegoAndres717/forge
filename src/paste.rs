@@ -59,6 +59,9 @@ pub fn save_png(width: usize, height: usize, rgba: &[u8], dir: &Path) -> Result<
     Ok(path)
 }
 
+/// Carpeta (dentro de la temporal) de las imágenes pegadas.
+pub const PASTE_DIR: &str = "forge-paste";
+
 /// Si el portapapeles tiene una imagen y ningún texto (una captura, una imagen copiada),
 /// la guarda como PNG temporal y devuelve su ruta.
 // ponytail: la carpeta temporal no se limpia; el sistema la vacía.
@@ -68,7 +71,7 @@ pub fn clipboard_image() -> Option<PathBuf> {
         return None;
     }
     let image = clipboard.get_image().ok()?;
-    let dir = std::env::temp_dir().join("forge-paste");
+    let dir = std::env::temp_dir().join(PASTE_DIR);
     save_png(image.width, image.height, &image.bytes, &dir).ok()
 }
 
