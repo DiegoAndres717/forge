@@ -16,6 +16,9 @@ pub(super) enum Update {
     Checking,
     /// Búsqueda a mano sin novedades: la pastilla lo dice unos segundos.
     UpToDate(Instant),
+    /// Búsqueda a mano que no llegó a GitHub (sin internet, sin curl…): se dice, no se
+    /// confunde con «está al día».
+    CheckFailed(Instant, String),
 }
 
 /// Cada cuánto se vuelve a mirar con Forge abierto.
@@ -48,13 +51,15 @@ impl App {
         }
         let (slot, ctx) = (self.update.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let newer = updates::latest(env!("CARGO_PKG_REPOSITORY"))
-                .filter(|r| updates::is_newer(&r.tag, env!("CARGO_PKG_VERSION")));
+            let found = updates::latest(env!("CARGO_PKG_REPOSITORY"));
             let mut state = slot.lock().unwrap();
-            match newer {
-                Some(release) => *state = Some(Update::Available(release)),
-                None if manual => *state = Some(Update::UpToDate(Instant::now())),
-                None => {}
+            match found {
+                Ok(r) if updates::is_newer(&r.tag, env!("CARGO_PKG_VERSION")) => {
+                    *state = Some(Update::Available(r))
+                }
+                Ok(_) if manual => *state = Some(Update::UpToDate(Instant::now())),
+                Err(e) if manual => *state = Some(Update::CheckFailed(Instant::now(), e)),
+                _ => {}
             }
             drop(state);
             ctx.request_repaint();
@@ -111,7 +116,13 @@ impl App {
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
-            Some(Update::Downloading | Update::Checking | Update::UpToDate(_)) | None => {}
+            Some(
+                Update::Downloading
+                | Update::Checking
+                | Update::UpToDate(_)
+                | Update::CheckFailed(..),
+            )
+            | None => {}
         }
     }
 }
@@ -149,6 +160,14 @@ pub(super) fn update_pill(ui: &mut egui::Ui, state: &Option<Update>, cmds: &mut 
             return;
         }
         Update::UpToDate(_) => return,
+        Update::CheckFailed(at, e) if at.elapsed() < Duration::from_secs(8) => {
+            let text = format!("{}  {}", icon::WARNING, tr!("No se pudo buscar"));
+            ui.label(RichText::new(text).size(12.0).color(theme::ORANGE))
+                .on_hover_text(tr!("No se pudo consultar GitHub: {e}", e = e));
+            ui.add_space(6.0);
+            return;
+        }
+        Update::CheckFailed(..) => return,
     };
     let button = egui::Button::new(RichText::new(text).size(12.0).color(theme::ACCENT))
         .fill(Color32::TRANSPARENT)
