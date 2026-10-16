@@ -364,6 +364,74 @@ fn review_command_forces_the_ai_review() {
     assert!(!clean.contains("Revisión de IA"), "{clean}");
 }
 
+/// Plan #42, fase 5: la revisión con IA aprobada en el commit se reutiliza en el push del
+/// mismo código (mismo árbol y mismos modelos): no se paga dos veces.
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+)]
+fn approved_ai_review_is_reused_on_push() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
+    let repo = Repo::new("reuse-ai");
+    let calls = repo.dir.parent().unwrap().join("llamadas");
+    let provider = format!(
+        "cat > /dev/null; echo x >> '{}'; echo '{{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"ok\",\"findings\":[]}}'",
+        calls.display()
+    );
+    repo.write(
+        ".forge/rules.toml",
+        "[commit]\nrequire_ai_review = true\n[push]\nrequire_ai_review = true\n",
+    );
+    repo.write(
+        ".forge/routing.toml",
+        &format!(
+            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
+             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
+             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
+        ),
+    );
+    repo.ok("git", &["add", "."]);
+    repo.ok("git", &["commit", "-m", "base"]);
+    // Un remoto con la base: el push compara con él.
+    let remote = repo.dir.parent().unwrap().join("remoto.git");
+    repo.ok("git", &["init", "-q", "--bare", &remote.to_string_lossy()]);
+    repo.ok(
+        "git",
+        &["remote", "add", "origin", &remote.to_string_lossy()],
+    );
+    repo.ok("git", &["push", "-q", "-u", "origin", "HEAD"]);
+    repo.write("a.txt", "uno\n");
+    repo.ok("git", &["add", "a.txt"]);
+    let count = || {
+        std::fs::read_to_string(&calls)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    let commit = text(&repo.forge(&["guard", "commit"]));
+    assert!(commit.contains("Revisión de IA: aprobada"), "{commit}");
+    let paid = count();
+    assert!(paid > 0, "el commit llama al modelo");
+    repo.ok("git", &["commit", "-m", "uno"]);
+    let push = text(&repo.forge(&["guard", "push"]));
+    assert!(push.contains("Revisión de IA"), "el push la pide: {push}");
+    assert_eq!(
+        count(),
+        paid,
+        "mismo código y modelos: se reutiliza: {push}"
+    );
+    // Código distinto: se revisa de nuevo.
+    repo.write("a.txt", "uno\ndos\n");
+    repo.ok("git", &["commit", "-qam", "dos"]);
+    let push = text(&repo.forge(&["guard", "push"]));
+    assert!(count() > paid, "otro código, otra revisión: {push}");
+}
+
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.
 #[test]
 #[cfg_attr(
