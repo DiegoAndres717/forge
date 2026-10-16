@@ -91,7 +91,6 @@ const STOPWORDS: [&str; 16] = [
     "with", "from", "not",
 ];
 
-/// Palabras significativas de un título: minúsculas, sin tildes, de 3 letras o más.
 /// La nota de la última sesión (`save_session_summary`), en cualquiera de los dos idiomas.
 fn is_session_note(m: &Memory) -> bool {
     m.kind == "note"
@@ -100,6 +99,7 @@ fn is_session_note(m: &Memory) -> bool {
             .any(|t| m.title.starts_with(t))
 }
 
+/// Palabras significativas de un título: minúsculas, sin tildes, de 3 letras o más.
 fn words(text: &str) -> Vec<String> {
     let folded: String = text
         .to_lowercase()
@@ -501,7 +501,7 @@ mod tests {
     fn suggestions_skip_the_session_note_and_loose_matches() {
         let store = Store::in_memory().unwrap();
         let p = Path::new("/p/pistas");
-        let shortcuts = store
+        store
             .add_memory(
                 p,
                 "decision",
@@ -551,7 +551,6 @@ mod tests {
             titles("el commit va lento por los shims"),
             ["Guard en Windows"]
         );
-        let _ = shortcuts;
     }
 
     #[test]
