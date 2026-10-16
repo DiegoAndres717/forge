@@ -98,7 +98,7 @@ impl Metrics {
 }
 
 /// Alto de la franja de tarjetas de adjuntos.
-const ATTACH_STRIP: f32 = 52.0;
+const ATTACH_STRIP: f32 = 34.0;
 /// Ancho aproximado de una tarjeta (para saber cuántas caben).
 const CARD_WIDTH: f32 = 230.0;
 
@@ -662,11 +662,37 @@ impl Terminal {
         self.scroll_overlay(ui, rect, id);
         self.suggest_overlay(ui, rect, id, m);
         self.copy_overlay(ui, rect, id);
-        // Las tarjetas, en una franja arriba sobre la salida antigua: no se cambia el tamaño
-        // de la terminal (un agente que redibuja al redimensionar se descoloca) ni se tapa el
-        // cuadro de texto del agente, que está abajo.
+        // Las tarjetas, superpuestas justo encima del cuadro de texto del agente (como en la
+        // extensión de VS Code): no se cambia el tamaño de la terminal (un agente que redibuja
+        // al redimensionar se descoloca). Mirando el historial, arriba del todo.
         if !self.attachments.is_empty() {
-            let strip = Rect::from_min_size(rect.min, Vec2::new(rect.width(), ATTACH_STRIP));
+            let top = {
+                let t = self.term.lock().unwrap();
+                let grid = t.grid();
+                (grid.display_offset() == 0).then(|| {
+                    let rows: Vec<String> = (0..t.screen_lines() as i32)
+                        .map(|l| {
+                            let row = &grid[alacritty_terminal::index::Line(l)];
+                            (0..t.columns()).map(|c| row[Column(c)].c).collect()
+                        })
+                        .collect();
+                    input_top(&rows, grid.cursor.point.line.0.max(0) as usize)
+                })
+            };
+            // Sin sitio encima (el cuadro arriba del todo, tras un `clear`): al pie, que está
+            // vacío, en vez de tapar lo que se escribe.
+            let y = top.map_or(rect.min.y, |row| {
+                let y = rect.min.y + row as f32 * m.cell.y - ATTACH_STRIP;
+                if y < rect.min.y {
+                    rect.max.y - ATTACH_STRIP
+                } else {
+                    y
+                }
+            });
+            let strip = Rect::from_min_size(
+                egui::pos2(rect.min.x, y),
+                Vec2::new(rect.width(), ATTACH_STRIP),
+            );
             self.attachments_ui(ui, strip, id);
         }
         // Miniaturas de tarjetas que ya no están: fuera.
@@ -919,11 +945,11 @@ impl Terminal {
         &self.attachments
     }
 
-    /// Franja de tarjetas al pie (miniatura o icono, nombre y ✕).
+    /// Franja de tarjetas encima del cuadro del agente (miniatura o icono, nombre y ✕).
     fn attachments_ui(&mut self, ui: &egui::Ui, strip: Rect, id: egui::Id) {
         ui.painter().rect_filled(strip, 0.0, crate::theme::TOOLBAR);
         let mut remove = None;
-        let inner = strip.shrink2(Vec2::new(8.0, 6.0));
+        let inner = strip.shrink2(Vec2::new(8.0, 4.0));
         let attachments = self.attachments.clone();
         let thumbs = &mut self.thumbs;
         egui::Area::new(id.with("attachments"))
@@ -955,21 +981,21 @@ impl Terminal {
                             .fill(crate::theme::SURFACE)
                             .stroke(egui::Stroke::new(1.0, crate::theme::SEPARATOR))
                             .corner_radius(8.0)
-                            .inner_margin(egui::Margin::symmetric(6, 4))
+                            .inner_margin(egui::Margin::symmetric(6, 2))
                             .show(child, |ui| {
                                 ui.horizontal(|ui| {
                                     match &thumb {
                                         Some(texture) => {
                                             ui.add(
                                                 egui::Image::new(texture)
-                                                    .fit_to_exact_size(Vec2::splat(32.0))
+                                                    .fit_to_exact_size(Vec2::splat(20.0))
                                                     .corner_radius(4.0),
                                             );
                                         }
                                         None => {
                                             ui.label(
                                                 egui::RichText::new(file_icon(path))
-                                                    .size(22.0)
+                                                    .size(16.0)
                                                     .color(crate::theme::TEXT_2),
                                             );
                                         }
@@ -2276,8 +2302,64 @@ fn copy_key(mac: bool, selection: Option<String>) -> Result<String, &'static [u8
         .ok_or(if mac { b"" } else { b"\x03" })
 }
 
+/// Fila de la pantalla sobre la que van las tarjetas: el borde de arriba del cuadro de
+/// texto del agente (una línea de `─`), buscando hacia arriba desde el cursor; sin cuadro,
+/// la fila del cursor.
+// ponytail: heurística de 8 filas y la segunda raya; si un agente pinta otro cuadro, mirar
+// aquí primero.
+fn input_top(rows: &[String], cursor: usize) -> usize {
+    let border = |row: &str| {
+        let row = row.trim();
+        row.chars().filter(|&c| c == '─').count() >= 10
+            && row.chars().all(|c| "─╭╮╰╯├┤ ".contains(c))
+    };
+    // ¿Hay una raya debajo del cursor? Entonces está dentro del cuadro y vale la primera de
+    // arriba; si no, está debajo del cuadro y vale la segunda (la de abajo es la primera).
+    let inside = rows.iter().skip(cursor + 1).take(8).any(|r| border(r));
+    let mut found = None;
+    for i in (cursor.saturating_sub(8)..=cursor.min(rows.len().saturating_sub(1))).rev() {
+        if border(&rows[i]) {
+            if inside || found.is_some() {
+                return i;
+            }
+            found = Some(i);
+        }
+    }
+    found.unwrap_or(cursor)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attachments_sit_on_top_of_the_agent_input_box() {
+        let rows = |r: &[&str]| r.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let rule = "─".repeat(40);
+        // Claude Code: rayas arriba y abajo del cuadro, el cursor debajo de todo.
+        let claude = rows(&["respuesta", &rule, "> hola", &rule, "  ? for shortcuts", ""]);
+        assert_eq!(super::input_top(&claude, 5), 1);
+        // Con el cursor dentro del cuadro: la raya de encima, aunque haya otra más arriba en
+        // la salida (un `---` de markdown).
+        assert_eq!(super::input_top(&claude, 2), 1);
+        let ruled = rows(&[&rule, "respuesta", &rule, "> hola", &rule, ""]);
+        assert_eq!(super::input_top(&ruled, 3), 2);
+        // Cuadro con esquinas.
+        let boxed = rows(&[
+            "respuesta",
+            "╭──────────────╮",
+            "│ > hola       │",
+            "╰──────────────╯",
+            "",
+        ]);
+        assert_eq!(super::input_top(&boxed, 4), 1);
+        // Sin cuadro (Codex, un shell): la fila del cursor.
+        let plain = rows(&["respuesta", "", "› hola"]);
+        assert_eq!(super::input_top(&plain, 2), 2);
+        // Una raya en la salida, lejos del cursor, no cuenta.
+        let mut far = rows(&[&rule]);
+        far.extend(rows(&["linea"; 15]));
+        assert_eq!(super::input_top(&far, 15), 15);
+    }
+
     use super::*;
 
     #[test]
