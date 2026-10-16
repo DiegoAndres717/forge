@@ -184,12 +184,17 @@ fn dropped_files_paste_their_path_and_folders_open_a_project() {
     let mut h = app(dir.clone());
     let image = dir.join("captura de pantalla.png");
     std::fs::write(&image, b"png").unwrap();
+    // PowerShell descarta lo que se escribe antes de su prompt: se espera a que aparezca.
+    wait_until(&mut h, "el prompt", |a| {
+        !ws(a).focus_screen().trim().is_empty()
+    });
     h.input_mut()
         .dropped_files
         .push(std::sync::Arc::new(Dropped(image)));
     h.run_steps(2);
+    // Una ruta larga (Windows) puede partirse en dos líneas de la pantalla.
     wait_until(&mut h, "la ruta en la terminal", |a| {
-        ws(a).focus_screen().contains("captura")
+        ws(a).focus_screen().replace('\n', "").contains("captura")
     });
     assert_eq!(h.state().workspaces.len(), 1, "un archivo no abre proyecto");
     let other = project("drop-folder");
