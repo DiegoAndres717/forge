@@ -2096,6 +2096,11 @@ fn a_process_added_in_settings_shows_up() {
 fn add_process_in_the_sidebar_opens_its_form() {
     let _serial = serial();
     let mut h = app(project("no-processes"));
+    // La detección de agentes de fondo cambia la barra lateral al terminar (la sección de
+    // agentes crece) y movía el botón justo al hacer clic (intermitente en Ubuntu, plan #29).
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
     h.run_steps(3);
     assert!(ws(h.state()).processes.list.is_empty());
     h.get_by_label("Añadir proceso").click();
