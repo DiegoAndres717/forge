@@ -734,12 +734,14 @@ impl AiOutcome {
     }
 }
 
-/// Saca el primer objeto JSON del texto (los modelos a veces lo envuelven en ```json).
+/// Saca el objeto JSON de la revisión del texto (los modelos a veces lo envuelven en ```json).
 pub fn parse_review(text: &str) -> Option<ModelReview> {
-    let start = text.find('{')?;
+    // Probando desde cada `{`: puede haber alguna suelta antes (el perfil de la shell).
     let end = text.rfind('}')?;
-    let review: ModelReview = serde_json::from_str(text.get(start..=end)?).ok()?;
-    matches!(review.verdict.as_str(), "approve" | "changes" | "block").then_some(review)
+    text.match_indices('{')
+        .filter(|(start, _)| *start < end)
+        .find_map(|(start, _)| serde_json::from_str::<ModelReview>(&text[start..=end]).ok())
+        .filter(|r| matches!(r.verdict.as_str(), "approve" | "changes" | "block"))
 }
 
 /// Texto y consumo según el formato del proveedor.
@@ -750,7 +752,19 @@ fn parse_output(
     match format {
         OutputFormat::Text => Ok((stdout.to_string(), 0, 0, None)),
         OutputFormat::ClaudeJson => {
-            let v: serde_json::Value = serde_json::from_str(stdout.trim())
+            // El JSON va en la última línea, desde su primera `{`: lo de antes puede ser lo que
+            // imprime el perfil de la shell de inicio de sesión (neofetch y sus códigos de
+            // escape, avisos de nvm…).
+            let v: serde_json::Value = stdout
+                .lines()
+                .rev()
+                .filter_map(|l| l.find('{').map(|i| &l[i..]))
+                .find_map(|l| {
+                    serde_json::from_str(l.trim())
+                        .ok()
+                        .filter(|v: &serde_json::Value| v.is_object())
+                })
+                .map_or_else(|| serde_json::from_str(stdout.trim()), Ok)
                 .map_err(|e| tr!("salida de claude no válida: {e}", e = e))?;
             if v["is_error"].as_bool() == Some(true) {
                 return Err(v["result"]
@@ -1682,12 +1696,21 @@ mod tests {
         let (text, input, output, cost) = parse_output(OutputFormat::ClaudeJson, claude).unwrap();
         assert_eq!((input, output, cost), (75635, 40, Some(0.0151)));
         assert_eq!(parse_review(&text).unwrap().verdict, "approve");
+        // Un perfil de la shell que imprime algo antes (neofetch, avisos de nvm, `{` sueltas):
+        // el JSON de claude es la última línea.
+        // neofetch deja sus códigos de escape finales en la misma línea que el JSON.
+        let noisy = format!("\x1b[32m'c.\n OS: macOS {{x}}\n\n\x1b[?25h\x1b[?7h{claude}\n");
+        let (text, ..) = parse_output(OutputFormat::ClaudeJson, &noisy).unwrap();
+        assert_eq!(parse_review(&text).unwrap().verdict, "approve");
 
         let codex = "{\"type\":\"thread.started\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"verdict\\\":\\\"block\\\",\\\"confidence\\\":0.8}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":90}}";
         let (text, input, output, _) = parse_output(OutputFormat::CodexJson, codex).unwrap();
         assert_eq!((input, output), (1200, 90));
         assert_eq!(parse_review(&text).unwrap().verdict, "block");
 
+        // Una `{` suelta antes del JSON (el perfil de la shell, texto del modelo).
+        let text = "OS: {x}\n{\"verdict\":\"changes\",\"confidence\":0.7}";
+        assert_eq!(parse_review(text).unwrap().verdict, "changes");
         assert!(parse_review("no sé").is_none());
         assert!(parse_review("{\"verdict\":\"quizás\"}").is_none());
         assert_eq!(
