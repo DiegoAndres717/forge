@@ -814,6 +814,20 @@ impl Terminal {
         }
     }
 
+    /// Pega texto como Terminal.app: saltos de línea normalizados y, si el programa lo pide,
+    /// entre marcas de pegado (así un agente no lo toma por teclas sueltas).
+    pub fn paste(&mut self, text: &str) {
+        let mode = *self.term.lock().unwrap().mode();
+        self.scroll_to_bottom();
+        let text = text.replace("\r\n", "\r").replace('\n', "\r");
+        if mode.contains(TermMode::BRACKETED_PASTE) {
+            let text = text.replace('\x1b', "");
+            self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
+        } else {
+            self.send(text.as_bytes());
+        }
+    }
+
     fn keyboard(&mut self, ctx: &egui::Context, m: &Metrics) {
         let mode = *self.term.lock().unwrap().mode();
         let (events, window_focused, alt) =
@@ -863,15 +877,18 @@ impl Terminal {
                     self.scroll_to_bottom();
                     self.send(text.as_bytes());
                 }
-                egui::Event::Paste(text) => {
-                    self.scroll_to_bottom();
-                    // Normaliza saltos de línea como Terminal.app/iTerm.
-                    let text = text.replace("\r\n", "\r").replace('\n', "\r");
-                    if mode.contains(TermMode::BRACKETED_PASTE) {
-                        let text = text.replace('\x1b', "");
-                        self.send(format!("\x1b[200~{text}\x1b[201~").as_bytes());
-                    } else {
-                        self.send(text.as_bytes());
+                egui::Event::Paste(text) => self.paste(&text),
+                // ⌘V con solo una imagen en el portapapeles: egui no da evento al pulsar (no
+                // hay texto), pero sí al soltar. Se guarda como PNG y se pega su ruta, que
+                // todos los agentes saben leer.
+                egui::Event::Key {
+                    key: Key::V,
+                    pressed: false,
+                    modifiers,
+                    ..
+                } if modifiers.command => {
+                    if let Some(path) = crate::paste::clipboard_image() {
+                        self.paste(&crate::paste::drop_text(&[path]));
                     }
                 }
                 // Ctrl+X en PC llega como «cortar»: es del shell (nano sale con él).

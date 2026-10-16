@@ -36,6 +36,9 @@ eframe = "0.36.2"
 egui-phosphor = "0.14.0"
 libc.workspace = true
 portable-pty = "0.9.0"
+# Pegar imágenes en la terminal: ya vienen con eframe (mismas versiones).
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
