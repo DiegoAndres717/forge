@@ -327,6 +327,39 @@ fn ai_review_in_hook_with_fake_providers() {
     );
 }
 
+/// Plan #42, fase 4: `forge review` revisa con IA los cambios sin commit aunque ningún paso
+/// la pida en rules.toml (la lanzan a mano el dueño o un agente).
+#[test]
+#[cfg_attr(
+    windows,
+    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
+)]
+fn review_command_forces_the_ai_review() {
+    // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
+    unsafe { std::env::set_var("FORGE_LANG", "es") };
+    let repo = Repo::new("review");
+    let provider = "cat > /dev/null; echo '{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}'";
+    repo.write(
+        ".forge/routing.toml",
+        &format!(
+            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
+             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
+             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
+             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
+        ),
+    );
+    repo.write("a.txt", "uno\n");
+    repo.ok("git", &["add", "."]);
+    repo.ok("git", &["commit", "-m", "base"]);
+    repo.write("a.txt", "uno\ndos\n");
+    let plain = text(&repo.forge(&["guard", "commit"]));
+    assert!(!plain.contains("Revisión de IA"), "sin pedirla: {plain}");
+    let reviewed = text(&repo.forge(&["review"]));
+    assert!(reviewed.contains("Revisión de IA: aprobada"), "{reviewed}");
+}
+
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.
 #[test]
 #[cfg_attr(

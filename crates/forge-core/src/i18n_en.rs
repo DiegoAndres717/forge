@@ -731,6 +731,12 @@ pub const EN: &[(&str, &str)] = &[
         "runs once the deterministic checks pass",
     ),
     ("Revisión de IA", "AI review"),
+    ("Revisar cambios con IA", "Review changes with AI"),
+    ("{p0}  Revisar cambios", "{p0}  Review changes"),
+    (
+        "Revisores con IA (seguridad, base de datos, lentes…) sobre lo que hay sin commit. El resultado sale en Guard.",
+        "AI reviewers (security, database, lenses…) on what isn't committed yet. The result shows in Guard.",
+    ),
     ("Revisión de seguridad", "Security review"),
     ("Commit", "Commit"),
     ("Push", "Push"),

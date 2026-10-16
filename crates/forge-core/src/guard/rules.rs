@@ -188,6 +188,18 @@ impl Rules {
         }
     }
 
+    /// La misma etapa con la revisión con IA pedida: para revisar a mano (plan #42).
+    pub fn with_ai_review(mut self, stage: Stage) -> Self {
+        let s = match stage {
+            Stage::Commit => &mut self.commit,
+            Stage::Push => &mut self.push,
+            Stage::PullRequest => &mut self.pull_request,
+        };
+        s.enabled = true;
+        s.require_ai_review = true;
+        self
+    }
+
     /// Checks de la etapa y los `require_*` que no tienen `[[checks]]` definido.
     pub fn checks_for(&self, stage: Stage) -> (Vec<&Check>, Vec<String>) {
         let s = self.stage(stage);
