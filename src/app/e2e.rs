@@ -1352,7 +1352,11 @@ fn a_planned_backlog_item_offers_to_start_it_with_an_agent() {
     let _serial = serial();
     let dir = project("start-plan");
     let mut h = app(dir.clone());
-    // Un agente que sabe planificar, instalado (simulado): el CI no tiene ninguno.
+    // Un agente que sabe planificar, instalado (simulado): el CI no tiene ninguno. Tras la
+    // detección de fondo, que si no lo pisa con «no instalado».
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
     for program in ["claude", "codex"] {
         h.state().agents.lock().unwrap().insert(
             program.into(),
