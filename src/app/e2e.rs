@@ -120,6 +120,51 @@ fn split_and_close_panels_with_shortcuts() {
     );
 }
 
+/// Plan #42, fase 4: «Revisar cambios» (panel de Git y paleta) lanza Guard con la revisión
+/// con IA aunque rules.toml no la pida.
+#[test]
+fn review_changes_runs_guard_with_the_ai_review() {
+    let _serial = serial();
+    let dir = project("review-changes");
+    // Un proveedor que falla al momento: la prueba nunca llama (ni paga) a un modelo real.
+    let fake = "[routing]\nprefer_local = false\n[routing.providers.nada]\ncommand = \"exit 1\"\n";
+    let tasks = ["classification", "code_review", "architecture", "security"]
+        .map(|t| format!("[routing.tasks.{t}]\nprovider = \"nada\"\nmodel = \"m\"\n"))
+        .concat();
+    std::fs::write(dir.join(".forge/routing.toml"), format!("{fake}{tasks}")).unwrap();
+    let mut h = app(dir);
+    // Los ítems llegan en segundo plano, al leer el diff.
+    fn has_ai_in(a: &App) -> bool {
+        ws(a)
+            .guard
+            .run
+            .as_ref()
+            .is_some_and(|r| r.snapshot(|r| r.items.iter().any(|i| i.id == "ai-review")))
+    }
+    palette(&mut h, "revisar cambios");
+    h.run_steps(2);
+    assert!(ws(h.state()).guard.open, "lo muestra en el panel de Guard");
+    wait_until(&mut h, "revisión con IA", has_ai_in);
+    assert_eq!(ws(h.state()).guard.stage, guard::Stage::Commit);
+    // El botón del panel de Git hace lo mismo.
+    if let Some(run) = &ws(h.state()).guard.run {
+        run.cancel();
+    }
+    h.state_mut().workspaces[0].guard.run = None;
+    // Guard se dibuja en el lugar del panel de Git: se cierra. project() deja cambios preparados.
+    h.state_mut().workspaces[0].guard.open = false;
+    h.key_press_modifiers(CMD_SHIFT, Key::G);
+    h.run_steps(2);
+    wait_until(&mut h, "estado de git", |a| ws(a).git.data.is_some());
+    h.run_steps(2);
+    h.get_by_label_contains("Revisar cambios").click();
+    h.run_steps(2);
+    wait_until(&mut h, "revisión con IA", has_ai_in);
+    if let Some(run) = &ws(h.state()).guard.run {
+        run.cancel();
+    }
+}
+
 #[test]
 fn guard_validates_the_commit_from_the_panel() {
     let _serial = serial();

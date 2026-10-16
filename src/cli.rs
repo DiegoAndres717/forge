@@ -17,6 +17,7 @@ Forge — workspace de proyectos con terminales, agentes y Project Guard
 Uso:
   forge [carpeta]                       abre la app (y ese proyecto)
   forge guard commit|push|pr            comprueba si el proyecto está listo
+  forge review                          Guard del commit con revisión con IA, aunque rules.toml no la pida
   forge guard status                    reglas, hooks y excepciones del proyecto
   forge guard explain [commit|push|pr]  qué se exige en cada etapa
   forge guard allow <regla> --reason \"motivo\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -62,6 +63,7 @@ Forge — project workspace with terminals, agents and Project Guard
 Usage:
   forge [folder]                        opens the app (and that project)
   forge guard commit|push|pr            checks whether the project is ready
+  forge review                          commit Guard with the AI review, even if rules.toml doesn't ask for it
   forge guard status                    project rules, hooks and exceptions
   forge guard explain [commit|push|pr]  what each stage requires
   forge guard allow <rule> --reason \"reason\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -187,7 +189,7 @@ fn open_store() -> Result<Store, String> {
 /// la app en vez de ejecutarse.
 pub const COMMANDS: &[&str] = &[
     "agent", "ai", "anchor", "context", "danger", "doctor", "guard", "handoff", "hooks", "ideas",
-    "mcp", "memory", "plans", "secret", "status",
+    "mcp", "memory", "plans", "review", "secret", "status",
 ];
 
 pub fn run(args: &[String]) -> i32 {
@@ -201,7 +203,9 @@ pub fn run(args: &[String]) -> i32 {
             &project,
             Stage::parse(stage).unwrap_or(Stage::Commit),
             hook,
+            false,
         ),
+        (Some("review"), _) => gate(&out, &project, Stage::Commit, hook, true),
         (Some("guard"), Some("status")) => status(&out, &project),
         (Some("guard"), Some("explain")) => {
             explain(&out, &project, pos.get(2).and_then(|s| Stage::parse(s)))
@@ -334,9 +338,19 @@ pub fn run(args: &[String]) -> i32 {
 }
 
 /// Ejecuta el Guard de una etapa e imprime el resultado. 0 = listo; 1 = bloqueado.
-fn gate(out: &Out, project_dir: &Path, stage: Stage, hook: bool) -> Result<i32, String> {
+/// `review`: revisión con IA a mano (plan #42), aunque la etapa no la pida.
+fn gate(
+    out: &Out,
+    project_dir: &Path,
+    stage: Stage,
+    hook: bool,
+    review: bool,
+) -> Result<i32, String> {
     let project = Project::load(project_dir)?;
-    let rules = Rules::load(project_dir)?.unwrap_or_default();
+    let mut rules = Rules::load(project_dir)?.unwrap_or_default();
+    if review {
+        rules = rules.with_ai_review(stage);
+    }
     if !rules.stage(stage).enabled {
         out.line(&tr!(
             "Forge Guard: {p0} desactivado en .forge/rules.toml",

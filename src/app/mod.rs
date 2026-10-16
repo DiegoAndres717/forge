@@ -270,6 +270,8 @@ enum UiCmd {
     OpenDefaultAgent,
     DetectAgents,
     GuardRun,
+    /// «Revisar cambios»: Guard del commit con la revisión con IA, aunque no se pida.
+    GuardReview,
     GuardCancel,
     GuardStage(Stage),
     GuardDiff,
@@ -1058,6 +1060,7 @@ impl App {
             }
             UiCmd::ToggleGuard
             | UiCmd::GuardRun
+            | UiCmd::GuardReview
             | UiCmd::GuardCancel
             | UiCmd::GuardStage(_)
             | UiCmd::GuardDiff
@@ -1091,7 +1094,11 @@ impl App {
                             run.cancel();
                         }
                     }
-                    UiCmd::GuardRun => {
+                    c @ (UiCmd::GuardRun | UiCmd::GuardReview) => {
+                        let review = matches!(c, UiCmd::GuardReview);
+                        if review {
+                            ws.guard.stage = Stage::Commit;
+                        }
                         ws.guard.open = true;
                         ws.guard.pr = None; // el borrador era de la validación anterior
                         match Rules::load(&ws.project.path) {
@@ -1126,10 +1133,14 @@ impl App {
                                 ws.guard.stale = false;
                                 ws.guard.stale_rx = None;
                                 ws.guard.stale_checked = None;
+                                let mut rules = rules.unwrap_or_default();
+                                if review {
+                                    rules = rules.with_ai_review(Stage::Commit);
+                                }
                                 ws.guard.run = Some(guard::run(
                                     &ws.project.path,
                                     &ws.project.root(),
-                                    rules.unwrap_or_default(),
+                                    rules,
                                     ws.guard.stage,
                                     options,
                                     move || repaint.request_repaint(),

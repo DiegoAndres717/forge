@@ -309,6 +309,12 @@ impl App {
                 "⌘G",
                 cmd(UiCmd::ToggleGuard),
             );
+            add(
+                icon::SHIELD_CHECK,
+                tr!("Revisar cambios con IA").into(),
+                "",
+                Run::Cmds(vec![UiCmd::GuardReview]),
+            );
             for stage in Stage::ALL {
                 add(
                     icon::SHIELD_CHECK,

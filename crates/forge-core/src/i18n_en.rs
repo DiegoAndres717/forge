@@ -731,6 +731,12 @@ pub const EN: &[(&str, &str)] = &[
         "runs once the deterministic checks pass",
     ),
     ("Revisión de IA", "AI review"),
+    ("Revisar cambios con IA", "Review changes with AI"),
+    ("{p0}  Revisar cambios", "{p0}  Review changes"),
+    (
+        "Valida el commit con los revisores con IA (seguridad, base de datos, lentes…), aunque Guard no los pida: lo preparado o, si no hay nada preparado, todo lo que hay sin commit. El resultado sale en Guard.",
+        "Validates the commit with the AI reviewers (security, database, lenses…) even if Guard doesn't ask for them: what's staged or, if nothing is staged, everything not committed yet. The result shows in Guard.",
+    ),
     ("Revisión de seguridad", "Security review"),
     ("Commit", "Commit"),
     ("Push", "Push"),
