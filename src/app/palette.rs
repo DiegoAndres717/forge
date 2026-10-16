@@ -315,6 +315,12 @@ impl App {
                 "",
                 Run::Cmds(vec![UiCmd::GuardReview]),
             );
+            add(
+                icon::SCALES,
+                tr!("Juicio: dos jueces revisan los cambios").into(),
+                "",
+                Run::Cmds(vec![UiCmd::GuardJudgment]),
+            );
             for stage in Stage::ALL {
                 add(
                     icon::SHIELD_CHECK,

@@ -45,6 +45,8 @@ pub enum DepthMode {
     Risk,
     Light,
     Full,
+    /// Juicio (plan #49): dos jueces a ciegas en vez de la revisión de IA; sin lentes.
+    Judgment,
 }
 
 /// Lentes generales en el orden en que se activan (la primera ya en profundidad estándar).
@@ -293,7 +295,7 @@ pub fn activate(
         .collect();
     let depth = match config.review_depth {
         DepthMode::Risk => depth(risk),
-        DepthMode::Light => Depth::Light,
+        DepthMode::Light | DepthMode::Judgment => Depth::Light,
         DepthMode::Full => Depth::Full,
     };
     let mut active = Vec::new();

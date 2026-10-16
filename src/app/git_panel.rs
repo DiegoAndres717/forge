@@ -233,6 +233,16 @@ impl App {
                     {
                         cmds.push(UiCmd::GuardReview);
                     }
+                    if ui
+                        .add_enabled_ui(changes, |ui| {
+                            theme::secondary(ui, tr!("{p0}  Juicio", p0 = icon::SCALES))
+                        })
+                        .inner
+                        .on_hover_text(tr!("Dos jueces con Sonnet (o el modelo de Ajustes) revisan el cambio a ciegas leyendo el proyecto: doble clic, estados vacíos, errores, concurrencia, seguridad, tests… Lo que ven los dos bloquea; lo que ve uno queda como sospecha. Gasta más que «Revisar cambios»."))
+                        .clicked()
+                    {
+                        cmds.push(UiCmd::GuardJudgment);
+                    }
                     if staged.is_empty() && !unstaged.is_empty() {
                         ui.label(
                             RichText::new(tr!("Prepara archivos con +"))

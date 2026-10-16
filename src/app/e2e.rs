@@ -929,6 +929,65 @@ fn review_depth_lenses_and_refuter_are_set_from_settings() {
     assert!(!f.refuter);
 }
 
+/// Plan #49: «Juicio» (paleta y panel de Git) lanza Guard con los dos jueces.
+#[test]
+fn judgment_runs_guard_with_two_judges() {
+    let _serial = serial();
+    let dir = project("judgment");
+    // Un proveedor que falla al momento: la prueba nunca llama (ni paga) a un modelo real.
+    let fake = "[routing]\nprefer_local = false\n[routing.providers.nada]\ncommand = \"exit 1\"\n";
+    let tasks = ["classification", "code_review", "architecture", "security"]
+        .map(|t| format!("[routing.tasks.{t}]\nprovider = \"nada\"\nmodel = \"m\"\n"))
+        .concat();
+    std::fs::write(dir.join(".forge/routing.toml"), format!("{fake}{tasks}")).unwrap();
+    let mut h = app(dir);
+    fn judged(a: &App) -> bool {
+        ws(a).guard.run.as_ref().is_some_and(|r| {
+            r.snapshot(|r| {
+                r.items
+                    .iter()
+                    .any(|i| i.id == "ai-review" && i.label.starts_with("Juicio:"))
+            })
+        })
+    }
+    palette(&mut h, "juicio");
+    h.run_steps(2);
+    assert!(ws(h.state()).guard.open, "lo muestra en el panel de Guard");
+    wait_until(&mut h, "juicio", judged);
+    // El botón del panel de Git hace lo mismo.
+    h.state_mut().workspaces[0].guard.run = None;
+    h.state_mut().workspaces[0].guard.open = false;
+    h.key_press_modifiers(CMD_SHIFT, Key::G);
+    h.run_steps(2);
+    wait_until(&mut h, "estado de git", |a| ws(a).git.data.is_some());
+    h.run_steps(2);
+    h.get_by_label_contains("Juicio").click();
+    h.run_steps(2);
+    wait_until(&mut h, "juicio", judged);
+}
+
+/// Ajustes → Revisión con IA: «Juicio (2 jueces)» y el modelo de los jueces (Sonnet de serie).
+#[test]
+fn judgment_and_its_model_are_set_from_settings() {
+    let _serial = serial();
+    let mut h = app(project("settings-judgment"));
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Este proyecto").click();
+    h.run_steps(3);
+    let form = |h: &Harness<'_, App>| h.state().routing_form.as_ref().unwrap().form.clone();
+    assert_eq!(form(&h).judge_model, "sonnet");
+    for label in ["Juicio (2 jueces)", "Opus"] {
+        h.get_by_label(label).scroll_to_me();
+        h.run_steps(10);
+        h.get_by_label(label).click();
+        h.run_steps(2);
+    }
+    let f = form(&h);
+    assert_eq!(f.review_depth, forge_core::reviewers::DepthMode::Judgment);
+    assert_eq!(f.judge_model, "opus");
+}
+
 /// Forge Jev se enciende en Ajustes → Agentes, apagado de serie, y llega a los agentes que
 /// se abran después (FORGE_JEV_CHORES / --jev-chores).
 #[test]

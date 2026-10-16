@@ -733,6 +733,41 @@ pub const EN: &[(&str, &str)] = &[
     ("Revisión de IA", "AI review"),
     ("Quitar {p0}", "Remove {p0}"),
     ("Imagen pegada", "Pasted image"),
+    ("el juez falló", "the judge crashed"),
+    (
+        "un juez no respondió: no se puede aprobar con uno solo",
+        "a judge didn't answer: one alone can't approve",
+    ),
+    ("{p0}  Juicio", "{p0}  Judgment"),
+    (
+        "Dos jueces con Sonnet (o el modelo de Ajustes) revisan el cambio a ciegas leyendo el proyecto: doble clic, estados vacíos, errores, concurrencia, seguridad, tests… Lo que ven los dos bloquea; lo que ve uno queda como sospecha. Gasta más que «Revisar cambios».",
+        "Two judges on Sonnet (or the model in Settings) review the change blind, reading the project: double clicks, empty states, errors, concurrency, security, tests… What both see blocks; what only one sees is a suspect. Costs more than «Review changes».",
+    ),
+    (
+        "Juicio: dos jueces revisan los cambios",
+        "Judgment: two judges review the changes",
+    ),
+    ("Juicio (2 jueces)", "Judgment (2 judges)"),
+    (
+        "Dos jueces revisan a ciegas leyendo el proyecto y recorren los casos límite (doble clic, vacíos, errores, concurrencia…). Lo que ven los dos bloquea. Sustituye a las lentes; gasta más.",
+        "Two judges review blind, reading the project, and walk the edge cases (double clicks, empty states, errors, concurrency…). What both see blocks. Replaces the lenses; costs more.",
+    ),
+    ("Modelo de los jueces", "Judges' model"),
+    ("2 jueces · {p0}", "2 judges · {p0}"),
+    ("{p0} · juez {judge}", "{p0} · judge {judge}"),
+    (
+        "ningún juez dio una respuesta válida",
+        "no judge gave a valid answer",
+    ),
+    ("Juicio", "Judgment"),
+    (
+        "{p0} (2 de 2 jueces; el otro: {p1})",
+        "{p0} (2 of 2 judges; the other: {p1})",
+    ),
+    (
+        "Sospecha (1 de 2 jueces): {p0}",
+        "Suspect (1 of 2 judges): {p0}",
+    ),
     ("captura", "screenshot"),
     ("Todas", "All"),
     ("Filtrar por etiqueta", "Filter by tag"),

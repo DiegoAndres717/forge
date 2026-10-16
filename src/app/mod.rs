@@ -272,6 +272,8 @@ enum UiCmd {
     GuardRun,
     /// «Revisar cambios»: Guard del commit con la revisión con IA, aunque no se pida.
     GuardReview,
+    /// «Juicio»: lo mismo con dos jueces a ciegas (plan #49).
+    GuardJudgment,
     GuardCancel,
     GuardStage(Stage),
     GuardDiff,
@@ -1061,6 +1063,7 @@ impl App {
             UiCmd::ToggleGuard
             | UiCmd::GuardRun
             | UiCmd::GuardReview
+            | UiCmd::GuardJudgment
             | UiCmd::GuardCancel
             | UiCmd::GuardStage(_)
             | UiCmd::GuardDiff
@@ -1094,8 +1097,9 @@ impl App {
                             run.cancel();
                         }
                     }
-                    c @ (UiCmd::GuardRun | UiCmd::GuardReview) => {
-                        let review = matches!(c, UiCmd::GuardReview);
+                    c @ (UiCmd::GuardRun | UiCmd::GuardReview | UiCmd::GuardJudgment) => {
+                        let judgment = matches!(c, UiCmd::GuardJudgment);
+                        let review = judgment || matches!(c, UiCmd::GuardReview);
                         if review {
                             ws.guard.stage = Stage::Commit;
                         }
@@ -1121,7 +1125,14 @@ impl App {
                                             e = e
                                         ))
                                     })
-                                    .ok(),
+                                    .ok()
+                                    .map(|mut c| {
+                                        if judgment {
+                                            c.review_depth =
+                                                forge_core::reviewers::DepthMode::Judgment;
+                                        }
+                                        c
+                                    }),
                                     month_spent,
                                     reviewers: forge_core::reviewers::load(&ws.project.path)
                                         .unwrap_or_else(|e| {
