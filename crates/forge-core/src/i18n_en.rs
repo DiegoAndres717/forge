@@ -1556,6 +1556,15 @@ pub const EN: &[(&str, &str)] = &[
         "Planifica por fases la idea #{id} de los planes de Forge («{title}»). Revisa el proyecto lo necesario, propón las fases en orden (con rama solo si la merecen) y sus tareas, y guárdalo con plan_update (phases). No escribas código todavía.",
         "Plan idea #{id} from Forge's plans (“{title}”) in phases. Look at the project as much as needed, propose the phases in order (with a branch only where it deserves one) and their tasks, and save it with plan_update (phases). Don't write code yet.",
     ),
+    ("Empezar con {agent}", "Start with {agent}"),
+    (
+        "El agente marca la primera fase en curso, crea su rama y se pone a trabajar en ella",
+        "The agent marks the first phase in progress, creates its branch and starts working on it",
+    ),
+    (
+        "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde main) y trabaja en ella tachando las tareas al terminarlas.",
+        "Start plan #{id} from the Forge plans (\"{title}\"): read its phases with plans_list, mark the first one in_progress with plan_update (and its branch, if it has one, creating it from main) and work on it, ticking tasks as you finish them.",
+    ),
     ("Planificar con {agent}", "Plan with {agent}"),
     ("Plegar fases", "Collapse phases"),
     ("Tachar", "Tick"),

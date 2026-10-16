@@ -404,14 +404,13 @@ impl App {
         }
     }
 
-    /// Agente por defecto del proyecto que puede planificar (lee y escribe los planes por
-    /// MCP): (id, nombre).
+    /// El agente que planifica o empieza un plan: el de la terminal enfocada si sabe (lee y
+    /// escribe los planes por MCP); si no, el por defecto del proyecto. (id, nombre).
     pub(super) fn planner(&self, workspace: usize) -> Option<(String, String)> {
         let detected = self.agents.lock().ok()?.clone();
         let ws = self.workspaces.get(workspace)?;
-        agents::default_agent(&ws.project.agents, &detected)
-            // Se conecta a los planes (MCP) y sabe abrirse con un primer mensaje.
-            .filter(|a| a.mcp_style.is_some() && a.with_prompt(&a.command, "").is_some())
+        let in_use = ws.focused_agent();
+        agents::planner_agent(&ws.project.agents, &detected, in_use.as_deref())
             .map(|a| (a.id.clone(), a.name.clone()))
     }
 
@@ -429,11 +428,20 @@ impl App {
         let Some(idea) = ws.ideas.items.iter().find(|i| i.id == id) else {
             return;
         };
-        let prompt = tr!(
-            "Planifica por fases la idea #{id} de los planes de Forge («{title}»). Revisa el proyecto lo necesario, propón las fases en orden (con rama solo si la merecen) y sus tareas, y guárdalo con plan_update (phases). No escribas código todavía.",
-            id = id,
-            title = idea.title
-        );
+        // Con fases ya planificadas se empieza la primera; sin ellas, se planifica.
+        let prompt = if idea.phases.is_empty() {
+            tr!(
+                "Planifica por fases la idea #{id} de los planes de Forge («{title}»). Revisa el proyecto lo necesario, propón las fases en orden (con rama solo si la merecen) y sus tareas, y guárdalo con plan_update (phases). No escribas código todavía.",
+                id = id,
+                title = idea.title
+            )
+        } else {
+            tr!(
+                "Empieza el plan #{id} de los planes de Forge («{title}»): lee sus fases con plans_list, marca la primera in_progress con plan_update (y su rama, si la tiene, creándola desde main) y trabaja en ella tachando las tareas al terminarlas.",
+                id = id,
+                title = idea.title
+            )
+        };
         ws.ideas.open = false; // que se vea el agente trabajando
         ws.ask_agent(ctx, &agent, &prompt, area);
     }
@@ -622,6 +630,25 @@ fn plan_card(
         progress_bar(ui, finished as f32 / total.max(1) as f32, idea.done());
         if !compact {
             ui.label(RichText::new(meta(idea)).size(11.0).color(theme::TEXT_4));
+        }
+        // Planificado pero sin empezar (backlog): el agente arranca la fase 1.
+        if let (Some(agent), "pending") = (ctx.planner, idea.status.as_str()) {
+            let label = format!(
+                "{}  {}",
+                icon::PLAY,
+                tr!("Empezar con {agent}", agent = agent)
+            );
+            let start = ui
+                .add(
+                    egui::Button::new(RichText::new(label).size(12.0).color(theme::ACCENT))
+                        .frame(false),
+                )
+                .on_hover_text(tr!(
+                    "El agente marca la primera fase en curso, crea su rama y se pone a trabajar en ella"
+                ));
+            if start.clicked() {
+                cmds.push(UiCmd::PlanWithAgent(idea.id));
+            }
         }
 
         if expanded {

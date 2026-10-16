@@ -1691,6 +1691,11 @@ impl Workspace {
         self.focus
     }
 
+    /// Agente de la terminal enfocada (el que el usuario está usando), si es de agente.
+    pub fn focused_agent(&self) -> Option<String> {
+        self.panels.get(&self.focus)?.agent.clone()
+    }
+
     #[cfg(test)]
     pub fn maximized(&self) -> Option<PanelId> {
         self.maximized

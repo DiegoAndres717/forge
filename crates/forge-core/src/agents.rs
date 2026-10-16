@@ -767,9 +767,72 @@ pub fn default_agent<'a>(
         .or_else(|| agents.iter().filter(|a| a.enabled).find(installed))
 }
 
+/// Quién planifica o empieza un plan: el agente que el usuario está usando (el de la
+/// terminal enfocada) si está instalado y sabe trabajar con los planes (MCP y primer
+/// mensaje); si no, el agente por defecto que sepa.
+pub fn planner_agent<'a>(
+    agents: &'a [AgentSpec],
+    detected: &HashMap<String, Detection>,
+    in_use: Option<&str>,
+) -> Option<&'a AgentSpec> {
+    let can_plan =
+        |a: &&AgentSpec| a.mcp_style.is_some() && a.with_prompt(&a.command, "").is_some();
+    let installed = |a: &&AgentSpec| detected.get(a.program()).is_some_and(|d| d.path.is_some());
+    in_use
+        .and_then(|id| agents.iter().find(|a| a.id == id))
+        .filter(|a| a.enabled && installed(a) && can_plan(a))
+        .or_else(|| default_agent(agents, detected).filter(can_plan))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_planner_is_the_agent_in_use_when_it_can_plan() {
+        let agents = builtins();
+        let installed = |ids: &[&str]| -> HashMap<String, Detection> {
+            ids.iter()
+                .map(|id| {
+                    let program = agents.iter().find(|a| a.id == *id).unwrap().program();
+                    (
+                        program.to_string(),
+                        Detection {
+                            path: Some(PathBuf::from("/bin/x")),
+                            version: None,
+                        },
+                    )
+                })
+                .collect()
+        };
+        let detected = installed(&["claude", "codex", "opencode"]);
+        // Sin terminal de agente enfocada: el agente por defecto.
+        let default = planner_agent(&agents, &detected, None).unwrap().id.clone();
+        assert_eq!(default, default_agent(&agents, &detected).unwrap().id);
+        // Con Codex en la terminal enfocada: Codex, aunque el de serie sea otro.
+        assert_eq!(
+            planner_agent(&agents, &detected, Some("codex")).unwrap().id,
+            "codex"
+        );
+        assert_eq!(
+            planner_agent(&agents, &detected, Some("opencode"))
+                .unwrap()
+                .id,
+            "opencode"
+        );
+        // Uno que no está instalado o no existe: el de serie.
+        let only_claude = installed(&["claude"]);
+        assert_eq!(
+            planner_agent(&agents, &only_claude, Some("codex"))
+                .unwrap()
+                .id,
+            "claude"
+        );
+        assert_eq!(
+            planner_agent(&agents, &detected, Some("vim")).unwrap().id,
+            default
+        );
+    }
 
     #[test]
     fn old_opencode_opens_without_standalone() {
