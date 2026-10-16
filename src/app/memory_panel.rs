@@ -121,7 +121,8 @@ impl App {
                         "{p0}  Buscar (sin tildes también)",
                         p0 = icon::MAGNIFYING_GLASS
                     ))
-                    .desired_width((ui.available_width() - 150.0).clamp(160.0, 320.0)),
+                    // Sitio para los dos desplegables (tipo y etiquetas).
+                    .desired_width((ui.available_width() - 270.0).clamp(140.0, 320.0)),
             );
             if search.changed() {
                 ws.memory.dirty = true;
@@ -157,24 +158,39 @@ impl App {
                         }
                     }
                 });
+            // Etiquetas en un desplegable (con muchas, una fila de botones llenaba el panel).
+            if !ws.memory.tags.is_empty() {
+                let selected = if ws.memory.tag.is_empty() {
+                    tr!("Etiquetas").to_string()
+                } else {
+                    format!("#{}", ws.memory.tag)
+                };
+                egui::ComboBox::from_id_salt("memory-tag")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        egui::ScrollArea::vertical()
+                            .max_height(300.0)
+                            .show(ui, |ui| {
+                                if ui
+                                    .selectable_label(ws.memory.tag.is_empty(), tr!("Todas"))
+                                    .clicked()
+                                {
+                                    ws.memory.tag.clear();
+                                    ws.memory.dirty = true;
+                                }
+                                for (tag, n) in ws.memory.tags.clone() {
+                                    let on = ws.memory.tag == tag;
+                                    if ui.selectable_label(on, format!("#{tag}  {n}")).clicked() {
+                                        ws.memory.tag = tag;
+                                        ws.memory.dirty = true;
+                                    }
+                                }
+                            });
+                    })
+                    .response
+                    .on_hover_text(tr!("Filtrar por etiqueta"));
+            }
         });
-        // Etiquetas que existen, para filtrar con un clic (otro clic quita el filtro).
-        if !ws.memory.tags.is_empty() {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-                for (tag, n) in ws.memory.tags.clone() {
-                    let on = ws.memory.tag == tag;
-                    if ui
-                        .selectable_label(on, RichText::new(format!("#{tag} {n}")).size(12.0))
-                        .on_hover_text(tr!("Filtrar por esta etiqueta"))
-                        .clicked()
-                    {
-                        ws.memory.tag = if on { String::new() } else { tag };
-                        ws.memory.dirty = true;
-                    }
-                }
-            });
-        }
         if ws.memory.form.is_none()
             && theme::secondary(&mut ui, tr!("{p0}  Nueva nota", p0 = icon::PLUS)).clicked()
         {
@@ -270,9 +286,17 @@ impl App {
                     for m in entries {
                         // El tipo ya lo dice el grupo; al lado, si los agentes la usan.
                         let read = ws.memory.reads.get(&m.id).copied();
+                        // Un título largo no se sale del panel: se corta con «…» (entero al
+                        // abrir la nota). El encabezado plegable no parte líneas.
+                        let room = ((ui.available_width() - 110.0) / 7.0).max(12.0) as usize;
+                        let title = if m.title.chars().count() > room {
+                            format!("{}…", m.title.chars().take(room - 1).collect::<String>())
+                        } else {
+                            m.title.clone()
+                        };
                         let mut header = egui::text::LayoutJob::default();
                         header.append(
-                            &m.title,
+                            &title,
                             0.0,
                             egui::TextFormat::simple(FontId::proportional(13.0), theme::TEXT),
                         );
@@ -288,10 +312,15 @@ impl App {
                         egui::CollapsingHeader::new(header)
                             .id_salt(("memory", m.id))
                             .show(ui, |ui| {
-                                if let Some(snippet) = &m.snippet {
-                                    ui.label(highlighted(snippet));
+                                if title != m.title {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(&m.title).strong()).wrap(),
+                                    );
                                 }
-                                ui.label(&m.body);
+                                if let Some(snippet) = &m.snippet {
+                                    ui.add(egui::Label::new(highlighted(snippet)).wrap());
+                                }
+                                ui.add(egui::Label::new(&m.body).wrap());
                                 let mut tags = if m.tags.is_empty() {
                                     String::new()
                                 } else {
@@ -303,7 +332,7 @@ impl App {
                                         p0 = store::ago_precise(last)
                                     ));
                                 }
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.label(
                                         RichText::new(format!(
                                             "#{} · {} · {}{tags}",
