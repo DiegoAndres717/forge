@@ -679,8 +679,15 @@ impl Terminal {
                     input_top(&rows, grid.cursor.point.line.0.max(0) as usize)
                 })
             };
+            // Sin sitio encima (el cuadro arriba del todo, tras un `clear`): al pie, que está
+            // vacío, en vez de tapar lo que se escribe.
             let y = top.map_or(rect.min.y, |row| {
-                (rect.min.y + row as f32 * m.cell.y - ATTACH_STRIP).max(rect.min.y)
+                let y = rect.min.y + row as f32 * m.cell.y - ATTACH_STRIP;
+                if y < rect.min.y {
+                    rect.max.y - ATTACH_STRIP
+                } else {
+                    y
+                }
             });
             let strip = Rect::from_min_size(
                 egui::pos2(rect.min.x, y),
@@ -2305,11 +2312,14 @@ fn input_top(rows: &[String], cursor: usize) -> usize {
         row.chars().filter(|&c| c == '─').count() >= 10
             && row.chars().all(|c| "─╭╮╰╯├┤ ".contains(c))
     };
+    // ¿Hay una raya debajo del cursor? Entonces está dentro del cuadro y vale la primera de
+    // arriba; si no, está debajo del cuadro y vale la segunda (la de abajo es la primera).
+    let inside = rows.iter().skip(cursor + 1).take(8).any(|r| border(r));
     let mut found = None;
     for i in (cursor.saturating_sub(8)..=cursor.min(rows.len().saturating_sub(1))).rev() {
         if border(&rows[i]) {
-            if found.is_some() {
-                return i; // la segunda raya hacia arriba: el borde de arriba del cuadro
+            if inside || found.is_some() {
+                return i;
             }
             found = Some(i);
         }
@@ -2326,8 +2336,11 @@ mod tests {
         // Claude Code: rayas arriba y abajo del cuadro, el cursor debajo de todo.
         let claude = rows(&["respuesta", &rule, "> hola", &rule, "  ? for shortcuts", ""]);
         assert_eq!(super::input_top(&claude, 5), 1);
-        // Con el cursor dentro del cuadro: la raya de encima.
+        // Con el cursor dentro del cuadro: la raya de encima, aunque haya otra más arriba en
+        // la salida (un `---` de markdown).
         assert_eq!(super::input_top(&claude, 2), 1);
+        let ruled = rows(&[&rule, "respuesta", &rule, "> hola", &rule, ""]);
+        assert_eq!(super::input_top(&ruled, 3), 2);
         // Cuadro con esquinas.
         let boxed = rows(&[
             "respuesta",
