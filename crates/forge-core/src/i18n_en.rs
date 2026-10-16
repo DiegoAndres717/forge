@@ -1004,6 +1004,11 @@ pub const EN: &[(&str, &str)] = &[
         "Reporta un hallazgo solo si es un defecto real, que afecta a quien usa el código y que puedes defender con evidencia concreta del diff. Si dudas, no lo reportes. El estilo no es un hallazgo salvo que esconda un defecto.",
         "Report a finding only if it is a real defect that affects whoever uses the code and that you can defend with concrete evidence from the diff. If in doubt, leave it out. Style is not a finding unless it hides a defect.",
     ),
+    ("{p0} · refutador", "{p0} · refuter"),
+    (
+        "Desmentido por el refutador: {m}",
+        "Disproved by the refuter: {m}",
+    ),
     ("Revisor de fiabilidad", "Reliability reviewer"),
     (
         "fiabilidad y tests: cambios de comportamiento sin un test que los cubra, casos límite (vacíos, entradas inválidas, límites, reintentos, rutas de error) y tests que pasan sin probar nada",

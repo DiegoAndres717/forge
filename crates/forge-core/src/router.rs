@@ -1092,6 +1092,7 @@ pub fn specialist(
                 "block" => AiVerdict::Block,
                 _ => AiVerdict::Changes,
             };
+            let spent = month_spent + usage.cost_usd;
             let step = Step {
                 route: label,
                 task: chosen.task,
@@ -1100,11 +1101,26 @@ pub fn specialist(
                 usage: Some(usage),
                 seconds: started.elapsed().as_secs_f64(),
             };
+            let mut steps = vec![step];
+            let mut findings = review.findings;
+            let mut verdict = verdict;
+            // Solo lo que bloquearía pasa por el refutador (idea de gentle-ai): menos
+            // bloqueos falsos sin gastar en lo informativo.
+            // Bloquear sin hallazgos concretos no tiene nada que desmentir: sigue bloqueando.
+            let had_blocking = findings.iter().any(|f| f.severity == "blocking");
+            if reviewer.blocking && verdict == AiVerdict::Block && had_blocking {
+                findings = refute(
+                    config, ctx, reviewer, &diff, findings, spent, local, &mut steps,
+                );
+                if !findings.iter().any(|f| f.severity == "blocking") {
+                    verdict = AiVerdict::Changes;
+                }
+            }
             AiOutcome {
                 verdict,
                 summary: review.summary,
-                findings: review.findings,
-                steps: vec![step],
+                findings,
+                steps,
                 reason: None,
             }
         }
@@ -1120,6 +1136,97 @@ pub fn specialist(
             incomplete(vec![step], tr!("el revisor no respondió: {e}", e = e))
         }
     }
+}
+
+/// Hallazgos graves que se revisan como mucho por revisión (cada uno es una llamada).
+// ponytail: tope fijo; configurable en Ajustes si hiciera falta (plan #42, fase 3).
+// El presupuesto se comprueba por revisor (los de Guard corren en paralelo con el gasto de
+// partida), así que el mes puede pasarse como mucho MAX_REFUTED llamadas por revisor que
+// bloquea; si molesta, reservarlas en `affordable_reviewers`.
+const MAX_REFUTED: usize = 3;
+/// Confianza mínima para que un desmentido cuente.
+const MIN_REFUTE_CONFIDENCE: f64 = 0.7;
+
+/// Otro modelo (la ruta potente) intenta desmentir cada hallazgo bloqueante. Desmentido:
+/// queda como nota; confirmado, dudoso, sin respuesta o sin presupuesto: se mantiene.
+#[allow(clippy::too_many_arguments)]
+fn refute(
+    config: &RouterConfig,
+    ctx: &ReviewContext,
+    reviewer: &crate::reviewers::ReviewerSpec,
+    diff: &str,
+    findings: Vec<Finding>,
+    mut spent: f64,
+    local: bool,
+    steps: &mut Vec<Step>,
+) -> Vec<Finding> {
+    let task = if reviewer.id == "security" {
+        Task::Security
+    } else {
+        Task::Architecture
+    };
+    let chosen = route(config, task, local);
+    let paid = config.provider(&chosen.provider).is_some_and(|p| !p.local);
+    let mut tried = 0;
+    findings
+        .into_iter()
+        .map(|f| {
+            if f.severity != "blocking" || tried == MAX_REFUTED {
+                return f;
+            }
+            if paid && spent + config.max_cost_per_call_usd > config.monthly_budget_usd {
+                return f;
+            }
+            tried += 1;
+            let prompt = format!(
+                "Eres un refutador. Otro revisor ({}) marcó este hallazgo como bloqueante. \
+                 Intenta desmentirlo con el diff: ¿es un defecto real que se demuestra con el código mostrado?\n\
+                 Hallazgo: {}:{} {}\n\n\
+                 Diff:\n```diff\n{diff}\n```\n\n\
+                 Responde SOLO con un objeto JSON: {{\"verdict\": \"block\" si el hallazgo es real, \
+                 \"approve\" si es falso o no se sostiene, \"changes\" si el diff no basta para decidir, \
+                 \"confidence\": 0.0-1.0, \"summary\": \"una frase en español\", \"findings\": []}}",
+                reviewer.name, f.file, f.line, f.message
+            );
+            let started = Instant::now();
+            let label = tr!("{p0} · refutador", p0 = chosen.label());
+            match call(config, &chosen, &prompt, &ctx.repo) {
+                Ok((r, usage)) => {
+                    spent += usage.cost_usd;
+                    // El diff puede intentar convencerlo: solo cuenta un desmentido seguro.
+                    let refuted = r.verdict == "approve" && r.confidence >= MIN_REFUTE_CONFIDENCE;
+                    steps.push(Step {
+                        route: label,
+                        task,
+                        review: Some(r),
+                        error: None,
+                        usage: Some(usage),
+                        seconds: started.elapsed().as_secs_f64(),
+                    });
+                    if refuted {
+                        Finding {
+                            severity: "info".into(),
+                            message: tr!("Desmentido por el refutador: {m}", m = f.message),
+                            ..f
+                        }
+                    } else {
+                        f
+                    }
+                }
+                Err(e) => {
+                    steps.push(Step {
+                        route: label,
+                        task,
+                        review: None,
+                        error: Some(e),
+                        usage: None,
+                        seconds: started.elapsed().as_secs_f64(),
+                    });
+                    f
+                }
+            }
+        })
+        .collect()
 }
 
 /// Decide la revisión de nivel 2 o 3 más alta que respondió: una clasificación de nivel 1
@@ -1590,5 +1697,76 @@ mod tests {
         let outcome = review(&config, &rules, &ctx, false, 0.10, false, &|_| {});
         assert_eq!(outcome.verdict, AiVerdict::Incomplete);
         assert!(outcome.reason.unwrap().contains("presupuesto"));
+
+        // Refutador: un revisor que bloquea ve su hallazgo grave revisado por otro modelo.
+        config.monthly_budget_usd = 100.0;
+        config.providers.insert(
+            "revisor".into(),
+            ProviderDef {
+                command: "cat > /dev/null; echo '{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"clave expuesta\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"clave en el código\"},{\"severity\":\"warning\",\"file\":\"a.txt\",\"line\":1,\"message\":\"nombre poco claro\"}]}'".into(),
+                format: OutputFormat::Text,
+                cost_per_call_usd: 0.10,
+                local: false,
+            },
+        );
+        let mut security = specs.iter().find(|r| r.id == "security").unwrap().clone();
+        security.provider = Some("revisor".into());
+        let activation = crate::reviewers::Activation {
+            reviewer: security,
+            files: vec!["a.txt".into()],
+        };
+        // El refutador (la ruta de seguridad, «potente») lo confirma: sigue bloqueando.
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
+        assert_eq!(
+            outcome.steps.len(),
+            2,
+            "revisión + una refutación (solo lo grave)"
+        );
+        // Lo desmiente: deja de bloquear, y se ve que fue desmentido.
+        config
+            .providers
+            .insert("potente".into(), fake("approve", 0.9));
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(
+            outcome.verdict,
+            AiVerdict::Changes,
+            "{:?}",
+            outcome.details()
+        );
+        assert!(
+            outcome
+                .details()
+                .iter()
+                .any(|d| d.contains("Desmentido") && d.contains("clave en el código")),
+            "{:?}",
+            outcome.details()
+        );
+        assert!(
+            outcome.findings.iter().all(|f| f.severity != "blocking"),
+            "{:?}",
+            outcome.findings
+        );
+        // Un refutador que no responde bien: el hallazgo se mantiene.
+        config.providers.insert(
+            "potente".into(),
+            ProviderDef {
+                command: "cat > /dev/null; echo basura".into(),
+                format: OutputFormat::Text,
+                cost_per_call_usd: 0.10,
+                local: false,
+            },
+        );
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
+        // Bloquea sin hallazgos concretos: no hay nada que desmentir, sigue bloqueando.
+        config
+            .providers
+            .insert("potente".into(), fake("approve", 0.9));
+        config
+            .providers
+            .insert("revisor".into(), fake("block", 0.9));
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
     }
 }
