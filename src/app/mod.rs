@@ -1339,13 +1339,23 @@ impl eframe::App for App {
         // Carpetas arrastradas a la ventana.
         let (dropped, hovering) =
             ctx.input(|i| (i.raw.dropped_files.clone(), !i.raw.hovered_files.is_empty()));
-        for file in dropped {
-            let path = file.path();
-            cmds.push(UiCmd::Open(if path.is_dir() {
-                path.to_path_buf()
-            } else {
-                path.parent().unwrap_or(path).to_path_buf()
-            }));
+        // Una carpeta abre su proyecto; archivos sueltos (una imagen para el agente) pegan su
+        // ruta en la terminal enfocada, como Terminal.app.
+        let (folders, files): (Vec<_>, Vec<_>) = dropped
+            .iter()
+            .map(|f| f.path().to_path_buf())
+            .partition(|p| p.is_dir());
+        let pasted = !files.is_empty()
+            && self.active.is_some_and(|i| {
+                self.workspaces[i].paste_into_focus(&crate::paste::drop_text(&files))
+            });
+        for path in folders {
+            cmds.push(UiCmd::Open(path));
+        }
+        if !pasted {
+            for path in files {
+                cmds.push(UiCmd::Open(path.parent().unwrap_or(&path).to_path_buf()));
+            }
         }
 
         // Los atajos se retiran de la cola para que no lleguen al shell.
