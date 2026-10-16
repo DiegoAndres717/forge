@@ -742,11 +742,13 @@ fn parse_output(
     match format {
         OutputFormat::Text => Ok((stdout.to_string(), 0, 0, None)),
         OutputFormat::ClaudeJson => {
-            // El JSON va en la última línea: lo de antes puede ser lo que imprime el perfil de
-            // la shell de inicio de sesión (neofetch, avisos de nvm…).
+            // El JSON va en la última línea, desde su primera `{`: lo de antes puede ser lo que
+            // imprime el perfil de la shell de inicio de sesión (neofetch y sus códigos de
+            // escape, avisos de nvm…).
             let v: serde_json::Value = stdout
                 .lines()
                 .rev()
+                .filter_map(|l| l.find('{').map(|i| &l[i..]))
                 .find_map(|l| {
                     serde_json::from_str(l.trim())
                         .ok()
@@ -1643,7 +1645,8 @@ mod tests {
         assert_eq!(parse_review(&text).unwrap().verdict, "approve");
         // Un perfil de la shell que imprime algo antes (neofetch, avisos de nvm, `{` sueltas):
         // el JSON de claude es la última línea.
-        let noisy = format!("\x1b[32m'c.\n OS: macOS {{x}}\n\n{claude}\n");
+        // neofetch deja sus códigos de escape finales en la misma línea que el JSON.
+        let noisy = format!("\x1b[32m'c.\n OS: macOS {{x}}\n\n\x1b[?25h\x1b[?7h{claude}\n");
         let (text, ..) = parse_output(OutputFormat::ClaudeJson, &noisy).unwrap();
         assert_eq!(parse_review(&text).unwrap().verdict, "approve");
 
