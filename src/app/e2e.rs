@@ -209,6 +209,23 @@ fn dropped_files_paste_their_path_and_folders_open_a_project() {
     );
 }
 
+/// Sin barra de menús nativa (Windows, Linux) el nombre de la app va en la barra superior,
+/// junto a los botones de la ventana; en macOS ya lo pone su barra de menús.
+#[test]
+fn the_app_name_shows_in_the_toolbar_without_a_native_menu_bar() {
+    let _serial = serial();
+    let mut h = app(project("app-name"));
+    h.state_mut().menu_button = false;
+    h.run_steps(2);
+    assert!(
+        h.query_by_label("Forge").is_none(),
+        "macOS: lo pone su barra de menús"
+    );
+    h.state_mut().menu_button = true;
+    h.run_steps(2);
+    h.get_by_label("Forge");
+}
+
 #[test]
 fn guard_validates_the_commit_from_the_panel() {
     let _serial = serial();
