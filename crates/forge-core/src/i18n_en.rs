@@ -732,6 +732,19 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Revisión de IA", "AI review"),
     ("Revisar cambios con IA", "Review changes with AI"),
+    ("No se pudo buscar", "Couldn't check"),
+    (
+        "No se pudo consultar GitHub: {e}",
+        "Couldn't reach GitHub: {e}",
+    ),
+    (
+        "respuesta inesperada de GitHub",
+        "unexpected response from GitHub",
+    ),
+    (
+        "{p0}: no es un repositorio de GitHub",
+        "{p0}: not a GitHub repository",
+    ),
     ("{p0}  Revisar cambios", "{p0}  Review changes"),
     (
         "Valida el commit con los revisores con IA (seguridad, base de datos, lentes…), aunque Guard no los pida: lo preparado o, si no hay nada preparado, todo lo que hay sin commit. El resultado sale en Guard.",
