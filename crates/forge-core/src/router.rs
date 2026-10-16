@@ -1402,8 +1402,15 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
         (Some(x), None) | (None, Some(x)) => (x, None),
         (Some(a), Some(b)) => (a, Some(b)),
     };
-    let empty = Vec::new();
-    let others = b.map_or(&empty, |b| &b.findings);
+    // Sin texto no hay hallazgo (un juez de verdad devolvió alguno vacío).
+    let said = |v: &[Finding]| -> Vec<Finding> {
+        v.iter()
+            .filter(|f| !f.message.trim().is_empty())
+            .cloned()
+            .collect()
+    };
+    let mine = said(&a.findings);
+    let others = b.map_or_else(Vec::new, |b| said(&b.findings));
     // Solo con ubicación: dos hallazgos sin archivo («faltan tests», «sin autorización») no
     // son el mismo.
     let near = |x: &Finding, y: &Finding| {
@@ -1416,7 +1423,7 @@ pub fn merge_judges(a: Option<&ModelReview>, b: Option<&ModelReview>) -> (AiVerd
     };
     let (mut confirmed, mut suspects) = (Vec::new(), Vec::new());
     let mut matched = vec![false; others.len()];
-    for x in &a.findings {
+    for x in &mine {
         // Uno a uno: cada hallazgo del otro juez confirma uno solo.
         match (0..others.len()).find(|&i| !matched[i] && near(x, &others[i])) {
             Some(i) => {
@@ -2039,6 +2046,12 @@ mod tests {
         let (verdict, findings) = merge_judges(Some(&a), Some(&b));
         assert_eq!(verdict, AiVerdict::Changes, "{findings:?}");
         assert!(findings.iter().all(|f| f.message.contains("1 de 2")));
+        // Un hallazgo sin texto (visto con Sonnet de verdad) no se muestra.
+        let blank = judge("approve", vec![f("warning", "x.md", 22, "  ")]);
+        assert_eq!(
+            merge_judges(Some(&blank), Some(&clean)),
+            (AiVerdict::Approve, vec![])
+        );
         // Un juez que no aprueba, aunque no dé hallazgos, no deja aprobar.
         let (verdict, _) = merge_judges(Some(&judge("block", vec![])), Some(&clean));
         assert_eq!(verdict, AiVerdict::Changes);
