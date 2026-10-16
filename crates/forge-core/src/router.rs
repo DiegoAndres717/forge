@@ -149,8 +149,16 @@ impl RouterConfig {
             local,
         };
         Some(match name {
+            // Lee el proyecto (solo lectura) para ver el código que el diff llama o toca, como
+            // los jueces de gentle-ai; los secretos, nunca (el diff ya los oculta). Sin los MCP,
+            // skills, plugins ni hooks del usuario: con ellos cada llamada cargaba ~400 k
+            // tokens (0,51 $ con Haiku frente a 0,001 $), y los hooks no pintan nada aquí.
             "anthropic" | "claude" => builtin(
-                "claude -p --model {model} --effort {effort} --output-format json --no-session-persistence --tools '' --max-budget-usd {max_cost}",
+                "claude -p --model {model} --effort {effort} --output-format json --no-session-persistence \
+                 --strict-mcp-config --disable-slash-commands --setting-sources '' \
+                 --tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob' \
+                 --disallowedTools 'Read(**/.env*)' 'Read(**/*.pem)' 'Read(**/*.key)' 'Read(~/.ssh/**)' \
+                 --max-budget-usd {max_cost}",
                 OutputFormat::ClaudeJson,
                 false,
             ),
@@ -593,6 +601,8 @@ fn prompt_with(role: &str, ctx: &ReviewContext, diff: &str) -> String {
          Archivos cambiados:\n{}\n\n\
          Diff (contexto de las funciones tocadas; archivos generados y sensibles excluidos; secretos ocultos):\n\
          ```diff\n{diff}\n```\n\n\
+         Si puedes leer archivos del proyecto, abre los archivos que el diff llama o toca (y sus \
+         tests) antes de afirmar un fallo, y no inventes lo que no hayas visto.\n\
          Responde SOLO con un objeto JSON, sin texto adicional, con esta forma:\n\
          {{\"verdict\": \"approve\" | \"changes\" | \"block\", \"confidence\": 0.0-1.0, \"risk\": \"low\" | \"medium\" | \"high\", \
          \"summary\": \"una o dos frases en español\", \
@@ -1635,6 +1645,49 @@ mod tests {
         );
         let r = route(&RouterConfig::default(), Task::Classification, true);
         assert_eq!(r.provider, "local");
+    }
+
+    #[test]
+    fn claude_reviewers_read_the_project_but_never_secrets() {
+        let claude = RouterConfig::default()
+            .provider("anthropic")
+            .unwrap()
+            .command;
+        // Leen el código alrededor del diff (como los jueces de gentle-ai), sin escribir
+        // ni ejecutar nada.
+        assert!(claude.contains("--tools 'Read,Grep,Glob'"), "{claude}");
+        assert!(
+            claude.contains("--allowedTools 'Read,Grep,Glob'"),
+            "{claude}"
+        );
+        // Sin los MCP, skills, plugins ni hooks del usuario (cientos de miles de tokens).
+        for lean in [
+            "--strict-mcp-config",
+            "--disable-slash-commands",
+            "--setting-sources ''",
+        ] {
+            assert!(claude.contains(lean), "falta {lean}: {claude}");
+        }
+        // Los secretos no salen hacia el modelo, igual que en el diff.
+        for secret in [
+            "Read(**/.env*)",
+            "Read(**/*.pem)",
+            "Read(**/*.key)",
+            "Read(~/.ssh/**)",
+        ] {
+            assert!(claude.contains(secret), "falta {secret}: {claude}");
+        }
+        // El prompt les dice que miren antes de opinar.
+        let ctx = ReviewContext {
+            project: "p".into(),
+            stage: Stage::Commit,
+            risk: assess(&[], 0),
+            deterministic: vec![],
+            files: vec![],
+            repo: ".".into(),
+            range: vec![],
+        };
+        assert!(prompt_with("Revisa.", &ctx, "").contains("abre los archivos"));
     }
 
     #[test]
