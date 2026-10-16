@@ -357,8 +357,12 @@ pub fn run(
         let mut activations = Vec::new();
         if rules.stage(stage).require_ai_review && !options.reviewers.is_empty() {
             let files = counted_files(&rules, &diff.files);
-            let (active, skipped) =
-                crate::reviewers::activate(&options.reviewers, &files, &router::assess(&files, 0));
+            let (active, skipped) = crate::reviewers::activate(
+                &options.reviewers,
+                &files,
+                &router::assess(&files, 0),
+                &options.routing.clone().unwrap_or_default(),
+            );
             for a in &active {
                 let details = vec![tr!("archivos de su área: {p0}", p0 = a.files.join(", "))];
                 items.push(item(

@@ -721,6 +721,41 @@ fn settings_tabs_show_their_options_with_help() {
     assert!(h.query_by_label_contains("Idioma").is_none());
 }
 
+/// Ajustes → Este proyecto → Revisión con IA: profundidad, lentes y refutador (plan #42).
+#[test]
+fn review_depth_lenses_and_refuter_are_set_from_settings() {
+    let _serial = serial();
+    let mut h = app(project("settings-review"));
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Este proyecto").click();
+    h.run_steps(3);
+    let form = |h: &Harness<'_, App>| h.state().routing_form.as_ref().unwrap().form.clone();
+    assert_eq!(
+        form(&h).review_depth,
+        forge_core::reviewers::DepthMode::Risk
+    );
+    for label in [
+        "Siempre completa",
+        "Legibilidad",
+        "Refutar antes de bloquear",
+    ] {
+        // Está abajo en la pestaña: primero se desplaza hasta él.
+        h.get_by_label(label).scroll_to_me();
+        h.run_steps(10);
+        h.get_by_label(label).click();
+        h.run_steps(2);
+    }
+    let f = form(&h);
+    assert_eq!(f.review_depth, forge_core::reviewers::DepthMode::Full);
+    assert_eq!(
+        f.lenses,
+        ["reliability", "resilience"],
+        "legibilidad quitada"
+    );
+    assert!(!f.refuter);
+}
+
 /// Forge Jev se enciende en Ajustes → Agentes, apagado de serie, y llega a los agentes que
 /// se abran después (FORGE_JEV_CHORES / --jev-chores).
 #[test]

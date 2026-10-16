@@ -46,6 +46,12 @@ pub struct RouterConfig {
     /// Si la revisión no se puede completar (sin proveedor, sin respuesta, sin presupuesto),
     /// queda como aviso en vez de pendiente: no bloquea.
     pub best_effort: bool,
+    /// Profundidad de la revisión por lentes (plan #42): según el riesgo o fija.
+    pub review_depth: crate::reviewers::DepthMode,
+    /// Lentes generales que se usan (de `reviewers::LENSES`).
+    pub lenses: Vec<String>,
+    /// Otro modelo intenta desmentir los hallazgos que bloquearían.
+    pub refuter: bool,
 }
 
 impl Default for RouterConfig {
@@ -60,6 +66,9 @@ impl Default for RouterConfig {
             tasks: HashMap::new(),
             providers: HashMap::new(),
             best_effort: false,
+            review_depth: crate::reviewers::DepthMode::Risk,
+            lenses: crate::reviewers::LENSES.map(String::from).to_vec(),
+            refuter: true,
         }
     }
 }
@@ -1108,7 +1117,7 @@ pub fn specialist(
             // bloqueos falsos sin gastar en lo informativo.
             // Bloquear sin hallazgos concretos no tiene nada que desmentir: sigue bloqueando.
             let had_blocking = findings.iter().any(|f| f.severity == "blocking");
-            if reviewer.blocking && verdict == AiVerdict::Block && had_blocking {
+            if config.refuter && reviewer.blocking && verdict == AiVerdict::Block && had_blocking {
                 findings = refute(
                     config, ctx, reviewer, &diff, findings, spent, local, &mut steps,
                 );
@@ -1278,7 +1287,10 @@ const TEMPLATE: &str = "# Router de modelos: qué modelo revisa según la tarea 
                 monthly_budget_usd = 20.00\n\
                 allow_escalation = true\n\
                 max_cost_per_call_usd = 0.50\n\
-                best_effort = false             # true: sin proveedor o sin respuesta, avisa y no bloquea\n\n\
+                best_effort = false             # true: sin proveedor o sin respuesta, avisa y no bloquea\n\
+                review_depth = \"risk\"           # risk | light | full: cuántas lentes según el riesgo\n\
+                lenses = [\"reliability\", \"readability\", \"resilience\"]\n\
+                refuter = true                  # otro modelo intenta desmentir lo que bloquearía\n\n\
                 # Cada tarea puede fijar proveedor (anthropic, openai, opencode, local), modelo y esfuerzo.\n\
                 # [routing.tasks.classification]\n# provider = \"local\"\n# model = \"qwen2.5-coder\"\n# effort = \"low\"\n\n\
                 # [routing.tasks.code_review]\n# provider = \"anthropic\"\n# model = \"haiku\"\n# effort = \"medium\"\n\n\
@@ -1299,6 +1311,9 @@ pub struct RoutingForm {
     /// sale del ordenador.
     pub local_reviews: bool,
     pub local_model: String,
+    pub review_depth: crate::reviewers::DepthMode,
+    pub lenses: Vec<String>,
+    pub refuter: bool,
 }
 
 /// Las tareas de nivel 2–3 que «Revisar en local» lleva a Ollama.
@@ -1325,6 +1340,9 @@ impl RoutingForm {
                 .get(LOCAL_TASKS[0])
                 .filter(|r| r.provider == "local" && !r.model.is_empty())
                 .map_or_else(|| LOCAL_MODEL.into(), |r| r.model.clone()),
+            review_depth: c.review_depth,
+            lenses: c.lenses,
+            refuter: c.refuter,
         })
     }
 
@@ -1348,6 +1366,13 @@ impl RoutingForm {
         r["allow_escalation"] = toml_edit::value(self.allow_escalation);
         r["max_cost_per_call_usd"] = toml_edit::value(self.max_cost_per_call_usd.max(0.0));
         r["best_effort"] = toml_edit::value(self.best_effort);
+        r["review_depth"] = toml_edit::value(match self.review_depth {
+            crate::reviewers::DepthMode::Risk => "risk",
+            crate::reviewers::DepthMode::Light => "light",
+            crate::reviewers::DepthMode::Full => "full",
+        });
+        r["lenses"] = toml_edit::value(self.lenses.iter().collect::<toml_edit::Array>());
+        r["refuter"] = toml_edit::value(self.refuter);
         let model = match self.local_model.trim() {
             "" => LOCAL_MODEL,
             m => m,
@@ -1498,6 +1523,26 @@ mod tests {
         assert!(
             c.tasks.contains_key("code_review"),
             "las tareas propias siguen"
+        );
+        assert_eq!(RoutingForm::load(&dir).unwrap(), form);
+        // Las opciones de la revisión por lentes (plan #42).
+        assert_eq!(
+            (form.review_depth, form.refuter, form.lenses.len()),
+            (crate::reviewers::DepthMode::Risk, true, 3),
+            "de serie: según el riesgo, con refutador y las tres lentes"
+        );
+        form.review_depth = crate::reviewers::DepthMode::Full;
+        form.refuter = false;
+        form.lenses = vec!["reliability".into()];
+        form.save(&dir).unwrap();
+        let c = RouterConfig::load(&dir).unwrap();
+        assert_eq!(
+            (c.review_depth, c.refuter, c.lenses.clone()),
+            (
+                crate::reviewers::DepthMode::Full,
+                false,
+                vec!["reliability".to_string()]
+            )
         );
         assert_eq!(RoutingForm::load(&dir).unwrap(), form);
         let _ = std::fs::remove_dir_all(dir);
@@ -1759,6 +1804,14 @@ mod tests {
         );
         let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
         assert_eq!(outcome.verdict, AiVerdict::Block, "{:?}", outcome.details());
+        // Con el refutador apagado en Ajustes no se gasta en refutar.
+        config.refuter = false;
+        let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
+        assert_eq!(
+            (outcome.verdict, outcome.steps.len()),
+            (AiVerdict::Block, 1)
+        );
+        config.refuter = true;
         // Bloquea sin hallazgos concretos: no hay nada que desmentir, sigue bloqueando.
         config
             .providers

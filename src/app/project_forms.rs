@@ -4,6 +4,7 @@ use super::guard_form::Autosave;
 use super::*;
 use forge_core::agents::{AgentForm, load_form, save_form};
 use forge_core::project::{AutoRestart, CommandForm, HealthKind, ProcessForm, ProjectForm};
+use forge_core::reviewers::DepthMode;
 use forge_core::router::{Profile, RoutingForm};
 
 pub(super) type AgentsForm = Autosave<Vec<AgentForm>>;
@@ -328,6 +329,74 @@ impl App {
             });
             ui.label(
                 RichText::new(profile_info(g.form.profile))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+
+            heading(
+                ui,
+                tr!("Profundidad de la revisión"),
+                tr!(
+                    "Además de los revisores de cada área (seguridad, base de datos, interfaz…), unas lentes generales revisan todo el cambio. Cuantas más, más se encuentra y más se gasta."
+                ),
+            );
+            ui.horizontal_wrapped(|ui| {
+                for (d, name, info) in [
+                    (DepthMode::Risk, tr!("Según el riesgo"), tr!("Cambio de riesgo bajo: ninguna lente. Medio: la primera elegida. Alto: todas.")),
+                    (DepthMode::Light, tr!("Siempre ligera"), tr!("Nunca usa lentes: solo los revisores de cada área.")),
+                    (DepthMode::Full, tr!("Siempre completa"), tr!("Usa todas las lentes elegidas en cada cambio, aunque sea pequeño.")),
+                ] {
+                    if ui
+                        .selectable_label(g.form.review_depth == d, name)
+                        .on_hover_text(info)
+                        .clicked()
+                    {
+                        g.form.review_depth = d;
+                        changed = true;
+                    }
+                }
+            });
+            for (id, name, help) in [
+                (
+                    "reliability",
+                    tr!("Fiabilidad y tests"),
+                    tr!(
+                        "Cambios sin un test que los cubra, casos límite y tests que pasan sin probar nada."
+                    ),
+                ),
+                (
+                    "readability",
+                    tr!("Legibilidad"),
+                    tr!(
+                        "Lógica duplicada, código muerto, números mágicos y nombres que esconden la intención."
+                    ),
+                ),
+                (
+                    "resilience",
+                    tr!("Resiliencia"),
+                    tr!(
+                        "Fallos sin manejar o tragados en silencio, operaciones sin forma de deshacer y fallos que pasarían inadvertidos."
+                    ),
+                ),
+            ] {
+                ui.horizontal(|ui| {
+                    let mut on = g.form.lenses.iter().any(|l| l == id);
+                    if ui.checkbox(&mut on, name).changed() {
+                        g.form.lenses.retain(|l| l != id);
+                        if on {
+                            g.form.lenses.push(id.into());
+                        }
+                        changed = true;
+                    }
+                    theme::help(ui, help);
+                });
+            }
+            ui.horizontal(|ui| {
+                changed |= ui.checkbox(&mut g.form.refuter, tr!("Refutar antes de bloquear")).changed();
+                theme::help(ui, tr!("Cuando un revisor iba a bloquear, otro modelo intenta desmentir cada hallazgo grave con el diff. Lo desmentido queda como nota y deja de bloquear; si duda, se mantiene. Cuesta una llamada por hallazgo (3 como máximo)."));
+            });
+            ui.label(
+                RichText::new(tr!("Cuándo se revisa: en «Revisión con IA» de cada paso de Project Guard (commit, push, PR)."))
                     .size(11.5)
                     .color(theme::TEXT_3),
             );

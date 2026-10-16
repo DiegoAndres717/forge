@@ -6,7 +6,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::guard::{FileChange, glob_match};
-use crate::router::{Risk, RiskLevel};
+use crate::router::{Risk, RiskLevel, RouterConfig};
 
 /// Nivel de modelo del revisor (plan 9.3: `route`).
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -34,6 +34,16 @@ pub enum Detector {
 pub enum Depth {
     Light,
     Standard,
+    Full,
+}
+
+/// Profundidad elegida en Ajustes: según el riesgo (de serie) o fija.
+#[derive(Deserialize, Clone, Copy, Debug, PartialEq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum DepthMode {
+    #[default]
+    Risk,
+    Light,
     Full,
 }
 
@@ -273,7 +283,19 @@ pub fn activate(
     reviewers: &[ReviewerSpec],
     files: &[FileChange],
     risk: &Risk,
+    config: &RouterConfig,
 ) -> (Vec<Activation>, Vec<(String, String)>) {
+    // Las lentes elegidas en Ajustes, en su orden: la primera entra ya en profundidad estándar.
+    let chosen: Vec<&str> = LENSES
+        .iter()
+        .copied()
+        .filter(|l| config.lenses.iter().any(|c| c == l))
+        .collect();
+    let depth = match config.review_depth {
+        DepthMode::Risk => depth(risk),
+        DepthMode::Light => Depth::Light,
+        DepthMode::Full => Depth::Full,
+    };
     let mut active = Vec::new();
     let mut skipped = Vec::new();
     for r in reviewers.iter().filter(|r| r.enabled) {
@@ -322,16 +344,18 @@ pub fn activate(
                     )
                 }
                 Some(Detector::Lens) => {
-                    let rank = LENSES.iter().position(|l| *l == r.id).unwrap_or(0);
-                    let on = match depth(risk) {
-                        Depth::Light => false,
-                        Depth::Standard => rank == 0,
-                        Depth::Full => true,
+                    let rank = chosen.iter().position(|l| *l == r.id);
+                    let on = match (rank, depth) {
+                        (None, _) | (_, Depth::Light) => false,
+                        (Some(i), Depth::Standard) => i == 0,
+                        (Some(_), Depth::Full) => true,
                     };
-                    (
-                        if on { pick(&|_| true) } else { Vec::new() },
-                        tr!("el riesgo del cambio no pide esta lente"),
-                    )
+                    let why = if rank.is_none() {
+                        tr!("apagada en Ajustes")
+                    } else {
+                        tr!("el riesgo del cambio no pide esta lente")
+                    };
+                    (if on { pick(&|_| true) } else { Vec::new() }, why)
                 }
                 None => (Vec::new(), tr!("sin rutas configuradas")),
             }
@@ -362,6 +386,10 @@ mod tests {
         }
     }
 
+    fn cfg() -> RouterConfig {
+        RouterConfig::default()
+    }
+
     fn low() -> Risk {
         Risk {
             score: 0,
@@ -378,7 +406,7 @@ mod tests {
             file("src/components/Vacunas.tsx"),
             file("src/lib/fechas.ts"),
         ];
-        let (active, skipped) = activate(&builtins(), &files, &low());
+        let (active, skipped) = activate(&builtins(), &files, &low(), &cfg());
         let ids: Vec<&str> = active.iter().map(|a| a.reviewer.id.as_str()).collect();
         assert_eq!(ids, ["database", "frontend"]);
         assert_eq!(
@@ -394,7 +422,7 @@ mod tests {
         );
         assert!(skipped.iter().any(|(n, _)| n.contains("arquitectura")));
 
-        let (active, _) = activate(&builtins(), &[file("src/auth/session.ts")], &low());
+        let (active, _) = activate(&builtins(), &[file("src/auth/session.ts")], &low(), &cfg());
         assert_eq!(
             active
                 .iter()
@@ -408,7 +436,7 @@ mod tests {
             signals: vec![],
             security: false,
         };
-        let (active, _) = activate(&builtins(), &[file("src/lib/fechas.ts")], &high);
+        let (active, _) = activate(&builtins(), &[file("src/lib/fechas.ts")], &high, &cfg());
         assert!(
             active.iter().any(|a| a.reviewer.id == "architecture"),
             "riesgo alto activa arquitectura"
@@ -429,7 +457,12 @@ mod tests {
         assert_eq!(depth(&at(RiskLevel::Critical)), Depth::Full);
 
         let lenses = |level| {
-            let (active, skipped) = activate(&builtins(), &[file("src/lib/fechas.ts")], &at(level));
+            let (active, skipped) = activate(
+                &builtins(),
+                &[file("src/lib/fechas.ts")],
+                &at(level),
+                &cfg(),
+            );
             let ids: Vec<String> = active
                 .into_iter()
                 .map(|a| a.reviewer.id)
@@ -452,6 +485,34 @@ mod tests {
             lenses(RiskLevel::High).0,
             ["reliability", "readability", "resilience"]
         );
+
+        // Desde Ajustes: profundidad fija y solo las lentes elegidas.
+        let ids = |config: &RouterConfig, level| {
+            activate(
+                &builtins(),
+                &[file("src/lib/fechas.ts")],
+                &at(level),
+                config,
+            )
+            .0
+            .into_iter()
+            .map(|a| a.reviewer.id)
+            .filter(|id| LENSES.contains(&id.as_str()))
+            .collect::<Vec<_>>()
+        };
+        let mut config = cfg();
+        config.review_depth = DepthMode::Full;
+        assert_eq!(ids(&config, RiskLevel::Low).len(), 3, "siempre completa");
+        config.review_depth = DepthMode::Light;
+        assert!(
+            ids(&config, RiskLevel::Critical).is_empty(),
+            "siempre ligera"
+        );
+        config.review_depth = DepthMode::Risk;
+        config.lenses = vec!["readability".into()];
+        assert_eq!(ids(&config, RiskLevel::High), ["readability"]);
+        // Con riesgo medio entra la primera de las elegidas.
+        assert_eq!(ids(&config, RiskLevel::Medium), ["readability"]);
     }
 
     #[test]
@@ -478,6 +539,7 @@ mod tests {
             &reviewers,
             &[file("src/vacunas/dosis.ts"), file("src/App.tsx")],
             &low(),
+            &cfg(),
         );
         assert_eq!(
             active

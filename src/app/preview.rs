@@ -540,6 +540,13 @@ fn ui_preview() {
         settle(&mut harness);
         save(&mut harness, &out, name);
     }
+    // La profundidad y las lentes de la revisión (plan #42), en estrecho.
+    harness.set_size(Vec2::new(560.0, 900.0));
+    show_tab(&ctx, SettingsTab::Project);
+    settle(&mut harness);
+    harness.get_by_label("Always full").scroll_to_me();
+    settle(&mut harness);
+    save(&mut harness, &out, "11p-ajustes-revision-lentes-estrecho");
     show_tab(&ctx, SettingsTab::General);
     harness.set_size(Vec2::new(1440.0, 880.0));
     harness.state_mut().settings_open = false;
