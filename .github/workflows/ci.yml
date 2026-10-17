@@ -17,7 +17,7 @@ jobs:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # Acciones fijadas por commit (no por etiqueta movible); Dependabot las actualiza.
+      # Acciones fijadas por commit (no por etiqueta movible); se actualizan a mano.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
