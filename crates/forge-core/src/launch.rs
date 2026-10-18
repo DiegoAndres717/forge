@@ -8,7 +8,7 @@ use crate::store::Store;
 /// Niveles de esfuerzo que entiende cada agente (de menos a más).
 pub fn efforts(program: &str) -> &'static [&'static str] {
     match program {
-        "claude" => &["low", "medium", "high", "xhigh", "max"],
+        "claude" | "agy" => &["low", "medium", "high", "xhigh", "max"],
         "codex" => &["low", "medium", "high", "xhigh"],
         _ => &[],
     }
@@ -337,6 +337,7 @@ mod tests {
             ("gpt-5".into(), String::new())
         );
         assert!(efforts("codex").contains(&"xhigh") && !efforts("codex").contains(&"max"));
+        assert!(efforts("agy").contains(&"max") && efforts("agy").contains(&"low"));
 
         let dir = std::env::temp_dir().join(format!("forge-codex-defaults-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();

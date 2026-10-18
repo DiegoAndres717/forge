@@ -255,7 +255,7 @@ No. Forge funciona en local; su única llamada de red es la comprobación de act
 Macs Intel: sí, la app es universal. Linux: en vista previa (ver [Linux](#linux-vista-previa)). Windows: en vista previa (ver [Windows](#windows-vista-previa)).
 
 **¿Necesito Claude Code?**
-No. Terminales, procesos, Guard, Git y planes funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code y Pi si están instalados.
+No. Terminales, procesos, Guard, Git y planes funcionan sin agentes. Forge detecta Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Pi y Antigravity si están instalados.
 
 **¿Por qué macOS pide acceso a Fotos, Música o Documentos?**
 Porque lo pidió un programa de una terminal: un agente, un script, un `find ~`… macOS lo atribuye a Forge, igual que Terminal o Warp, así que el aviso dice «Forge» y lo que permitas vale para lo que corra en sus terminales. Forge en sí no lee esas carpetas. Puedes revisarlo en Ajustes del Sistema → Privacidad y seguridad.

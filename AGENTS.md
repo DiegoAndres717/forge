@@ -1,6 +1,6 @@
 # Forge — instructions for agents
 
-Forge is a native macOS workspace (Rust + egui) for coding with AI agents. These rules apply to every agent (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code…).
+Forge is a native macOS workspace (Rust + egui) for coding with AI agents. These rules apply to every agent (Claude Code, Codex, OpenCode, Gemini CLI, Qwen Code, Antigravity…).
 
 ## Ground rules
 

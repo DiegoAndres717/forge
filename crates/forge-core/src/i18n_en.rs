@@ -2470,6 +2470,10 @@ pub const EN: &[(&str, &str)] = &[
         "Con qué modelo se abre Codex desde Forge. Escribe el nombre tal como lo pide Codex (p. ej. gpt-5). «En este proyecto» manda sobre «En general».",
         "Which model Codex opens with from Forge. Type the name as Codex expects it (e.g. gpt-5). \"In this project\" wins over \"In general\".",
     ),
+    (
+        "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-2.5-flash). «En este proyecto» manda sobre «En general».",
+        "Which model Antigravity opens with from Forge. Type the name as agy expects it (e.g. gemini-2.5-flash). \"In this project\" wins over \"In general\".",
+    ),
     ("Esfuerzo", "Effort"),
     (
         "Cuánto piensa el agente antes de responder. Más esfuerzo: mejores respuestas en lo difícil, pero más lento y más gasto de tu plan. En Claude Code puedes cambiarlo en la sesión con /forge-effort.",
