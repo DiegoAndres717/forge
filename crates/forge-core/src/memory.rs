@@ -130,7 +130,11 @@ fn fts_query(query: &str) -> Option<String> {
     let meaningful: Vec<&str> = all
         .iter()
         .copied()
-        .filter(|t| t.chars().count() >= 3 && !words(t).is_empty())
+        .filter(|t| match t.chars().count() {
+            // Dos letras: siglas como CI, PR o DB cuentan; «de», «la», «el»… no.
+            2 => !SHORT_FILLER.contains(&t.to_lowercase().as_str()),
+            n => n >= 3 && !words(t).is_empty(),
+        })
         .collect();
     let terms = if meaningful.is_empty() {
         all
@@ -145,6 +149,12 @@ fn fts_query(query: &str) -> Option<String> {
             .join(" OR ")
     })
 }
+
+/// Relleno de dos letras (las de 3 o más van en `STOPWORDS`).
+const SHORT_FILLER: [&str; 27] = [
+    "de", "la", "el", "en", "se", "lo", "le", "un", "es", "no", "si", "al", "mi", "tu", "ya", "me",
+    "te", "to", "of", "in", "on", "is", "it", "an", "or", "at", "by",
+];
 
 /// Palabras de relleno que no dicen de qué trata un título.
 const STOPWORDS: [&str; 19] = [
@@ -1007,6 +1017,14 @@ mod tests {
         store
             .add_memory(p, "command", "Levantar la base de datos", "x", "", "x")
             .unwrap();
+        let ci = store
+            .add_memory(p, "convention", "Pasos del CI", "x", "", "x")
+            .unwrap();
+        // Una sigla corta sí cuenta.
+        let found = store
+            .search_memories(p, "configuración del ci", None, 10)
+            .unwrap();
+        assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), [ci]);
         // Las palabras de relleno («de», «la», «como») no traen todo lo demás.
         let found = store
             .search_memories(p, "como se hace de la vacunación del ganado", None, 10)
