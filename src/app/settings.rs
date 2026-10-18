@@ -1264,7 +1264,7 @@ impl App {
                     )
                 } else if program == "agy" {
                     tr!(
-                        "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-2.5-flash). «En este proyecto» manda sobre «En general»."
+                        "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-3.8-flash-high). «En este proyecto» manda sobre «En general»."
                     )
                 } else {
                     tr!(

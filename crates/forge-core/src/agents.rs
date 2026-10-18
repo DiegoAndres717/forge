@@ -260,10 +260,7 @@ impl AgentSpec {
             _ => {}
         }
         if self.id == "agy" {
-            let has_model = command
-                .split_whitespace()
-                .any(|w| w == "-m" || w == "--model");
-            if !model.is_empty() && !has_model {
+            if !model.is_empty() && !command.contains("--model") {
                 flags.push(format!("--model {}", quote(model)));
             }
             if !effort.is_empty() && !command.contains("--effort") {
@@ -439,7 +436,7 @@ pub fn builtins() -> Vec<AgentSpec> {
             Some("agy --continue"),
             Some("agy -p"),
             true,
-            "curl -fsSL https://antigravity.google/install.sh | bash",
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         ),
     ]
 }
