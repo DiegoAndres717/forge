@@ -826,11 +826,11 @@ impl App {
                         return;
                     }
                 }
-                if let Err(e) = crate::open_command()
-                    .args(cfg!(target_os = "macos").then_some("-t"))
-                    .arg(&file)
-                    .spawn()
-                {
+                if let Err(e) = crate::launch(
+                    crate::open_command()
+                        .args(cfg!(target_os = "macos").then_some("-t"))
+                        .arg(&file),
+                ) {
                     self.error = Some(e.to_string());
                 }
             }
@@ -1301,11 +1301,11 @@ impl App {
                 let Some(i) = self.active else { return };
                 let file = self.workspaces[i].project.path.join(".forge/project.toml");
                 // Editor de texto por defecto (en Linux, la app de los .toml).
-                if let Err(e) = crate::open_command()
-                    .args(cfg!(target_os = "macos").then_some("-t"))
-                    .arg(&file)
-                    .spawn()
-                {
+                if let Err(e) = crate::launch(
+                    crate::open_command()
+                        .args(cfg!(target_os = "macos").then_some("-t"))
+                        .arg(&file),
+                ) {
                     self.error = Some(tr!(
                         "no se pudo abrir {p0}: {e}",
                         p0 = file.display(),

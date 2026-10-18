@@ -175,6 +175,17 @@ pub fn open_command() -> std::process::Command {
     })
 }
 
+/// Lanza un programa que no hace falta esperar (abrir una URL, un editor…) y devuelve su pid.
+/// Un hilo lo espera: soltar el `Child` sin `wait` lo deja como zombi hasta cerrar Forge.
+pub fn launch(cmd: &mut std::process::Command) -> std::io::Result<u32> {
+    let mut child = cmd.spawn()?;
+    let pid = child.id();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 pub fn install_fonts(ctx: &egui::Context, s: &Settings) -> Result<(), String> {
     let load = |path: &PathBuf, index: u32| {
         std::fs::read(path)
@@ -417,6 +428,20 @@ fn main() -> eframe::Result {
 
 #[cfg(test)]
 mod tests {
+    /// Lo que se abre con `open`, el editor… no se queda como proceso zombi hasta cerrar Forge.
+    #[cfg(unix)]
+    #[test]
+    fn launched_processes_are_reaped() {
+        let pid = super::launch(&mut std::process::Command::new("true")).unwrap() as i32;
+        let gone = (0..100).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            // Un zombi sigue respondiendo a kill(pid, 0); uno recogido ya no existe.
+            // SAFETY: la señal 0 solo comprueba si el proceso existe.
+            (unsafe { libc::kill(pid, 0) }) != 0
+        });
+        assert!(gone, "el proceso {pid} sigue como zombi");
+    }
+
     #[test]
     fn settings_live_in_appdata_on_windows() {
         use std::path::Path;
