@@ -18,6 +18,17 @@ pub struct ProjectRow {
     pub last_opened: i64,
 }
 
+/// Sesión activa de un agente en un proyecto y rama (para detectar colisiones).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ActiveAgentSession {
+    pub id: String,
+    pub project_key: String,
+    pub branch: String,
+    pub agent: String,
+    pub pid: Option<u32>,
+    pub updated_at: i64,
+}
+
 pub struct Store {
     pub conn: Connection,
     /// Claves de proyecto ya resueltas (ver `project_key`).
@@ -83,6 +94,7 @@ fn strip_verbatim_keys(conn: &Connection) {
         ("agent_usage", "project"),
         ("ideas", "project"),
         ("memories", "project"),
+        ("agent_sessions", "project_key"),
     ];
     for (table, col) in columns {
         let _ = conn.execute(
@@ -198,7 +210,16 @@ impl Store {
                 verdict    TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 report     TEXT NOT NULL
-            );",
+            );
+            CREATE TABLE IF NOT EXISTS agent_sessions (
+                id          TEXT PRIMARY KEY,
+                project_key TEXT NOT NULL,
+                branch      TEXT NOT NULL,
+                agent       TEXT NOT NULL,
+                pid         INTEGER,
+                updated_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_agent_sessions_branch ON agent_sessions (project_key, branch);",
         )
         .map_err(err)?;
         crate::memory::init(&conn).map_err(err)?;
@@ -255,6 +276,10 @@ impl Store {
                         params![key, old],
                     );
                 }
+                let _ = self.conn.execute(
+                    "UPDATE agent_sessions SET project_key = ?1 WHERE project_key = ?2",
+                    params![key, old],
+                );
             }
         }
         let _ = self.conn.execute(
@@ -614,6 +639,127 @@ impl Store {
             .map_err(err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
+
+    // ---------------------------------------------------------------- sesiones activas de agentes
+
+    /// Registra o renueva una sesión activa de un agente en un proyecto y rama.
+    pub fn register_agent_session(
+        &self,
+        id: &str,
+        project: &Path,
+        branch: &str,
+        agent: &str,
+        pid: Option<u32>,
+    ) -> Result<()> {
+        let key = self.project_key(project);
+        let t = now();
+        self.conn
+            .execute(
+                "INSERT INTO agent_sessions (id, project_key, branch, agent, pid, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(id) DO UPDATE SET
+                    project_key = excluded.project_key,
+                    branch = excluded.branch,
+                    agent = excluded.agent,
+                    pid = excluded.pid,
+                    updated_at = excluded.updated_at",
+                params![id, key, branch.trim(), agent.trim(), pid, t],
+            )
+            .map(drop)
+            .map_err(err)
+    }
+
+    /// Actualiza el latido de una sesión para que no caduque.
+    pub fn heartbeat_agent_session(&self, id: &str) -> Result<bool> {
+        let t = now();
+        self.conn
+            .execute(
+                "UPDATE agent_sessions SET updated_at = ?2 WHERE id = ?1",
+                params![id, t],
+            )
+            .map(|n| n > 0)
+            .map_err(err)
+    }
+
+    /// Elimina una sesión al cerrarse la terminal o salir el agente.
+    pub fn remove_agent_session(&self, id: &str) -> Result<bool> {
+        self.conn
+            .execute("DELETE FROM agent_sessions WHERE id = ?1", params![id])
+            .map(|n| n > 0)
+            .map_err(err)
+    }
+
+    /// Limpia sesiones que no han emitido latido en más de `max_age_secs` segundos.
+    pub fn prune_stale_agent_sessions(&self, max_age_secs: i64) -> Result<usize> {
+        let threshold = now() - max_age_secs;
+        self.conn
+            .execute(
+                "DELETE FROM agent_sessions WHERE updated_at < ?1",
+                params![threshold],
+            )
+            .map_err(err)
+    }
+
+    /// Sesiones activas de otros agentes en la misma rama del repositorio (excluyendo opcionalmente una sesión).
+    pub fn active_agent_sessions_on_branch(
+        &self,
+        project: &Path,
+        branch: &str,
+        exclude_id: Option<&str>,
+    ) -> Result<Vec<ActiveAgentSession>> {
+        let _ = self.prune_stale_agent_sessions(30);
+        let key = self.project_key(project);
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_key, branch, agent, pid, updated_at
+                 FROM agent_sessions
+                 WHERE project_key = ?1 AND branch = ?2 AND (?3 IS NULL OR id != ?3)
+                 ORDER BY updated_at DESC",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params![key, branch.trim(), exclude_id], |r| {
+                Ok(ActiveAgentSession {
+                    id: r.get(0)?,
+                    project_key: r.get(1)?,
+                    branch: r.get(2)?,
+                    agent: r.get(3)?,
+                    pid: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            })
+            .map_err(err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(err)
+    }
+
+    /// Todas las sesiones activas en el repositorio del proyecto.
+    pub fn active_agent_sessions(&self, project: &Path) -> Result<Vec<ActiveAgentSession>> {
+        let _ = self.prune_stale_agent_sessions(30);
+        let key = self.project_key(project);
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT id, project_key, branch, agent, pid, updated_at
+                 FROM agent_sessions
+                 WHERE project_key = ?1
+                 ORDER BY updated_at DESC",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map(params![key], |r| {
+                Ok(ActiveAgentSession {
+                    id: r.get(0)?,
+                    project_key: r.get(1)?,
+                    branch: r.get(2)?,
+                    agent: r.get(3)?,
+                    pid: r.get(4)?,
+                    updated_at: r.get(5)?,
+                })
+            })
+            .map_err(err)?;
+        rows.collect::<rusqlite::Result<_>>().map_err(err)
+    }
 }
 
 /// "hace 5 min", "hace 2 h", "hace 3 días".
@@ -855,5 +1001,70 @@ mod tests {
         assert_eq!(ago(now()), "hoy");
         assert_eq!(ago(now() - 86_400), "ayer");
         assert_eq!(ago(now() - 5 * 86_400), "hace 5 días");
+    }
+
+    #[test]
+    fn agent_sessions_tracking() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/forge");
+
+        // Registrar sesiones
+        store
+            .register_agent_session("s1", p, "feat/branch-a", "claude", Some(101))
+            .unwrap();
+        store
+            .register_agent_session("s2", p, "feat/branch-a", "agy", Some(102))
+            .unwrap();
+        store
+            .register_agent_session("s3", p, "main", "codex", None)
+            .unwrap();
+
+        // Listar sesiones en feat/branch-a sin exclusión
+        let sessions = store
+            .active_agent_sessions_on_branch(p, "feat/branch-a", None)
+            .unwrap();
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().any(|s| s.id == "s1" && s.agent == "claude"));
+        assert!(sessions.iter().any(|s| s.id == "s2" && s.agent == "agy"));
+
+        // Listar sesiones en feat/branch-a excluyendo s1 (por ejemplo, el propio panel)
+        let other = store
+            .active_agent_sessions_on_branch(p, "feat/branch-a", Some("s1"))
+            .unwrap();
+        assert_eq!(other.len(), 1);
+        assert_eq!(other[0].id, "s2");
+
+        // Listar todas las sesiones del proyecto
+        let all = store.active_agent_sessions(p).unwrap();
+        assert_eq!(all.len(), 3);
+
+        // Heartbeat renueva la sesión
+        assert!(store.heartbeat_agent_session("s1").unwrap());
+
+        // Eliminar s2
+        assert!(store.remove_agent_session("s2").unwrap());
+        let remaining = store
+            .active_agent_sessions_on_branch(p, "feat/branch-a", None)
+            .unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "s1");
+
+        // Probar caducidad / poda de sesiones obsoletas
+        let old_time = now() - 100;
+        store
+            .conn
+            .execute(
+                "INSERT INTO agent_sessions (id, project_key, branch, agent, pid, updated_at)
+                 VALUES ('s_old', ?1, 'feat/branch-a', 'qwen', NULL, ?2)",
+                params![store.project_key(p), old_time],
+            )
+            .unwrap();
+
+        // active_agent_sessions_on_branch poda automáticamente (> 30s)
+        let after_prune = store
+            .active_agent_sessions_on_branch(p, "feat/branch-a", None)
+            .unwrap();
+        assert_eq!(after_prune.len(), 1);
+        assert_eq!(after_prune[0].id, "s1");
     }
 }
