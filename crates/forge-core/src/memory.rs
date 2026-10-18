@@ -79,11 +79,20 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     // Estados (vigente, reemplazada, archivada). Las bases de antes ganan las columnas con
     // valor por defecto: todas sus memorias siguen vigentes.
-    if conn.prepare("SELECT status FROM memories LIMIT 0").is_err() {
-        conn.execute_batch(
-            "ALTER TABLE memories ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
-             ALTER TABLE memories ADD COLUMN superseded_by INTEGER;",
-        )?;
+    // Columna a columna: si otro proceso (la app, la CLI, el servidor MCP) la añadió a la
+    // vez, el «duplicate column» no es un error.
+    for (column, ddl) in [
+        ("status", "status TEXT NOT NULL DEFAULT 'active'"),
+        ("superseded_by", "superseded_by INTEGER"),
+    ] {
+        if conn
+            .prepare(&format!("SELECT {column} FROM memories LIMIT 0"))
+            .is_err()
+            && let Err(e) = conn.execute_batch(&format!("ALTER TABLE memories ADD COLUMN {ddl}"))
+            && !e.to_string().contains("duplicate column")
+        {
+            return Err(e);
+        }
     }
     Ok(())
 }
@@ -112,18 +121,35 @@ fn from_row(r: &rusqlite::Row, snippet: bool) -> rusqlite::Result<Memory> {
 /// Consulta FTS5 segura: cada palabra entre comillas y como prefijo (`"vacun"*`). Basta con
 /// una; bm25 pone primero las que tienen más.
 fn fts_query(query: &str) -> Option<String> {
-    let terms: Vec<String> = query
+    let all: Vec<&str> = query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{t}\"*"))
         .collect();
-    (!terms.is_empty()).then(|| terms.join(" OR "))
+    // Con OR, «de» o «la» como prefijo traerían casi todo: fuera el relleno y lo muy corto,
+    // salvo que no quede nada más.
+    let meaningful: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|t| t.chars().count() >= 3 && !words(t).is_empty())
+        .collect();
+    let terms = if meaningful.is_empty() {
+        all
+    } else {
+        meaningful
+    };
+    (!terms.is_empty()).then(|| {
+        terms
+            .iter()
+            .map(|t| format!("\"{t}\"*"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
 }
 
 /// Palabras de relleno que no dicen de qué trata un título.
-const STOPWORDS: [&str; 16] = [
-    "con", "por", "para", "los", "las", "del", "que", "una", "uno", "sin", "the", "and", "for",
-    "with", "from", "not",
+const STOPWORDS: [&str; 19] = [
+    "con", "por", "para", "los", "las", "del", "que", "una", "uno", "sin", "como", "pero", "esto",
+    "the", "and", "for", "with", "from", "not",
 ];
 
 /// La nota de la última sesión (`save_session_summary`), en cualquiera de los dos idiomas.
@@ -406,7 +432,7 @@ impl Store {
         Ok(self
             .list_memories(project, None, 500)?
             .into_iter()
-            .find(|m| same_topic(&m.title, title)))
+            .find(|m| m.status == "active" && same_topic(&m.title, title)))
     }
 
     /// Cambia los campos dados de una memoria (los `None` se quedan como estaban).
@@ -978,8 +1004,12 @@ mod tests {
         let id = store
             .add_memory(p, "decision", "Vacunación en lotes", "x", "", "x")
             .unwrap();
+        store
+            .add_memory(p, "command", "Levantar la base de datos", "x", "", "x")
+            .unwrap();
+        // Las palabras de relleno («de», «la», «como») no traen todo lo demás.
         let found = store
-            .search_memories(p, "vacunación del ganado", None, 10)
+            .search_memories(p, "como se hace de la vacunación del ganado", None, 10)
             .unwrap();
         assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), [id]);
     }
@@ -1004,6 +1034,18 @@ mod tests {
             })
             .unwrap();
         assert_eq!((status.as_str(), by), ("active", None));
+        // A medio migrar (otro proceso se cortó entre las dos columnas): se completa.
+        let half = Connection::open_in_memory().unwrap();
+        half.execute_batch(
+            "CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, kind TEXT NOT NULL,
+                title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL, created_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active');",
+        )
+        .unwrap();
+        init(&half).unwrap();
+        assert!(half.prepare("SELECT superseded_by FROM memories").is_ok());
     }
 
     #[test]

@@ -569,8 +569,22 @@ impl<'a> Server<'a> {
                             old = old
                         )
                     }
-                    _ => format!("Guardada como #{id}."),
+                    // Que el agente no crea que reemplazó una regla que no existe.
+                    Some(old) => tr!(
+                        "Guardada como #{id}, pero #{old} no existe en este proyecto: no se reemplazó nada.",
+                        id = id,
+                        old = old
+                    ),
+                    None => format!("Guardada como #{id}."),
                 }),
+            // Antes de tocar nada: solo se archiva o se restaura («superseded» va con replaces).
+            "memory_update"
+                if args["status"]
+                    .as_str()
+                    .is_some_and(|s| !matches!(s, "active" | "archived")) =>
+            {
+                Err(tr!("`status` solo puede ser active o archived").into())
+            }
             "memory_update" => match args["id"].as_i64() {
                 Some(id) => self
                     .store
@@ -840,12 +854,15 @@ pub fn project_context(project: &Path, store: &Store) -> String {
     // Las reglas vigentes van siempre, como un índice: que una corrección del usuario no
     // dependa de que el mensaje use sus mismas palabras. Convenciones primero; con tope.
     // ponytail: tope por caracteres; si un proyecto tiene cientos de reglas, priorizar por uso.
-    let mut rules: Vec<memory::Memory> = store
-        .list_memories(project, None, 500)
-        .unwrap_or_default()
+    // Por tipo: muchas notas o errores no dejan fuera una convención vieja.
+    let mut rules: Vec<memory::Memory> = ["convention", "decision", "architecture"]
         .into_iter()
+        .flat_map(|kind| {
+            store
+                .list_memories(project, Some(kind), 500)
+                .unwrap_or_default()
+        })
         .filter(|m| m.status == "active")
-        .filter(|m| matches!(m.kind.as_str(), "convention" | "decision" | "architecture"))
         .collect();
     // Dentro de cada tipo, las más nuevas primero: una corrección reciente no se queda fuera.
     rules.sort_by_key(|m| {
@@ -1076,9 +1093,37 @@ mod tests {
             (replaced.status.as_str(), replaced.superseded_by),
             ("superseded", Some(new))
         );
-        // Archivar desde memory_update.
+        // Archivar desde memory_update; un estado que no vale no cambia nada.
         let text = call("memory_update", json!({"id": last, "status": "archived"}));
         assert!(text.contains("actualizada"), "{text}");
+        for status in ["borrada", "superseded"] {
+            call(
+                "memory_update",
+                json!({"id": new, "title": "Cambiada", "status": status}),
+            );
+            assert_ne!(
+                store.get_memory(project, new).unwrap().unwrap().title,
+                "Cambiada"
+            );
+        }
+        // Reemplazar una que no existe: se guarda, pero se dice.
+        let text = call(
+            "memory_save",
+            json!({"kind": "note", "title": "Otra nota suelta", "body": "x", "replaces": 9999}),
+        );
+        assert!(text.contains("#9999"), "{text}");
+        // Una archivada no impide guardar otra parecida.
+        let sounds = store
+            .add_memory(project, "note", "Sonidos con afplay", "x", "", "x")
+            .unwrap();
+        store
+            .set_memory_status(project, sounds, "archived", None)
+            .unwrap();
+        let text = call(
+            "memory_save",
+            json!({"kind": "note", "title": "Sonidos con afplay", "body": "de nuevo"}),
+        );
+        assert!(text.starts_with("Guardada"), "{text}");
 
         let ctx = project_context(project, &store);
         let rules = ctx.find("Commits solo con aprobación").expect(&ctx);

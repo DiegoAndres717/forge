@@ -992,6 +992,14 @@ pub const EN: &[(&str, &str)] = &[
     (" (reemplazada)", " (replaced)"),
     (" (archivada)", " (archived)"),
     ("Archivar", "Archive"),
+    (
+        "Guardada como #{id}, pero #{old} no existe en este proyecto: no se reemplazó nada.",
+        "Saved as #{id}, but #{old} doesn't exist in this project: nothing was replaced.",
+    ),
+    (
+        "`status` solo puede ser active o archived",
+        "`status` can only be active or archived",
+    ),
     ("Restaurar", "Restore"),
     (
         "Ideas pendientes (ideas_list para el detalle):",
