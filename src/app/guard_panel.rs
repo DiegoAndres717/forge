@@ -312,14 +312,20 @@ impl App {
             }
             tags.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             let reads = self.db(|s| s.memory_reads()).unwrap_or_default();
+            let stats = self.db(|s| s.memory_stats()).unwrap_or_default();
+            let sent_chars = self
+                .db(|s| s.memory_sent_chars(&path, 7))
+                .unwrap_or_default();
             let memory = &mut self.workspaces[i].memory;
             (
                 memory.results,
                 memory.count,
                 memory.tags,
                 memory.reads,
+                memory.stats,
+                memory.sent_chars,
                 memory.dirty,
-            ) = (results, count, tags, reads, false);
+            ) = (results, count, tags, reads, stats, sent_chars, false);
         }
         // Historial del panel abierto.
         if let Some(i) = self.active.filter(|i| {

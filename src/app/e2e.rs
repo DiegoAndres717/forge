@@ -399,6 +399,12 @@ fn memory_can_be_archived_and_restored_from_the_panel() {
     h.get_by_label("Restaurar").click();
     h.run_steps(3);
     assert_eq!(status(&h), "active");
+    // «Se ignoró»: el dueño anota que un agente no la tuvo en cuenta.
+    h.get_by_label("Se ignoró").click();
+    h.run_steps(3);
+    let stats = h.state().store.as_ref().unwrap().memory_stats().unwrap();
+    assert_eq!(stats[&id].forgotten, 1);
+    h.get_by_label_contains("ignorada 1");
 }
 
 #[test]

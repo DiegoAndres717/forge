@@ -191,6 +191,18 @@ impl App {
                     .on_hover_text(tr!("Filtrar por etiqueta"));
             }
         });
+        // Lo que cuesta la memoria: el texto que Forge mandó a los agentes (≈ 4 caracteres
+        // por token).
+        if ws.memory.sent_chars > 0 {
+            ui.label(
+                RichText::new(tr!(
+                    "≈ {p0} tokens de memoria enviados a agentes en 7 días",
+                    p0 = ws.memory.sent_chars / 4
+                ))
+                .small()
+                .color(theme::TEXT_3),
+            );
+        }
         if ws.memory.form.is_none()
             && theme::secondary(&mut ui, tr!("{p0}  Nueva nota", p0 = icon::PLUS)).clicked()
         {
@@ -286,6 +298,7 @@ impl App {
                     for m in entries {
                         // El tipo ya lo dice el grupo; al lado, si los agentes la usan.
                         let read = ws.memory.reads.get(&m.id).copied();
+                        let stats = ws.memory.stats.get(&m.id).copied().unwrap_or_default();
                         // Un título largo no se sale del panel: se corta con «…» (entero al
                         // abrir la nota). El encabezado plegable no parte líneas.
                         let room = ((ui.available_width() - 110.0) / 7.0).max(12.0) as usize;
@@ -302,12 +315,13 @@ impl App {
                         );
                         header.append(
                             &format!(
-                                "{}{}",
+                                "{}{}{}",
                                 match read {
                                     Some((1, _)) => tr!("1 lectura").into(),
                                     Some((n, _)) => tr!("{n} lecturas", n = n),
                                     None => tr!("sin leer").into(),
                                 },
+                                usage(stats),
                                 forge_core::memory::status_note(m)
                             ),
                             8.0,
@@ -358,6 +372,15 @@ impl App {
                                     if ui.small_button(label).clicked() {
                                         cmds.push(UiCmd::MemoryStatus(m.id, status));
                                     }
+                                    if ui
+                                        .small_button(tr!("Se ignoró"))
+                                        .on_hover_text(tr!(
+                                            "Un agente no la tuvo en cuenta: se cuenta para decidir si Forge Memory recuerda bien"
+                                        ))
+                                        .clicked()
+                                    {
+                                        cmds.push(UiCmd::MemoryForgotten(m.id));
+                                    }
                                     if ui.small_button(tr!("Borrar")).clicked() {
                                         cmds.push(UiCmd::MemoryDelete(m.id));
                                     }
@@ -370,4 +393,16 @@ impl App {
                 }
             });
     }
+}
+
+/// « · enviada N · ignorada M», lo que haya.
+fn usage(stats: forge_core::memory::MemoryStats) -> String {
+    let mut out = String::new();
+    if stats.sent > 0 {
+        out.push_str(&tr!(" · enviada {n}", n = stats.sent));
+    }
+    if stats.forgotten > 0 {
+        out.push_str(&tr!(" · ignorada {n}", n = stats.forgotten));
+    }
+    out
 }

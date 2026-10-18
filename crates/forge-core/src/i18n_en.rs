@@ -992,6 +992,17 @@ pub const EN: &[(&str, &str)] = &[
     (" (reemplazada)", " (replaced)"),
     (" (archivada)", " (archived)"),
     ("Archivar", "Archive"),
+    ("Se ignoró", "Was ignored"),
+    (
+        "Un agente no la tuvo en cuenta: se cuenta para decidir si Forge Memory recuerda bien",
+        "An agent didn't take it into account: counted to decide whether Forge Memory remembers well",
+    ),
+    (
+        "≈ {p0} tokens de memoria enviados a agentes en 7 días",
+        "≈ {p0} memory tokens sent to agents in 7 days",
+    ),
+    (" · enviada {n}", " · sent {n}"),
+    (" · ignorada {n}", " · ignored {n}"),
     (
         "Guardada como #{id}, pero #{old} no existe en este proyecto: no se reemplazó nada.",
         "Saved as #{id}, but #{old} doesn't exist in this project: nothing was replaced.",

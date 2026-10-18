@@ -251,6 +251,7 @@ enum UiCmd {
     NewNote,
     MemoryDelete(i64),
     MemoryStatus(i64, &'static str),
+    MemoryForgotten(i64),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
     /// Clic en un agente: (id, sesión nueva). Ver `Workspace::agent_click`.
@@ -972,7 +973,8 @@ impl App {
             | UiCmd::NewNote
             | UiCmd::MemorySave
             | UiCmd::MemoryDelete(_)
-            | UiCmd::MemoryStatus(..) => {
+            | UiCmd::MemoryStatus(..)
+            | UiCmd::MemoryForgotten(_) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
                 match cmd {
@@ -1021,6 +1023,10 @@ impl App {
                     }
                     UiCmd::MemoryDelete(id) => {
                         self.db(|s| s.delete_memory(&path, id));
+                        self.workspaces[i].memory.dirty = true;
+                    }
+                    UiCmd::MemoryForgotten(id) => {
+                        self.db(|s| s.note_memory_forgotten(id));
                         self.workspaces[i].memory.dirty = true;
                     }
                     UiCmd::MemoryStatus(id, status) => {

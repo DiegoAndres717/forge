@@ -873,14 +873,19 @@ pub fn project_context(project: &Path, store: &Store) -> String {
         )
     });
     let mut size = 0;
-    let important: Vec<String> = rules
+    let (ids, important): (Vec<i64>, Vec<String>) = rules
         .iter()
-        .map(|m| format!("  #{} [{}] {}", m.id, memory::kind_label(&m.kind), m.title))
-        .take_while(|line| {
+        .map(|m| {
+            let line = format!("  #{} [{}] {}", m.id, memory::kind_label(&m.kind), m.title);
+            (m.id, line)
+        })
+        .take_while(|(_, line)| {
             size += line.len() + 1;
             size <= 3000
         })
-        .collect();
+        .unzip();
+    // Contar nunca rompe el contexto.
+    let _ = store.note_memory_sent(project, &ids, size.min(3000));
     if !important.is_empty() {
         out.push(
             tr!("Memoria (convenciones, decisiones y arquitectura vigentes; detalle con memory_get):")
@@ -1126,6 +1131,10 @@ mod tests {
         assert!(text.starts_with("Guardada"), "{text}");
 
         let ctx = project_context(project, &store);
+        // Lo que va en el contexto cuenta como enviado.
+        let stats = store.memory_stats().unwrap();
+        assert_eq!(stats[&new].sent, 1);
+        assert!(!stats.contains_key(&old), "la reemplazada no se envía");
         let rules = ctx.find("Commits solo con aprobación").expect(&ctx);
         assert!(rules < ctx.find("Decisión 0").expect(&ctx), "{ctx}");
         assert!(

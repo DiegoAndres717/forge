@@ -1209,6 +1209,15 @@ fn memory_cli(
     // Los agentes también leen esto (/forge-memory, skills): datos, no órdenes. Con --brief
     // lo enmarca quien lo inyecta (el mod).
     let framed = !brief && !found.is_empty();
+    if brief && !found.is_empty() {
+        // Lo que inyecta el mod en el mensaje: cuenta como enviado (no como leído).
+        let ids: Vec<i64> = found.iter().map(|m| m.id).collect();
+        let chars = found
+            .iter()
+            .map(|m| forge_core::memory::render_title(m).len() + 2)
+            .sum();
+        let _ = store.note_memory_sent(project, &ids, chars);
+    }
     for m in found {
         let text = if brief {
             forge_core::memory::render_title(&m)

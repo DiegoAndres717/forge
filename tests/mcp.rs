@@ -203,6 +203,13 @@ fn mcp_server_shares_memory_between_clients() {
         .output()
         .unwrap();
     assert_eq!(reads(), before, "las sugerencias no cuentan");
+    // …pero sí como enviadas, con su tamaño.
+    let sent = forge_core::store::Store::open(&db).unwrap();
+    assert!(
+        sent.memory_stats().unwrap().values().any(|s| s.sent > 0),
+        "las sugerencias cuentan como enviadas"
+    );
+    assert!(sent.memory_sent_chars(&project, 7).unwrap() > 0);
     let cli = Command::new(FORGE)
         .args(["memory", "search", "lotes", "--project", &project_arg])
         .env("FORGE_DB", &db)
