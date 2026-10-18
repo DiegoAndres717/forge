@@ -58,7 +58,7 @@ pub fn latest(repo_url: &str) -> Result<Release, String> {
 
 /// curl del sistema: el de macOS en su ruta (la app del Finder no tiene PATH); en Windows
 /// 10+ y Linux, el del PATH.
-fn curl_program() -> &'static str {
+pub(crate) fn curl_program() -> &'static str {
     if cfg!(target_os = "macos") {
         "/usr/bin/curl"
     } else {

@@ -35,6 +35,7 @@ Uso:
   forge ai init                         crea .forge/routing.toml
   forge memory search <texto> [--kind k]   busca en Forge Memory (memoria del proyecto)
   forge memory add <tipo> \"título\" \"texto\" [--tags a,b]
+  forge memory embed                       calcula los vectores de la búsqueda por significado
   forge memory list [--kind k] · forge memory delete <id>
   forge plans [--all] [--general]          planes y backlog (fuera del repositorio)
   forge plans show <id>                    un plan con sus fases, ramas y tareas
@@ -82,6 +83,7 @@ Usage:
   forge ai init                         creates .forge/routing.toml
   forge memory search <text> [--kind k]    searches Forge Memory (project memory)
   forge memory add <kind> \"title\" \"text\" [--tags a,b]
+  forge memory embed                       computes the vectors for search by meaning
   forge memory list [--kind k] · forge memory delete <id>
   forge plans [--all] [--general]          plans and backlog (outside the repository)
   forge plans show <id>                    a plan with its phases, branches and tasks
@@ -1149,7 +1151,33 @@ fn memory_cli(
     let brief = args.iter().any(|arg| arg == "--brief");
     let found = match action {
         // --brief: lo que hace el mod en cada mensaje; pocas referencias y nada si no hay.
-        "search" if brief => store.recall_memories(project, &rest.join(" "), 2)?,
+        "search" if brief => {
+            let text = rest.join(" ");
+            let words = store.recall_memories(project, &text, 2)?;
+            // Por significado si el modelo está y responde a tiempo (el mod espera 2 s; la
+            // versión publicada tarda ≈0,65 s, una compilación sin optimizar ≈3 s).
+            let budget = Duration::from_millis(if cfg!(debug_assertions) { 15_000 } else { 1300 });
+            let meaning = forge_core::embed::default_dir()
+                .and_then(|dir| forge_core::embed::embed_within(&dir, &text, budget))
+                .and_then(|q| {
+                    store
+                        .recall_by_meaning(project, forge_core::embed::MODEL, &q, 2)
+                        .ok()
+                })
+                .unwrap_or_default();
+            forge_core::memory::merge_recall(meaning, words, 2)
+        }
+        // Vectores que faltan (lo hace también la app en segundo plano).
+        "embed" => {
+            let dir = forge_core::embed::default_dir()
+                .filter(|d| forge_core::embed::installed(d))
+                .ok_or_else(|| {
+                    tr!("la búsqueda por significado no está activada (Ajustes)").to_string()
+                })?;
+            let n = forge_core::embed::embed_pending(&store, &dir, usize::MAX)?;
+            out.line(&tr!("{n} memorias con vector nuevo.", n = n));
+            return Ok(0);
+        }
         // Un agente buscando por la CLI (skills, /forge-memory): cuenta como lectura.
         "search" => {
             let found = store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?;

@@ -89,6 +89,18 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             forgotten      INTEGER NOT NULL DEFAULT 0,
             last_forgotten INTEGER
         );
+        CREATE TABLE IF NOT EXISTS memory_vectors (
+            memory_id INTEGER PRIMARY KEY,
+            model     TEXT NOT NULL,
+            vector    BLOB NOT NULL
+        );
+        -- Si cambia lo que dice, el vector ya no vale; si se borra, tampoco.
+        CREATE TRIGGER IF NOT EXISTS memories_vec_au AFTER UPDATE OF title, body, tags ON memories BEGIN
+            DELETE FROM memory_vectors WHERE memory_id = old.id;
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_vec_ad AFTER DELETE ON memories BEGIN
+            DELETE FROM memory_vectors WHERE memory_id = old.id;
+        END;
         CREATE TABLE IF NOT EXISTS memory_sent_daily (
             project TEXT NOT NULL,
             day     INTEGER NOT NULL,
@@ -112,6 +124,18 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Pistas de un mensaje: primero las que coinciden por significado, luego las de palabras,
+/// sin repetir.
+pub fn merge_recall(meaning: Vec<Memory>, words: Vec<Memory>, limit: usize) -> Vec<Memory> {
+    let mut out: Vec<Memory> = Vec::new();
+    for m in meaning.into_iter().chain(words) {
+        if out.len() < limit && !out.iter().any(|o| o.id == m.id) {
+            out.push(m);
+        }
+    }
+    out
 }
 
 /// Envíos a agentes y veces que el dueño marcó «se ignoró» (las lecturas van en `memory_reads`).
@@ -274,6 +298,66 @@ impl Store {
         )
         .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// Memorias vigentes (de cualquier proyecto) que aún no tienen vector de `model`.
+    pub fn pending_vectors(&self, model: &str, limit: usize) -> Result<Vec<Memory>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {COLUMNS} FROM memories m
+                 LEFT JOIN memory_vectors v ON v.memory_id = m.id AND v.model = ?1
+                 WHERE v.memory_id IS NULL AND m.status = 'active' ORDER BY m.id LIMIT ?2"
+            ))
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![model, limit as i64], |r| from_row(r, false))
+            .and_then(|rows| rows.collect())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn set_memory_vector(&self, id: i64, model: &str, vector: &[f32]) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO memory_vectors (memory_id, model, vector) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(memory_id) DO UPDATE SET model = ?2, vector = ?3",
+                params![id, model, crate::embed::to_blob(vector)],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Memorias vigentes del proyecto que se parecen a `query` (vector normalizado) por
+    /// encima del umbral, de más a menos. Las que aún no tienen vector no salen.
+    // ponytail: compara con todas (decenas o cientos por proyecto); un índice si llegan a miles.
+    pub fn recall_by_meaning(
+        &self,
+        project: &Path,
+        model: &str,
+        query: &[f32],
+        limit: usize,
+    ) -> Result<Vec<Memory>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {COLUMNS}, v.vector FROM memories m
+                 JOIN memory_vectors v ON v.memory_id = m.id AND v.model = ?2
+                 WHERE m.project = ?1 AND m.status = 'active'"
+            ))
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(Memory, Vec<u8>)> = stmt
+            .query_map(params![self.project_key(project), model], |r| {
+                Ok((from_row(r, false)?, r.get(9)?))
+            })
+            .and_then(|rows| rows.collect())
+            .map_err(|e| e.to_string())?;
+        let mut scored: Vec<(f32, Memory)> = rows
+            .into_iter()
+            .filter(|(m, _)| !is_session_note(m))
+            .map(|(m, v)| (crate::embed::cosine(query, &crate::embed::from_blob(&v)), m))
+            .filter(|(score, _)| *score >= crate::embed::THRESHOLD)
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+        Ok(scored.into_iter().take(limit).map(|(_, m)| m).collect())
     }
 
     /// El dueño marcó que un agente no tuvo en cuenta esta memoria.
@@ -1181,6 +1265,107 @@ mod tests {
         );
         assert_eq!(store.memory_sent_chars(p, 7).unwrap(), 500);
         assert_eq!(store.memory_sent_chars(other, 7).unwrap(), 0);
+    }
+
+    #[test]
+    fn meaning_recall_uses_stored_vectors_of_active_memories() {
+        use crate::embed::{MODEL, THRESHOLD};
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/significado");
+        let near = store
+            .add_memory(p, "convention", "Never commit to main", "x", "", "x")
+            .unwrap();
+        let far = store
+            .add_memory(p, "decision", "Alert sounds", "x", "", "x")
+            .unwrap();
+        let archived = store
+            .add_memory(p, "decision", "Old rule", "x", "", "x")
+            .unwrap();
+        let unembedded = store
+            .add_memory(p, "decision", "Sin vector", "x", "", "x")
+            .unwrap();
+        let pending: Vec<i64> = store
+            .pending_vectors(MODEL, 10)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(pending, [near, far, archived, unembedded]);
+        store.set_memory_vector(near, MODEL, &[1.0, 0.0]).unwrap();
+        store.set_memory_vector(far, MODEL, &[0.0, 1.0]).unwrap();
+        store
+            .set_memory_vector(archived, MODEL, &[1.0, 0.0])
+            .unwrap();
+        store
+            .set_memory_status(p, archived, "archived", None)
+            .unwrap();
+        assert_eq!(
+            store
+                .pending_vectors(MODEL, 10)
+                .unwrap()
+                .iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>(),
+            [unembedded],
+            "las archivadas no hacen falta"
+        );
+        let query = [0.99_f32, (1.0_f32 - 0.99 * 0.99).sqrt()];
+        let found = store.recall_by_meaning(p, MODEL, &query, 3).unwrap();
+        assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), [near]);
+        assert!(crate::embed::cosine(&query, &[0.0, 1.0]) < THRESHOLD);
+        // Otro modelo: sus vectores no se mezclan.
+        assert!(
+            store
+                .recall_by_meaning(p, "otro", &query, 3)
+                .unwrap()
+                .is_empty()
+        );
+        // Cambiar el texto deja la memoria sin vector (hay que volver a calcularlo).
+        store
+            .update_memory(p, near, None, Some("Never commit to main!"), None, None)
+            .unwrap();
+        assert!(
+            store
+                .pending_vectors(MODEL, 10)
+                .unwrap()
+                .iter()
+                .any(|m| m.id == near)
+        );
+        // Cambiar el estado no.
+        store.set_memory_status(p, far, "active", None).unwrap();
+        assert!(
+            !store
+                .pending_vectors(MODEL, 10)
+                .unwrap()
+                .iter()
+                .any(|m| m.id == far)
+        );
+    }
+
+    #[test]
+    fn meaning_hits_come_first_and_keyword_hits_fill_in() {
+        let m = |id| Memory {
+            id,
+            kind: "decision".into(),
+            title: String::new(),
+            body: String::new(),
+            tags: String::new(),
+            source: String::new(),
+            created_at: 0,
+            status: "active".into(),
+            superseded_by: None,
+            snippet: None,
+        };
+        let ids = |v: Vec<Memory>| v.into_iter().map(|m| m.id).collect::<Vec<_>>();
+        assert_eq!(
+            ids(merge_recall(vec![m(3)], vec![m(3), m(5), m(7)], 2)),
+            [3, 5]
+        );
+        assert_eq!(ids(merge_recall(vec![], vec![m(5)], 2)), [5]);
+        assert_eq!(
+            ids(merge_recall(vec![m(1), m(2), m(9)], vec![m(5)], 2)),
+            [1, 2]
+        );
     }
 
     #[test]

@@ -849,6 +849,26 @@ fn cmd_f_opens_terminal_search_and_esc_closes_it() {
 }
 
 #[test]
+fn search_by_meaning_can_be_removed_from_settings() {
+    let _serial = serial();
+    let mut h = app(project("semantic"));
+    // Un modelo «instalado» en una carpeta temporal (la descarga real no se prueba aquí).
+    let dir = std::env::temp_dir().join(format!("forge-e2e-model-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    for (name, _, _) in forge_core::embed::FILES {
+        std::fs::write(dir.join(name), "x").unwrap();
+    }
+    h.state_mut().semantic.dir = Some(dir.clone());
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label("Búsqueda por significado");
+    h.get_by_label("Quitar el modelo").click();
+    h.run_steps(3);
+    assert!(!dir.exists(), "quitarlo borra el modelo");
+    h.get_by_label_contains("Activar (descarga");
+}
+
+#[test]
 fn cmd_comma_opens_settings() {
     let _serial = serial();
     let mut h = app(project("settings"));
