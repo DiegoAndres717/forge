@@ -311,6 +311,10 @@ pub struct MemoryView {
     pub results: Vec<forge_core::memory::Memory>,
     /// Lecturas de los agentes por memoria: id → (veces, última).
     pub reads: std::collections::HashMap<i64, (i64, i64)>,
+    /// Envíos a agentes y veces marcada «se ignoró», por memoria.
+    pub stats: std::collections::HashMap<i64, forge_core::memory::MemoryStats>,
+    /// Caracteres de memoria enviados a agentes en los últimos 7 días.
+    pub sent_chars: i64,
     pub count: i64,
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).
     pub dirty: bool,

@@ -79,6 +79,23 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     // Estados (vigente, reemplazada, archivada). Las bases de antes ganan las columnas con
     // valor por defecto: todas sus memorias siguen vigentes.
+    // Medición (plan #53): cuántas veces se envió cada memoria a un agente y cuántas el dueño
+    // marcó que se ignoró; y cuánto texto de memoria se envió cada día, por proyecto.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_stats (
+            memory_id      INTEGER PRIMARY KEY,
+            sent           INTEGER NOT NULL DEFAULT 0,
+            last_sent      INTEGER,
+            forgotten      INTEGER NOT NULL DEFAULT 0,
+            last_forgotten INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS memory_sent_daily (
+            project TEXT NOT NULL,
+            day     INTEGER NOT NULL,
+            chars   INTEGER NOT NULL,
+            PRIMARY KEY (project, day)
+        );",
+    )?;
     // Columna a columna: si otro proceso (la app, la CLI, el servidor MCP) la añadió a la
     // vez, el «duplicate column» no es un error.
     for (column, ddl) in [
@@ -95,6 +112,13 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Envíos a agentes y veces que el dueño marcó «se ignoró» (las lecturas van en `memory_reads`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MemoryStats {
+    pub sent: i64,
+    pub forgotten: i64,
 }
 
 /// Estados de una memoria. Solo las vigentes llegan solas a los agentes.
@@ -219,6 +243,78 @@ impl Store {
                 .map_err(|e| e.to_string())?;
         }
         Ok(())
+    }
+
+    /// Forge envió estas memorias a un agente (contexto de sesión o pistas de un mensaje), en
+    /// un bloque de `chars` caracteres.
+    pub fn note_memory_sent(
+        &self,
+        project: &Path,
+        ids: &[i64],
+        chars: usize,
+    ) -> Result<(), String> {
+        let at = now();
+        // Una sola escritura: al empezar una sesión pueden ser decenas de memorias.
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
+        for id in ids {
+            tx.execute(
+                "INSERT INTO memory_stats (memory_id, sent, last_sent) VALUES (?1, 1, ?2)
+                     ON CONFLICT(memory_id) DO UPDATE SET sent = sent + 1, last_sent = ?2",
+                params![id, at],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        tx.execute(
+            "INSERT INTO memory_sent_daily (project, day, chars) VALUES (?1, ?2, ?3)
+             ON CONFLICT(project, day) DO UPDATE SET chars = chars + ?3",
+            params![self.project_key(project), at / 86_400, chars as i64],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
+    }
+
+    /// El dueño marcó que un agente no tuvo en cuenta esta memoria.
+    pub fn note_memory_forgotten(&self, id: i64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO memory_stats (memory_id, forgotten, last_forgotten) VALUES (?1, 1, ?2)
+                 ON CONFLICT(memory_id) DO UPDATE SET forgotten = forgotten + 1, last_forgotten = ?2",
+                params![id, now()],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn memory_stats(&self) -> Result<std::collections::HashMap<i64, MemoryStats>, String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT memory_id, sent, forgotten FROM memory_stats")
+            .map_err(|e| e.to_string())?;
+        stmt.query_map([], |r| {
+            Ok((
+                r.get(0)?,
+                MemoryStats {
+                    sent: r.get(1)?,
+                    forgotten: r.get(2)?,
+                },
+            ))
+        })
+        .and_then(|rows| rows.collect())
+        .map_err(|e| e.to_string())
+    }
+
+    /// Caracteres de memoria enviados a agentes en los últimos `days` días (hoy incluido).
+    pub fn memory_sent_chars(&self, project: &Path, days: i64) -> Result<i64, String> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(chars), 0) FROM memory_sent_daily WHERE project = ?1 AND day > ?2",
+                params![self.project_key(project), now() / 86_400 - days],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())
     }
 
     /// Lecturas de cada memoria leída alguna vez: id → (veces, última).
@@ -1064,6 +1160,27 @@ mod tests {
         .unwrap();
         init(&half).unwrap();
         assert!(half.prepare("SELECT superseded_by FROM memories").is_ok());
+    }
+
+    #[test]
+    fn sends_and_forgets_are_counted_apart_from_reads() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/envios");
+        let other = Path::new("/p/otro");
+        let a = store.add_memory(p, "decision", "A", "x", "", "x").unwrap();
+        let b = store.add_memory(p, "decision", "B", "x", "", "x").unwrap();
+        store.note_memory_sent(p, &[a, b], 400).unwrap();
+        store.note_memory_sent(p, &[a], 100).unwrap();
+        store.note_memory_forgotten(b).unwrap();
+        let stats = store.memory_stats().unwrap();
+        assert_eq!((stats[&a].sent, stats[&a].forgotten), (2, 0));
+        assert_eq!((stats[&b].sent, stats[&b].forgotten), (1, 1));
+        assert!(
+            store.memory_reads().unwrap().is_empty(),
+            "enviar no es leer"
+        );
+        assert_eq!(store.memory_sent_chars(p, 7).unwrap(), 500);
+        assert_eq!(store.memory_sent_chars(other, 7).unwrap(), 0);
     }
 
     #[test]

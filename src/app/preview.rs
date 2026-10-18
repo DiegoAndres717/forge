@@ -196,6 +196,10 @@ fn ui_preview() {
             .unwrap();
         // Los agentes la han leído: el panel lo muestra al lado del título.
         store.note_memory_reads(&[stripe; 3]).unwrap();
+        // …y Forge se la ha enviado: también lo muestra, con el total de tokens arriba.
+        store
+            .note_memory_sent(&project, &[stripe; 5], 2400)
+            .unwrap();
         // Un título largo y muchas etiquetas: el panel no debe desbordarse.
         store
             .add_memory(
