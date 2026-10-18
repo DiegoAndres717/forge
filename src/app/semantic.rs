@@ -12,8 +12,12 @@ use forge_core::store::Store;
 /// Cada cuánto se miran las memorias sin vector (la consulta es barata; el cálculo no).
 const SWEEP_EVERY: Duration = Duration::from_secs(20);
 
-/// Vectores calculados: (id de la memoria, vector).
-type Vectors = Vec<(i64, Vec<f32>)>;
+/// Tras un fallo (modelo roto, una memoria que no se deja), se espera más antes de reintentar:
+/// cargar el modelo cuesta ≈0,6 s y ≈450 MB.
+const RETRY_AFTER_ERROR: Duration = Duration::from_secs(600);
+
+/// Vectores calculados: (id de la memoria, vector), o por qué no se pudo.
+type Vectors = Result<Vec<(i64, Vec<f32>)>, String>;
 
 #[derive(Default)]
 pub struct Semantic {
@@ -23,6 +27,8 @@ pub struct Semantic {
     pub error: Option<String>,
     sweep: Option<Receiver<Vectors>>,
     last_sweep: Option<Instant>,
+    /// El último cálculo falló: el siguiente espera `RETRY_AFTER_ERROR`.
+    failed: bool,
 }
 
 impl Semantic {
@@ -87,9 +93,15 @@ impl Semantic {
         }
         if let Some(rx) = &self.sweep {
             match rx.try_recv() {
-                Ok(vectors) => {
-                    for (id, v) in vectors {
-                        let _ = store.set_memory_vector(id, embed::MODEL, &v);
+                Ok(result) => {
+                    self.failed = result.is_err();
+                    match result {
+                        Ok(vectors) => {
+                            for (id, v) in vectors {
+                                let _ = store.set_memory_vector(id, embed::MODEL, &v);
+                            }
+                        }
+                        Err(e) => self.error = Some(e),
                     }
                     self.sweep = None;
                 }
@@ -98,7 +110,17 @@ impl Semantic {
             }
             return;
         }
-        if !self.installed() || self.last_sweep.is_some_and(|t| t.elapsed() < SWEEP_EVERY) {
+        if !self.installed() {
+            return;
+        }
+        // Sin esto, una memoria nueva esperaría al próximo movimiento del ratón.
+        ctx.request_repaint_after(SWEEP_EVERY);
+        let every = if self.failed {
+            RETRY_AFTER_ERROR
+        } else {
+            SWEEP_EVERY
+        };
+        if self.last_sweep.is_some_and(|t| t.elapsed() < every) {
             return;
         }
         self.last_sweep = Some(Instant::now());
@@ -111,13 +133,12 @@ impl Semantic {
         self.sweep = Some(rx);
         let ctx = ctx.clone();
         std::thread::spawn(move || {
-            let Ok(embedder) = embed::Embedder::load(&dir) else {
-                return;
-            };
-            let vectors: Vectors = pending
-                .iter()
-                .filter_map(|m| Some((m.id, embedder.embed(&embed::memory_text(m)).ok()?)))
-                .collect();
+            let vectors: Vectors = embed::Embedder::load(&dir).and_then(|embedder| {
+                pending
+                    .iter()
+                    .map(|m| Ok((m.id, embedder.embed(&embed::memory_text(m))?)))
+                    .collect()
+            });
             let _ = tx.send(vectors);
             ctx.request_repaint();
         });
