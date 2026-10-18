@@ -259,6 +259,14 @@ impl AgentSpec {
             }
             _ => {}
         }
+        if self.id == "agy" {
+            if !model.is_empty() && !command.contains("--model") {
+                flags.push(format!("--model {}", quote(model)));
+            }
+            if !effort.is_empty() && !command.contains("--effort") {
+                flags.push(format!("--effort {}", quote(effort)));
+            }
+        }
         if flags.is_empty() {
             return command.to_string();
         }
@@ -277,6 +285,7 @@ impl AgentSpec {
         match self.mcp_style {
             Some(McpStyle::OpenCodeEnv) => Some(format!("{command} --prompt {}", quote(prompt))),
             None if matches!(self.id.as_str(), "gemini" | "qwen" | "pi") => None,
+            _ if self.id == "agy" => Some(format!("{command} -i {}", quote(prompt))),
             _ => Some(format!("{command} {}", quote(prompt))),
         }
     }
@@ -311,7 +320,7 @@ impl AgentSpec {
 /// Plantilla comentada de `.forge/agents.toml`.
 pub fn template() -> String {
     r#"# Agentes del proyecto. Cambia los que Forge ya conoce o añade los tuyos.
-# Conocidos: claude, codex, opencode, gemini, qwen, pi.
+# Conocidos: claude, codex, opencode, gemini, qwen, pi, agy.
 
 # Abrir Claude Code con un modelo concreto y que sea el predeterminado (⌘⇧A):
 # [[agents]]
@@ -419,6 +428,15 @@ pub fn builtins() -> Vec<AgentSpec> {
             None,
             false,
             "npm install -g @mariozechner/pi-coding-agent",
+        ),
+        agent(
+            "agy",
+            "Antigravity",
+            "agy",
+            Some("agy --continue"),
+            Some("agy -p"),
+            true,
+            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
         ),
     ]
 }
@@ -937,6 +955,18 @@ mod tests {
             get("claude").with_launch("claude --effort low", "", "high"),
             "claude --effort low"
         );
+        assert_eq!(
+            get("agy").with_model("agy --continue", "gemini-2.5-flash"),
+            "agy --model 'gemini-2.5-flash' --continue"
+        );
+        assert_eq!(
+            get("agy").with_launch("agy --continue", "gemini-2.5-pro", "high"),
+            "agy --model 'gemini-2.5-pro' --effort 'high' --continue"
+        );
+        assert_eq!(
+            get("agy").with_launch("agy --effort low", "", "high"),
+            "agy --effort low"
+        );
     }
 
     fn project(name: &str, agents_toml: Option<&str>) -> PathBuf {
@@ -1085,6 +1115,10 @@ mod tests {
         assert_eq!(
             get("opencode").with_prompt("opencode", "it's").as_deref(),
             Some(r"opencode --prompt 'it'\''s'")
+        );
+        assert_eq!(
+            get("agy").with_prompt("agy", "planifica #7").as_deref(),
+            Some("agy -i 'planifica #7'")
         );
         assert_eq!(get("gemini").with_prompt("gemini", "x"), None);
         let opencode = get("opencode").with_mcp("opencode --continue", &server);

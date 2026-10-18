@@ -315,6 +315,10 @@ impl App {
                 self.subagents_ui(ui, forge_core::subagents::Agent::Codex, codex.as_deref())
             });
         }
+        if installed("agy") {
+            theme::section(ui, "Antigravity");
+            theme::card(ui, |ui| self.launch_ui(ui, "agy"));
+        }
         if installed("gemini") {
             theme::section(ui, "Gemini CLI");
             theme::card(ui, |ui| {
@@ -1257,6 +1261,10 @@ impl App {
                 if program == "claude" {
                     tr!(
                         "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas. «En este proyecto» manda sobre «En general»."
+                    )
+                } else if program == "agy" {
+                    tr!(
+                        "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-3.8-flash-high). «En este proyecto» manda sobre «En general»."
                     )
                 } else {
                     tr!(
