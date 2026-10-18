@@ -366,6 +366,42 @@ fn memory_note_created_from_the_panel_is_searchable() {
 }
 
 #[test]
+fn memory_can_be_archived_and_restored_from_the_panel() {
+    let _serial = serial();
+    let dir = project("memory-archive");
+    let mut h = app(dir.clone());
+    let id = h
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .add_memory(&dir, "decision", "Sonidos con afplay", "x", "", "x")
+        .unwrap();
+    let status = |h: &Harness<'_, App>| {
+        h.state()
+            .store
+            .as_ref()
+            .unwrap()
+            .get_memory(&dir, id)
+            .unwrap()
+            .unwrap()
+            .status
+    };
+    h.key_press_modifiers(CMD_SHIFT, Key::M);
+    h.run_steps(3);
+    h.get_by_label_contains("Sonidos con afplay").click();
+    h.run_steps(2);
+    h.get_by_label("Archivar").click();
+    h.run_steps(3);
+    assert_eq!(status(&h), "archived");
+    // Se sigue viendo, marcada, y se puede restaurar.
+    h.get_by_label_contains("archivada");
+    h.get_by_label("Restaurar").click();
+    h.run_steps(3);
+    assert_eq!(status(&h), "active");
+}
+
+#[test]
 fn guard_blocks_a_commit_with_a_secret() {
     let _serial = serial();
     let dir = project("secret");

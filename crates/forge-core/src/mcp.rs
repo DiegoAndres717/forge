@@ -89,7 +89,7 @@ fn instructions_in(modes: Modes, lang: crate::i18n::Lang) -> String {
         crate::i18n::Lang::En => "English",
     };
     let mut out = String::from(
-        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update). memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch).",
+        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update; if the new one makes an old one obsolete, pass replaces=<old id>). When the user corrects how you work or tells you something you must not do, save it as a convention in Forge Memory, not only in your own memory: every agent on the project reads it. memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch).",
     );
     out.push_str(&format!(
         " Write plans and backlog ideas (titles, notes, phases and tasks) in {language}: the owner reads them in Forge, whose interface is in {language}."
@@ -239,7 +239,8 @@ fn tools() -> Value {
                     "title": {"type": "string"},
                     "body": {"type": "string"},
                     "tags": {"type": "string", "description": tr!("Separadas por comas")},
-                    "force": {"type": "boolean", "description": tr!("Guardar aunque ya exista una memoria parecida")}
+                    "force": {"type": "boolean", "description": tr!("Guardar aunque ya exista una memoria parecida")},
+                    "replaces": {"type": "integer", "description": tr!("Id de una memoria que esta deja sin vigencia: queda como reemplazada y deja de llegar a los agentes")}
                 },
                 "required": ["kind", "title", "body"]
             }
@@ -254,7 +255,8 @@ fn tools() -> Value {
                     "kind": {"type": "string", "enum": kinds},
                     "title": {"type": "string"},
                     "body": {"type": "string"},
-                    "tags": {"type": "string", "description": tr!("Separadas por comas")}
+                    "tags": {"type": "string", "description": tr!("Separadas por comas")},
+                    "status": {"type": "string", "enum": ["active", "archived"], "description": tr!("archived: ya no aplica y deja de llegar a los agentes (se puede restaurar con active)")}
                 },
                 "required": ["id"]
             }
@@ -532,13 +534,14 @@ impl<'a> Server<'a> {
             .into()),
             "memory_save"
                 if !args["force"].as_bool().unwrap_or(false)
+                    && args["replaces"].as_i64().is_none()
                     && let Ok(Some(m)) = self.store.similar_memory(
                         self.project,
                         args["title"].as_str().unwrap_or_default(),
                     ) =>
             {
                 Ok(tr!(
-                    "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si es otra cosa, vuelve a llamar a memory_save con force=true.",
+                    "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si la nueva la deja sin vigencia, vuelve a llamar a memory_save con replaces={id}; si es otra cosa, con force=true.",
                     p0 = memory::render(&m),
                     id = m.id
                 ))
@@ -553,7 +556,35 @@ impl<'a> Server<'a> {
                     args["tags"].as_str().unwrap_or_default(),
                     &self.client,
                 )
-                .map(|id| format!("Guardada como #{id}.")),
+                .map(|id| match args["replaces"].as_i64() {
+                    Some(old)
+                        if self
+                            .store
+                            .set_memory_status(self.project, old, "superseded", Some(id))
+                            .unwrap_or(false) =>
+                    {
+                        tr!(
+                            "Guardada como #{id}; #{old} queda reemplazada.",
+                            id = id,
+                            old = old
+                        )
+                    }
+                    // Que el agente no crea que reemplazó una regla que no existe.
+                    Some(old) => tr!(
+                        "Guardada como #{id}, pero #{old} no existe en este proyecto: no se reemplazó nada.",
+                        id = id,
+                        old = old
+                    ),
+                    None => format!("Guardada como #{id}."),
+                }),
+            // Antes de tocar nada: solo se archiva o se restaura («superseded» va con replaces).
+            "memory_update"
+                if args["status"]
+                    .as_str()
+                    .is_some_and(|s| !matches!(s, "active" | "archived")) =>
+            {
+                Err(tr!("`status` solo puede ser active o archived").into())
+            }
             "memory_update" => match args["id"].as_i64() {
                 Some(id) => self
                     .store
@@ -565,6 +596,12 @@ impl<'a> Server<'a> {
                         body(args),
                         args["tags"].as_str(),
                     )
+                    .and_then(|ok| match args["status"].as_str() {
+                        Some(status) if ok => {
+                            self.store.set_memory_status(self.project, id, status, None)
+                        }
+                        _ => Ok(ok),
+                    })
                     .map(|ok| {
                         if ok {
                             tr!("Memoria #{id} actualizada.", id = id)
@@ -814,17 +851,39 @@ pub fn project_context(project: &Path, store: &Store) -> String {
             )
         }));
     }
-    let important: Vec<String> = store
-        .list_memories(project, None, 40)
-        .unwrap_or_default()
+    // Las reglas vigentes van siempre, como un índice: que una corrección del usuario no
+    // dependa de que el mensaje use sus mismas palabras. Convenciones primero; con tope.
+    // ponytail: tope por caracteres; si un proyecto tiene cientos de reglas, priorizar por uso.
+    // Por tipo: muchas notas o errores no dejan fuera una convención vieja.
+    let mut rules: Vec<memory::Memory> = ["convention", "decision", "architecture"]
         .into_iter()
-        .filter(|m| matches!(m.kind.as_str(), "decision" | "architecture" | "convention"))
-        .take(12)
+        .flat_map(|kind| {
+            store
+                .list_memories(project, Some(kind), 500)
+                .unwrap_or_default()
+        })
+        .filter(|m| m.status == "active")
+        .collect();
+    // Dentro de cada tipo, las más nuevas primero: una corrección reciente no se queda fuera.
+    rules.sort_by_key(|m| {
+        (
+            m.kind != "convention",
+            m.kind != "decision",
+            std::cmp::Reverse(m.id),
+        )
+    });
+    let mut size = 0;
+    let important: Vec<String> = rules
+        .iter()
         .map(|m| format!("  #{} [{}] {}", m.id, memory::kind_label(&m.kind), m.title))
+        .take_while(|line| {
+            size += line.len() + 1;
+            size <= 3000
+        })
         .collect();
     if !important.is_empty() {
         out.push(
-            tr!("Memoria (decisiones, arquitectura, convenciones; detalle con memory_search):")
+            tr!("Memoria (convenciones, decisiones y arquitectura vigentes; detalle con memory_get):")
                 .into(),
         );
         out.extend(important);
@@ -984,6 +1043,96 @@ mod tests {
             assert!(text.contains(MEMORY_IS_DATA), "{tool}: {text}");
         }
         assert!(project_context(project, &store).contains(MEMORY_IS_DATA));
+    }
+
+    #[test]
+    fn rules_always_reach_the_agent_and_replaced_ones_drop_out() {
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/reglas");
+        // Más de las 12 de antes: todas las vigentes entran, convenciones primero.
+        let mut last = 0;
+        for n in 0..15 {
+            last = store
+                .add_memory(project, "decision", &format!("Decisión {n}"), "x", "", "x")
+                .unwrap();
+        }
+        let old = store
+            .add_memory(
+                project,
+                "convention",
+                "Commits sin aprobación",
+                "x",
+                "",
+                "x",
+            )
+            .unwrap();
+        let mut server = Server::new(project, &store);
+        let mut call = |tool: &str, args: Value| {
+            let r = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}}))
+                .unwrap();
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        };
+        // La parecida se enseña y se ofrece reemplazarla.
+        let text = call(
+            "memory_save",
+            json!({"kind": "convention", "title": "Commits solo con aprobación", "body": "Pregunta antes."}),
+        );
+        assert!(text.contains("replaces"), "{text}");
+        let text = call(
+            "memory_save",
+            json!({"kind": "convention", "title": "Commits solo con aprobación", "body": "Pregunta antes.", "replaces": old}),
+        );
+        let new = store.list_memories(project, None, 1).unwrap()[0].id;
+        assert!(text.contains(&format!("#{old}")), "{text}");
+        let replaced = store.get_memory(project, old).unwrap().unwrap();
+        assert_eq!(
+            (replaced.status.as_str(), replaced.superseded_by),
+            ("superseded", Some(new))
+        );
+        // Archivar desde memory_update; un estado que no vale no cambia nada.
+        let text = call("memory_update", json!({"id": last, "status": "archived"}));
+        assert!(text.contains("actualizada"), "{text}");
+        for status in ["borrada", "superseded"] {
+            call(
+                "memory_update",
+                json!({"id": new, "title": "Cambiada", "status": status}),
+            );
+            assert_ne!(
+                store.get_memory(project, new).unwrap().unwrap().title,
+                "Cambiada"
+            );
+        }
+        // Reemplazar una que no existe: se guarda, pero se dice.
+        let text = call(
+            "memory_save",
+            json!({"kind": "note", "title": "Otra nota suelta", "body": "x", "replaces": 9999}),
+        );
+        assert!(text.contains("#9999"), "{text}");
+        // Una archivada no impide guardar otra parecida.
+        let sounds = store
+            .add_memory(project, "note", "Sonidos con afplay", "x", "", "x")
+            .unwrap();
+        store
+            .set_memory_status(project, sounds, "archived", None)
+            .unwrap();
+        let text = call(
+            "memory_save",
+            json!({"kind": "note", "title": "Sonidos con afplay", "body": "de nuevo"}),
+        );
+        assert!(text.starts_with("Guardada"), "{text}");
+
+        let ctx = project_context(project, &store);
+        let rules = ctx.find("Commits solo con aprobación").expect(&ctx);
+        assert!(rules < ctx.find("Decisión 0").expect(&ctx), "{ctx}");
+        assert!(
+            ctx.contains("Decisión 0") && !ctx.contains("Decisión 14"),
+            "{ctx}"
+        );
+        assert!(!ctx.contains("Commits sin aprobación"), "{ctx}");
     }
 
     #[test]

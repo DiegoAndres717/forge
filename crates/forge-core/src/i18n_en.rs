@@ -950,8 +950,8 @@ pub const EN: &[(&str, &str)] = &[
         "Fixes or extends an existing memory (by id) instead of saving a similar one. Only the fields you pass change.",
     ),
     (
-        "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si es otra cosa, vuelve a llamar a memory_save con force=true.",
-        "Not saved: a similar memory already exists.\n{p0}\nIf it's the same thing, update it with memory_update (id {id}); if it's something else, call memory_save again with force=true.",
+        "No guardada: ya existe una memoria parecida.\n{p0}\nSi es lo mismo, actualízala con memory_update (id {id}); si la nueva la deja sin vigencia, vuelve a llamar a memory_save con replaces={id}; si es otra cosa, con force=true.",
+        "Not saved: a similar memory already exists.\n{p0}\nIf it's the same thing, update it with memory_update (id {id}); if the new one makes it obsolete, call memory_save again with replaces={id}; if it's something else, with force=true.",
     ),
     (
         "No existe la idea #{id} en esta lista.",
@@ -969,9 +969,38 @@ pub const EN: &[(&str, &str)] = &[
     ("Procesos:", "Processes:"),
     ("Últimas validaciones:", "Latest validations:"),
     (
-        "Memoria (decisiones, arquitectura, convenciones; detalle con memory_search):",
-        "Memory (decisions, architecture, conventions; details with memory_search):",
+        "Memoria (convenciones, decisiones y arquitectura vigentes; detalle con memory_get):",
+        "Memory (current conventions, decisions and architecture; details with memory_get):",
     ),
+    (
+        "Guardada como #{id}; #{old} queda reemplazada.",
+        "Saved as #{id}; #{old} is now replaced.",
+    ),
+    (
+        "Id de una memoria que esta deja sin vigencia: queda como reemplazada y deja de llegar a los agentes",
+        "Id of a memory this one makes obsolete: it is marked as replaced and stops reaching agents",
+    ),
+    (
+        "archived: ya no aplica y deja de llegar a los agentes (se puede restaurar con active)",
+        "archived: no longer applies and stops reaching agents (restore it with active)",
+    ),
+    (
+        "estado de memoria desconocido \"{status}\" (válidos: {p0})",
+        "unknown memory status \"{status}\" (valid: {p0})",
+    ),
+    (" (reemplazada por #{by})", " (replaced by #{by})"),
+    (" (reemplazada)", " (replaced)"),
+    (" (archivada)", " (archived)"),
+    ("Archivar", "Archive"),
+    (
+        "Guardada como #{id}, pero #{old} no existe en este proyecto: no se reemplazó nada.",
+        "Saved as #{id}, but #{old} doesn't exist in this project: nothing was replaced.",
+    ),
+    (
+        "`status` solo puede ser active o archived",
+        "`status` can only be active or archived",
+    ),
+    ("Restaurar", "Restore"),
     (
         "Ideas pendientes (ideas_list para el detalle):",
         "Pending ideas (ideas_list for details):",

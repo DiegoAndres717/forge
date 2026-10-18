@@ -1149,7 +1149,7 @@ fn memory_cli(
     let brief = args.iter().any(|arg| arg == "--brief");
     let found = match action {
         // --brief: lo que hace el mod en cada mensaje; pocas referencias y nada si no hay.
-        "search" if brief => store.recall_memories(project, &rest.join(" "), 3)?,
+        "search" if brief => store.recall_memories(project, &rest.join(" "), 2)?,
         // Un agente buscando por la CLI (skills, /forge-memory): cuenta como lectura.
         "search" => {
             let found = store.search_memories(project, &rest.join(" "), kind.as_deref(), 20)?;

@@ -35,6 +35,10 @@ pub struct Memory {
     /// Quién la guardó: "usuario", "claude-code", "codex-mcp-client"…
     pub source: String,
     pub created_at: i64,
+    /// "active" (vigente), "superseded" (reemplazada) o "archived" (archivada).
+    pub status: String,
+    /// La memoria que la reemplazó.
+    pub superseded_by: Option<i64>,
     /// Fragmento con las coincidencias marcadas [así] (solo en búsquedas).
     pub snippet: Option<String>,
 }
@@ -72,23 +76,90 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             reads     INTEGER NOT NULL,
             last_read INTEGER NOT NULL
         );",
-    )
+    )?;
+    // Estados (vigente, reemplazada, archivada). Las bases de antes ganan las columnas con
+    // valor por defecto: todas sus memorias siguen vigentes.
+    // Columna a columna: si otro proceso (la app, la CLI, el servidor MCP) la añadió a la
+    // vez, el «duplicate column» no es un error.
+    for (column, ddl) in [
+        ("status", "status TEXT NOT NULL DEFAULT 'active'"),
+        ("superseded_by", "superseded_by INTEGER"),
+    ] {
+        if conn
+            .prepare(&format!("SELECT {column} FROM memories LIMIT 0"))
+            .is_err()
+            && let Err(e) = conn.execute_batch(&format!("ALTER TABLE memories ADD COLUMN {ddl}"))
+            && !e.to_string().contains("duplicate column")
+        {
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
-/// Consulta FTS5 segura: cada palabra entre comillas y como prefijo (`"vacun"*`), todas obligatorias.
+/// Estados de una memoria. Solo las vigentes llegan solas a los agentes.
+pub const STATUSES: [&str; 3] = ["active", "superseded", "archived"];
+
+const COLUMNS: &str =
+    "m.id, m.kind, m.title, m.body, m.tags, m.source, m.created_at, m.status, m.superseded_by";
+
+fn from_row(r: &rusqlite::Row, snippet: bool) -> rusqlite::Result<Memory> {
+    Ok(Memory {
+        id: r.get(0)?,
+        kind: r.get(1)?,
+        title: r.get(2)?,
+        body: r.get(3)?,
+        tags: r.get(4)?,
+        source: r.get(5)?,
+        created_at: r.get(6)?,
+        status: r.get(7)?,
+        superseded_by: r.get(8)?,
+        snippet: if snippet { r.get(9)? } else { None },
+    })
+}
+
+/// Consulta FTS5 segura: cada palabra entre comillas y como prefijo (`"vacun"*`). Basta con
+/// una; bm25 pone primero las que tienen más.
 fn fts_query(query: &str) -> Option<String> {
-    let terms: Vec<String> = query
+    let all: Vec<&str> = query
         .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{t}\"*"))
         .collect();
-    (!terms.is_empty()).then(|| terms.join(" "))
+    // Con OR, «de» o «la» como prefijo traerían casi todo: fuera el relleno y lo muy corto,
+    // salvo que no quede nada más.
+    let meaningful: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|t| match t.chars().count() {
+            // Dos letras: siglas como CI, PR o DB cuentan; «de», «la», «el»… no.
+            2 => !SHORT_FILLER.contains(&t.to_lowercase().as_str()),
+            n => n >= 3 && !words(t).is_empty(),
+        })
+        .collect();
+    let terms = if meaningful.is_empty() {
+        all
+    } else {
+        meaningful
+    };
+    (!terms.is_empty()).then(|| {
+        terms
+            .iter()
+            .map(|t| format!("\"{t}\"*"))
+            .collect::<Vec<_>>()
+            .join(" OR ")
+    })
 }
 
+/// Relleno de dos letras (las de 3 o más van en `STOPWORDS`).
+const SHORT_FILLER: [&str; 27] = [
+    "de", "la", "el", "en", "se", "lo", "le", "un", "es", "no", "si", "al", "mi", "tu", "ya", "me",
+    "te", "to", "of", "in", "on", "is", "it", "an", "or", "at", "by",
+];
+
 /// Palabras de relleno que no dicen de qué trata un título.
-const STOPWORDS: [&str; 16] = [
-    "con", "por", "para", "los", "las", "del", "que", "una", "uno", "sin", "the", "and", "for",
-    "with", "from", "not",
+const STOPWORDS: [&str; 19] = [
+    "con", "por", "para", "los", "las", "del", "que", "una", "uno", "sin", "como", "pero", "esto",
+    "the", "and", "for", "with", "from", "not",
 ];
 
 /// La nota de la última sesión (`save_session_summary`), en cualquiera de los dos idiomas.
@@ -220,10 +291,26 @@ impl Store {
         text: &str,
         limit: usize,
     ) -> Result<Vec<Memory>, String> {
-        // Las más largas primero: son las más específicas.
+        // Las más largas primero: son las más específicas. Una palabra que sale en más de un
+        // cuarto de las memorias («forge» en el proyecto Forge) no dice de qué trata ninguna.
+        // ponytail: una consulta por palabra (12 como mucho); con miles de memorias, cachear.
+        let total = self.count_memories(project)? as usize;
+        let key = self.project_key(project);
+        let common = |t: &str| {
+            self.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid
+                     WHERE memories_fts MATCH ?1 AND m.project = ?2",
+                    params![format!("\"{t}\"*"), key],
+                    |r| r.get::<_, i64>(0),
+                )
+                .unwrap_or(0) as usize
+                * 4
+                > total.max(8)
+        };
         let mut terms = words(text);
         terms.sort_by_key(|w| std::cmp::Reverse(w.chars().count()));
-        terms.truncate(12);
+        let terms: Vec<String> = terms.into_iter().filter(|t| !common(t)).take(12).collect();
         if terms.is_empty() {
             return Ok(Vec::new());
         }
@@ -232,7 +319,7 @@ impl Store {
         let has = |haystack: &[String], term: &str| haystack.iter().any(|w| w.starts_with(term));
         Ok(found
             .into_iter()
-            .filter(|m| !is_session_note(m))
+            .filter(|m| !is_session_note(m) && m.status == "active")
             .filter(|m| {
                 let head = words(&format!("{} {}", m.title, m.tags));
                 let body = words(&m.body);
@@ -261,29 +348,17 @@ impl Store {
     ) -> Result<Vec<Memory>, String> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT m.id, m.kind, m.title, m.body, m.tags, m.source, m.created_at,
-                        snippet(memories_fts, -1, '[', ']', '…', 14)
+            .prepare(&format!(
+                "SELECT {COLUMNS}, snippet(memories_fts, -1, '[', ']', '…', 14)
                  FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid
                  WHERE memories_fts MATCH ?1 AND m.project = ?2 AND (?3 IS NULL OR m.kind = ?3)
-                 ORDER BY bm25(memories_fts, 10.0, 1.0, 5.0) LIMIT ?4",
-            )
+                 ORDER BY bm25(memories_fts, 10.0, 1.0, 5.0) LIMIT ?4"
+            ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(
                 params![fts, self.project_key(project), kind, limit as i64],
-                |r| {
-                    Ok(Memory {
-                        id: r.get(0)?,
-                        kind: r.get(1)?,
-                        title: r.get(2)?,
-                        body: r.get(3)?,
-                        tags: r.get(4)?,
-                        source: r.get(5)?,
-                        created_at: r.get(6)?,
-                        snippet: r.get(7)?,
-                    })
-                },
+                |r| from_row(r, true),
             )
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
@@ -298,26 +373,15 @@ impl Store {
     ) -> Result<Vec<Memory>, String> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT id, kind, title, body, tags, source, created_at FROM memories
-                 WHERE project = ?1 AND (?2 IS NULL OR kind = ?2) ORDER BY id DESC LIMIT ?3",
-            )
+            .prepare(&format!(
+                "SELECT {COLUMNS} FROM memories m
+                 WHERE project = ?1 AND (?2 IS NULL OR kind = ?2) ORDER BY id DESC LIMIT ?3"
+            ))
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map(
                 params![self.project_key(project), kind, limit as i64],
-                |r| {
-                    Ok(Memory {
-                        id: r.get(0)?,
-                        kind: r.get(1)?,
-                        title: r.get(2)?,
-                        body: r.get(3)?,
-                        tags: r.get(4)?,
-                        source: r.get(5)?,
-                        created_at: r.get(6)?,
-                        snippet: None,
-                    })
-                },
+                |r| from_row(r, false),
             )
             .map_err(|e| e.to_string())?;
         rows.collect::<rusqlite::Result<_>>()
@@ -328,21 +392,9 @@ impl Store {
     pub fn get_memory(&self, project: &Path, id: i64) -> Result<Option<Memory>, String> {
         self.conn
             .query_row(
-                "SELECT id, kind, title, body, tags, source, created_at FROM memories
-                 WHERE id = ?1 AND project = ?2",
+                &format!("SELECT {COLUMNS} FROM memories m WHERE id = ?1 AND project = ?2"),
                 params![id, self.project_key(project)],
-                |r| {
-                    Ok(Memory {
-                        id: r.get(0)?,
-                        kind: r.get(1)?,
-                        title: r.get(2)?,
-                        body: r.get(3)?,
-                        tags: r.get(4)?,
-                        source: r.get(5)?,
-                        created_at: r.get(6)?,
-                        snippet: None,
-                    })
-                },
+                |r| from_row(r, false),
             )
             .optional()
             .map_err(|e| e.to_string())
@@ -390,7 +442,7 @@ impl Store {
         Ok(self
             .list_memories(project, None, 500)?
             .into_iter()
-            .find(|m| same_topic(&m.title, title)))
+            .find(|m| m.status == "active" && same_topic(&m.title, title)))
     }
 
     /// Cambia los campos dados de una memoria (los `None` se quedan como estaban).
@@ -436,6 +488,31 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    /// Vigente, reemplazada (por `by`) o archivada. Nada se borra: se puede restaurar.
+    pub fn set_memory_status(
+        &self,
+        project: &Path,
+        id: i64,
+        status: &str,
+        by: Option<i64>,
+    ) -> Result<bool, String> {
+        if !STATUSES.contains(&status) {
+            return Err(tr!(
+                "estado de memoria desconocido \"{status}\" (válidos: {p0})",
+                p0 = STATUSES.join(", "),
+                status = status
+            ));
+        }
+        let by = by.filter(|_| status == "superseded");
+        self.conn
+            .execute(
+                "UPDATE memories SET status = ?3, superseded_by = ?4 WHERE id = ?1 AND project = ?2",
+                params![id, self.project_key(project), status, by],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
     pub fn count_memories(&self, project: &Path) -> Result<i64, String> {
         self.conn
             .query_row(
@@ -457,6 +534,16 @@ impl Store {
     }
 }
 
+/// « (reemplazada por #N)» o « (archivada)»; nada si está vigente.
+pub fn status_note(m: &Memory) -> String {
+    match (m.status.as_str(), m.superseded_by) {
+        ("superseded", Some(by)) => tr!(" (reemplazada por #{by})", by = by),
+        ("superseded", None) => tr!(" (reemplazada)").into(),
+        ("archived", _) => tr!(" (archivada)").into(),
+        _ => String::new(),
+    }
+}
+
 /// Texto de una memoria para un agente o la terminal.
 pub fn render(m: &Memory) -> String {
     let tags = if m.tags.is_empty() {
@@ -468,7 +555,7 @@ pub fn render(m: &Memory) -> String {
         "#{p0} [{p1}] {p2}\n{p3}\n(guardada por {p4}, {p5}{tags})",
         p0 = m.id,
         p1 = kind_label(&m.kind),
-        p2 = m.title,
+        p2 = format!("{}{}", m.title, status_note(m)),
         p3 = m.body,
         p4 = m.source,
         p5 = crate::store::ago_precise(m.created_at),
@@ -483,7 +570,7 @@ pub fn render_search(m: &Memory) -> String {
         "#{p0} [{p1}] {p2}\n{p3}",
         p0 = m.id,
         p1 = kind_label(&m.kind),
-        p2 = m.title,
+        p2 = format!("{}{}", m.title, status_note(m)),
         p3 = snippet
     )
 }
@@ -604,12 +691,10 @@ mod tests {
         assert_eq!(hits.len(), 2, "{hits:?}");
         assert_eq!(hits[0].title, "Vacunación en lotes", "el título pesa más");
         assert!(hits[0].snippet.as_deref().unwrap_or("").contains('['));
+        // Basta una palabra; la que tiene las dos va primero.
         assert_eq!(
-            store
-                .search_memories(p, "vacun lote", None, 10)
-                .unwrap()
-                .len(),
-            1
+            store.search_memories(p, "vacun lote", None, 10).unwrap()[0].title,
+            "Vacunación en lotes"
         );
         assert_eq!(
             store
@@ -846,6 +931,139 @@ mod tests {
         std::fs::create_dir_all(&sub).unwrap();
         assert_eq!(store.project_key(&sub), "git:github.com/org/repo/api");
         let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[test]
+    fn words_shared_by_much_of_the_project_do_not_count() {
+        // En el proyecto Forge casi todo dice «Forge»: esa palabra no dice de qué trata nada.
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/comunes");
+        for title in [
+            "Forge Guard en Windows",
+            "Forge Memory por remoto",
+            "Atajos de Forge",
+            "Forge Jev mide modelos",
+            "Sonidos de Forge",
+        ] {
+            store
+                .add_memory(p, "decision", title, "x", "", "x")
+                .unwrap();
+        }
+        let titles = |text: &str| {
+            store
+                .recall_memories(p, text, 2)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.title)
+                .collect::<Vec<_>>()
+        };
+        assert!(titles("siento que forge no sirve").is_empty());
+        assert_eq!(titles("los atajos de forge"), ["Atajos de Forge"]);
+    }
+
+    #[test]
+    fn replaced_and_archived_memories_stay_searchable_but_are_not_suggested() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/estados");
+        let old = store
+            .add_memory(p, "decision", "Atajos de PC", "Ctrl", "", "x")
+            .unwrap();
+        let new = store
+            .add_memory(p, "decision", "Atajos en Linux", "Ctrl+Shift", "", "x")
+            .unwrap();
+        let archived = store
+            .add_memory(p, "decision", "Sonidos con afplay", "x", "", "x")
+            .unwrap();
+        assert!(
+            store
+                .set_memory_status(p, old, "superseded", Some(new))
+                .unwrap()
+        );
+        assert!(
+            store
+                .set_memory_status(p, archived, "archived", None)
+                .unwrap()
+        );
+        assert!(store.set_memory_status(p, old, "borrada", None).is_err());
+        let recalled = |text: &str| {
+            store
+                .recall_memories(p, text, 3)
+                .unwrap()
+                .into_iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(recalled("¿qué atajos usamos?"), [new]);
+        assert!(recalled("los sonidos con afplay").is_empty());
+        // Buscando a propósito siguen ahí, con su estado.
+        let found = store.search_memories(p, "atajos", None, 10).unwrap();
+        let replaced = found.iter().find(|m| m.id == old).unwrap();
+        assert_eq!(replaced.status, "superseded");
+        assert_eq!(replaced.superseded_by, Some(new));
+        // Restaurada vuelve a sugerirse.
+        store
+            .set_memory_status(p, archived, "active", None)
+            .unwrap();
+        assert_eq!(recalled("los sonidos con afplay"), [archived]);
+    }
+
+    #[test]
+    fn search_needs_only_some_of_the_words() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/alguna");
+        let id = store
+            .add_memory(p, "decision", "Vacunación en lotes", "x", "", "x")
+            .unwrap();
+        store
+            .add_memory(p, "command", "Levantar la base de datos", "x", "", "x")
+            .unwrap();
+        let ci = store
+            .add_memory(p, "convention", "Pasos del CI", "x", "", "x")
+            .unwrap();
+        // Una sigla corta sí cuenta.
+        let found = store
+            .search_memories(p, "configuración del ci", None, 10)
+            .unwrap();
+        assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), [ci]);
+        // Las palabras de relleno («de», «la», «como») no traen todo lo demás.
+        let found = store
+            .search_memories(p, "como se hace de la vacunación del ganado", None, 10)
+            .unwrap();
+        assert_eq!(found.iter().map(|m| m.id).collect::<Vec<_>>(), [id]);
+    }
+
+    #[test]
+    fn old_databases_keep_their_memories_as_active() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, kind TEXT NOT NULL,
+                title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL, created_at INTEGER NOT NULL);
+             INSERT INTO memories (project, kind, title, body, source, created_at)
+                VALUES ('p', 'decision', 'vieja', 'x', 'u', 1);",
+        )
+        .unwrap();
+        init(&conn).unwrap();
+        init(&conn).unwrap();
+        let (status, by): (String, Option<i64>) = conn
+            .query_row("SELECT status, superseded_by FROM memories", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!((status.as_str(), by), ("active", None));
+        // A medio migrar (otro proceso se cortó entre las dos columnas): se completa.
+        let half = Connection::open_in_memory().unwrap();
+        half.execute_batch(
+            "CREATE TABLE memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, kind TEXT NOT NULL,
+                title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL, created_at INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'active');",
+        )
+        .unwrap();
+        init(&half).unwrap();
+        assert!(half.prepare("SELECT superseded_by FROM memories").is_ok());
     }
 
     #[test]
