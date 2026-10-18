@@ -160,10 +160,13 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
             after_dashes || !a.starts_with('-')
         })
         .collect();
-    // Dentro del proyecto (dist, node_modules, .next…) es rutina: no se pregunta.
+    // Dentro del proyecto (dist, node_modules, .next…) o de la carpeta temporal del agente
+    // (scratchpad, capturas) es rutina: no se pregunta.
+    let temp = temp_dirs();
     let inside = |t: &String| {
         let path = normalize(&cwd.join(t));
         project.is_some_and(|root| inside_project(&path, root, cfg!(windows)))
+            || in_temp(&path, &temp)
     };
     let outside: Vec<&String> = targets.into_iter().filter(|t| !inside(t)).collect();
     if outside.is_empty() {
@@ -174,6 +177,49 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
         "borra en forma recursiva fuera de la carpeta del proyecto: {p0}",
         p0 = names.join(", ")
     ))
+}
+
+/// Carpetas temporales de los agentes: la del sistema (`TMPDIR`, `%TEMP%`) y la de Claude
+/// Code (`/tmp/claude-<uid>`, con su scratchpad).
+fn temp_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![std::env::temp_dir()];
+    #[cfg(unix)]
+    {
+        // SAFETY: getuid no falla ni toca memoria.
+        let uid = unsafe { libc::getuid() };
+        dirs.push(PathBuf::from(format!("/tmp/claude-{uid}")));
+    }
+    dirs
+}
+
+/// ¿Está `path` dentro (no en la raíz) de una carpeta temporal? Si existe, se mira su ruta real:
+/// un enlace dentro de la temporal que apunta a otro sitio no cuenta como temporal.
+// ponytail: la temporal del sistema la comparten las apps del usuario; borrar dentro de ella es
+// borrar temporales, y su raíz sigue preguntando.
+fn in_temp(path: &Path, roots: &[PathBuf]) -> bool {
+    let path = real_path(path);
+    roots
+        .iter()
+        .any(|root| inside_project(&path, &real_path(root), cfg!(windows)))
+}
+
+/// La ruta real de la parte que existe, más lo que aún no existe (`/var/…/nueva` en macOS es
+/// `/private/var/…/nueva`).
+fn real_path(path: &Path) -> PathBuf {
+    let mut rest = Vec::new();
+    let mut base = path;
+    loop {
+        if let Ok(real) = std::fs::canonicalize(base) {
+            return rest.iter().rev().fold(real, |p, c| p.join(c));
+        }
+        match (base.parent(), base.file_name()) {
+            (Some(parent), Some(name)) => {
+                rest.push(name.to_os_string());
+                base = parent;
+            }
+            _ => return path.to_path_buf(),
+        }
+    }
 }
 
 /// ¿Está `path` dentro de `root` (sin ser la raíz ni su `.git`)? En Windows sin distinguir
@@ -950,6 +996,43 @@ mod tests {
         assert!(found("sudo git push --force"));
         assert!(found("env FOO=1 git reset --hard"));
         assert!(found("time nohup git push -f"));
+    }
+
+    #[test]
+    fn deleting_inside_the_temp_dir_needs_no_authorization() {
+        // Los agentes trabajan en su carpeta temporal (scratchpad, capturas…): borrar ahí es
+        // rutina. La carpeta temporal entera, o salir de ella con un enlace, no.
+        let project = Path::new("/p/app");
+        let tmp = std::env::temp_dir().join(format!("forge-danger-{}", std::process::id()));
+        let shots = tmp.join("scratchpad").join("shots");
+        std::fs::create_dir_all(&shots).unwrap();
+        let rm = |target: &Path| {
+            classify(
+                "rm",
+                &args(&format!("-rf {}", target.display())),
+                project,
+                Some(project),
+            )
+        };
+        assert_eq!(rm(&shots), None, "una carpeta dentro de la temporal");
+        assert_eq!(rm(&tmp.join("aún-no-existe")), None);
+        assert!(
+            rm(&std::env::temp_dir()).is_some(),
+            "la temporal entera sí pregunta"
+        );
+        assert!(rm(&tmp.join("../..")).is_some(), "salir con .. sí pregunta");
+        #[cfg(unix)]
+        {
+            let home = tmp.join("casa");
+            // Un enlace dentro de la temporal que apunta fuera de ella no la convierte en temporal.
+            let target = Path::new("/usr");
+            std::os::unix::fs::symlink(target, &home).unwrap();
+            assert!(
+                rm(&home.join("")).is_some(),
+                "seguir un enlace hacia fuera sí pregunta"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
