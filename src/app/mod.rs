@@ -250,6 +250,7 @@ enum UiCmd {
     /// Abre la memoria con el formulario de nota nueva.
     NewNote,
     MemoryDelete(i64),
+    MemoryStatus(i64, &'static str),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
     /// Clic en un agente: (id, sesión nueva). Ver `Workspace::agent_click`.
@@ -967,7 +968,11 @@ impl App {
             | UiCmd::TaskToggle(..)
             | UiCmd::PhaseAdd(..) => self.apply_idea(cmd),
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
-            UiCmd::ToggleMemory | UiCmd::NewNote | UiCmd::MemorySave | UiCmd::MemoryDelete(_) => {
+            UiCmd::ToggleMemory
+            | UiCmd::NewNote
+            | UiCmd::MemorySave
+            | UiCmd::MemoryDelete(_)
+            | UiCmd::MemoryStatus(..) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
                 match cmd {
@@ -1016,6 +1021,10 @@ impl App {
                     }
                     UiCmd::MemoryDelete(id) => {
                         self.db(|s| s.delete_memory(&path, id));
+                        self.workspaces[i].memory.dirty = true;
+                    }
+                    UiCmd::MemoryStatus(id, status) => {
+                        self.db(|s| s.set_memory_status(&path, id, status, None));
                         self.workspaces[i].memory.dirty = true;
                     }
                     _ => {}

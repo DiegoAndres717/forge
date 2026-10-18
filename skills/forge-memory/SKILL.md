@@ -24,4 +24,7 @@ Don't save what's already in the code, the Git history or the plans.
 Exception: when you fix a bug that a review or the user caught, save it as `error` if the same mistake could show up elsewhere (a pattern, not a one-off typo), even though the fix is in Git: the commit doesn't warn the next agent.
 
 ## No duplicates
-If `memory_save` answers that a similar memory exists, don't force it: update that one with `memory_update` (its id) so memory doesn't fill up with repeats. Use `force=true` only if it really is something else. If a memory is no longer true, delete it with `memory_delete`.
+If `memory_save` answers that a similar memory exists, don't force it: update that one with `memory_update` (its id) so memory doesn't fill up with repeats. If the new one makes the old one obsolete, save it with `replaces=<old id>`: the old one is kept as replaced and stops reaching agents. Use `force=true` only if it really is something else. If a memory no longer applies, archive it with `memory_update` (`status: "archived"`) instead of deleting it.
+
+## User corrections
+When the user corrects how you work or tells you something you must not do, save it as a `convention` in Forge Memory (not only in your own agent memory): current conventions reach every agent at the start of each session.

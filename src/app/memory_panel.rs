@@ -301,11 +301,15 @@ impl App {
                             egui::TextFormat::simple(FontId::proportional(13.0), theme::TEXT),
                         );
                         header.append(
-                            &match read {
-                                Some((1, _)) => tr!("1 lectura").into(),
-                                Some((n, _)) => tr!("{n} lecturas", n = n),
-                                None => tr!("sin leer").into(),
-                            },
+                            &format!(
+                                "{}{}",
+                                match read {
+                                    Some((1, _)) => tr!("1 lectura").into(),
+                                    Some((n, _)) => tr!("{n} lecturas", n = n),
+                                    None => tr!("sin leer").into(),
+                                },
+                                forge_core::memory::status_note(m)
+                            ),
                             8.0,
                             egui::TextFormat::simple(FontId::proportional(11.0), theme::TEXT_3),
                         );
@@ -344,6 +348,16 @@ impl App {
                                         .small()
                                         .color(Color32::from_gray(0x80)),
                                     );
+                                    // Archivar en vez de borrar: deja de llegar a los
+                                    // agentes y se puede restaurar.
+                                    let (label, status) = if m.status == "active" {
+                                        (tr!("Archivar"), "archived")
+                                    } else {
+                                        (tr!("Restaurar"), "active")
+                                    };
+                                    if ui.small_button(label).clicked() {
+                                        cmds.push(UiCmd::MemoryStatus(m.id, status));
+                                    }
                                     if ui.small_button(tr!("Borrar")).clicked() {
                                         cmds.push(UiCmd::MemoryDelete(m.id));
                                     }
