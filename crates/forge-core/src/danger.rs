@@ -179,18 +179,28 @@ fn rm(args: &[String], cwd: &Path, project: Option<&Path>) -> Option<String> {
     ))
 }
 
-/// Carpetas temporales de los agentes: la del sistema (`TMPDIR`, `%TEMP%`) y la de Claude
-/// Code (`/tmp/claude-<uid>`, con su scratchpad).
-fn temp_dirs() -> Vec<PathBuf> {
-    let mut dirs = vec![std::env::temp_dir()];
+/// Carpetas temporales de los agentes: en Unix, `TMPDIR` si el entorno la fija (en macOS es
+/// del usuario) y la de Claude Code (`/tmp/claude-<uid>`, con su scratchpad); en Windows,
+/// `%TEMP%` (del usuario).
+pub(crate) fn temp_dirs() -> Vec<PathBuf> {
     #[cfg(unix)]
     {
         // SAFETY: getuid no falla ni toca memoria.
         let uid = unsafe { libc::getuid() };
-        dirs.push(PathBuf::from(format!("/tmp/claude-{uid}")));
+        std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .into_iter()
+            .chain([PathBuf::from(format!("/tmp/claude-{uid}"))])
+            .collect()
     }
-    dirs
+    #[cfg(not(unix))]
+    {
+        vec![std::env::temp_dir()]
+    }
 }
+
+/// Carpetas que nunca cuentan como temporales del agente: son de todo el equipo.
+const SHARED: [&str; 4] = ["/", "/tmp", "/private/tmp", "/var/tmp"];
 
 /// ¿Está `path` dentro (no en la raíz) de una carpeta temporal? Si existe, se mira su ruta real:
 /// un enlace dentro de la temporal que apunta a otro sitio no cuenta como temporal.
@@ -198,9 +208,10 @@ fn temp_dirs() -> Vec<PathBuf> {
 // borrar temporales, y su raíz sigue preguntando.
 fn in_temp(path: &Path, roots: &[PathBuf]) -> bool {
     let path = real_path(path);
-    roots
-        .iter()
-        .any(|root| inside_project(&path, &real_path(root), cfg!(windows)))
+    roots.iter().map(|r| real_path(r)).any(|root| {
+        !SHARED.iter().any(|s| real_path(Path::new(s)) == root)
+            && inside_project(&path, &root, cfg!(windows))
+    })
 }
 
 /// La ruta real de la parte que existe, más lo que aún no existe (`/var/…/nueva` en macOS es
@@ -1003,7 +1014,8 @@ mod tests {
         // Los agentes trabajan en su carpeta temporal (scratchpad, capturas…): borrar ahí es
         // rutina. La carpeta temporal entera, o salir de ella con un enlace, no.
         let project = Path::new("/p/app");
-        let tmp = std::env::temp_dir().join(format!("forge-danger-{}", std::process::id()));
+        let root = temp_dirs()[0].clone();
+        let tmp = root.join(format!("forge-danger-{}", std::process::id()));
         let shots = tmp.join("scratchpad").join("shots");
         std::fs::create_dir_all(&shots).unwrap();
         let rm = |target: &Path| {
@@ -1016,10 +1028,9 @@ mod tests {
         };
         assert_eq!(rm(&shots), None, "una carpeta dentro de la temporal");
         assert_eq!(rm(&tmp.join("aún-no-existe")), None);
-        assert!(
-            rm(&std::env::temp_dir()).is_some(),
-            "la temporal entera sí pregunta"
-        );
+        assert!(rm(&root).is_some(), "la temporal entera sí pregunta");
+        // /tmp es de todo el equipo: aunque TMPDIR diga /tmp, no cuenta.
+        assert!(!in_temp(Path::new("/tmp/otra"), &[PathBuf::from("/tmp")]));
         assert!(rm(&tmp.join("../..")).is_some(), "salir con .. sí pregunta");
         #[cfg(unix)]
         {
