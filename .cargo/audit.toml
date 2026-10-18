@@ -1,0 +1,11 @@
+# cargo audit (CI). Cada excepción dice por qué no nos afecta y cuándo quitarla.
+[advisories]
+ignore = [
+    # zip 8.6 llega por candle-core (búsqueda por significado de Forge Memory), que exige ^8.6.
+    # Las tres son de ZipArchive::extract / ZipStreamReader::extract (escribir un zip en disco):
+    # candle solo lee .npz en memoria y Forge solo carga .safetensors, así que no se ejecutan.
+    # Quitar cuando candle pase a zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
+]
