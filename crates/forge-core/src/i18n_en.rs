@@ -992,6 +992,29 @@ pub const EN: &[(&str, &str)] = &[
     (" (reemplazada)", " (replaced)"),
     (" (archivada)", " (archived)"),
     ("Archivar", "Archive"),
+    ("Búsqueda por significado", "Search by meaning"),
+    (
+        "Las pistas de memoria que Forge da a los agentes encuentran las notas por lo que dicen, no solo por sus palabras, y entre idiomas (escribes en español, la nota está en inglés). Usa un modelo local que se descarga una vez; nada sale de tu equipo. Sin él, Forge busca por palabras.",
+        "The memory hints Forge gives agents find notes by what they say, not only by their words, and across languages (you write in Spanish, the note is in English). It uses a local model downloaded once; nothing leaves your computer. Without it, Forge searches by words.",
+    ),
+    ("Descargando… {p0} %", "Downloading… {p0} %"),
+    ("✓ Activada · {p0} MB", "✓ On · {p0} MB"),
+    ("Quitar el modelo", "Remove the model"),
+    ("Activar (descarga {p0} MB)", "Turn on ({p0} MB download)"),
+    ("la descarga se interrumpió", "the download was interrupted"),
+    (
+        "la búsqueda por significado no está activada (Ajustes)",
+        "search by meaning is not turned on (Settings)",
+    ),
+    (
+        "{n} memorias con vector nuevo.",
+        "{n} memories got a new vector.",
+    ),
+    (
+        "no se pudo descargar {name}: {p0}",
+        "couldn't download {name}: {p0}",
+    ),
+    ("texto vacío", "empty text"),
     ("Se ignoró", "Was ignored"),
     (
         "Un agente no la tuvo en cuenta: se cuenta para decidir si Forge Memory recuerda bien",

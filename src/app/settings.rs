@@ -224,6 +224,8 @@ impl App {
                 },
             );
         });
+        theme::section(ui, "Forge Memory");
+        theme::card(ui, |ui| self.semantic_ui(ui));
         theme::section(ui, tr!("Terminal"));
         theme::card(ui, |ui| {
             row(
@@ -452,6 +454,45 @@ impl App {
 
     /// Los comandos de Forge en Codex (`$forge-plans`…): skills en ~/.codex/skills,
     /// solo si el usuario lo pide (es su carpeta; las demás cuentas la comparten).
+    /// Búsqueda por significado: se descarga al activarla y se quita para liberar el disco.
+    fn semantic_ui(&mut self, ui: &mut egui::Ui) {
+        let size_mb = forge_core::embed::FILES.iter().map(|f| f.2).sum::<u64>() / 1_000_000;
+        row(
+            ui,
+            tr!("Búsqueda por significado"),
+            tr!(
+                "Las pistas de memoria que Forge da a los agentes encuentran las notas por lo que dicen, no solo por sus palabras, y entre idiomas (escribes en español, la nota está en inglés). Usa un modelo local que se descarga una vez; nada sale de tu equipo. Sin él, Forge busca por palabras."
+            ),
+            |ui| {
+                let semantic = &mut self.semantic;
+                if let Some(done) = semantic.downloading() {
+                    ui.add(
+                        egui::ProgressBar::new(done)
+                            .desired_width(160.0)
+                            .text(tr!("Descargando… {p0} %", p0 = (done * 100.0) as u32)),
+                    );
+                } else if semantic.installed() {
+                    ui.label(
+                        RichText::new(tr!("✓ Activada · {p0} MB", p0 = size_mb))
+                            .color(theme::TEXT_3),
+                    );
+                    if ui.button(tr!("Quitar el modelo")).clicked() {
+                        semantic.remove();
+                    }
+                } else if semantic.dir.is_some()
+                    && ui
+                        .button(tr!("Activar (descarga {p0} MB)", p0 = size_mb))
+                        .clicked()
+                {
+                    semantic.install(ui.ctx());
+                }
+            },
+        );
+        if let Some(e) = &self.semantic.error {
+            ui.label(RichText::new(e).small().color(theme::RED));
+        }
+    }
+
     fn codex_skills_ui(&mut self, ui: &mut egui::Ui, codex: &std::path::Path) {
         let installed = forge_core::mcp::codex_skills_installed(codex);
         let mut result = None;

@@ -210,6 +210,34 @@ fn mcp_server_shares_memory_between_clients() {
         "las sugerencias cuentan como enviadas"
     );
     assert!(sent.memory_sent_chars(&project, 7).unwrap() > 0);
+    // Con un modelo roto (descarga corrupta, otra versión…), las pistas siguen saliendo por
+    // palabras: la búsqueda por significado nunca deja sin respuesta.
+    let models = db
+        .parent()
+        .unwrap()
+        .join("models")
+        .join(forge_core::embed::MODEL);
+    std::fs::create_dir_all(&models).unwrap();
+    for (name, _, _) in forge_core::embed::FILES {
+        std::fs::write(models.join(name), "roto").unwrap();
+    }
+    let hint = Command::new(FORGE)
+        .args([
+            "memory",
+            "search",
+            "--brief",
+            "lotes",
+            "--project",
+            &project_arg,
+        ])
+        .env("FORGE_DB", &db)
+        .output()
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&hint.stdout).contains("Vacunación por lotes"),
+        "{}",
+        String::from_utf8_lossy(&hint.stderr)
+    );
     let cli = Command::new(FORGE)
         .args(["memory", "search", "lotes", "--project", &project_arg])
         .env("FORGE_DB", &db)
@@ -293,4 +321,62 @@ fn mcp_server_shares_memory_between_clients() {
     );
     assert!(plans(&["add", "Modo oscuro"]).contains("backlog"));
     assert!(plans(&[]).contains("Modo oscuro"));
+}
+
+/// Con el modelo de verdad (no en CI: `FORGE_MODEL_DIR=<carpeta> cargo test -- --ignored`):
+/// `forge memory embed` calcula los vectores y la pista de un mensaje en español encuentra
+/// la nota en inglés aunque no comparta ninguna palabra.
+#[test]
+#[ignore]
+fn spanish_hint_finds_the_english_note_by_meaning() {
+    let base = std::env::temp_dir().join(format!("forge-it-sem-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(&project).unwrap();
+    let db = base.join("forge.db");
+    let models = base.join("models").join(forge_core::embed::MODEL);
+    std::fs::create_dir_all(&models).unwrap();
+    let src =
+        std::path::PathBuf::from(std::env::var_os("FORGE_MODEL_DIR").expect("FORGE_MODEL_DIR"));
+    for (name, _, _) in forge_core::embed::FILES {
+        std::fs::copy(src.join(name), models.join(name)).unwrap();
+    }
+    let project_arg = project.to_string_lossy().into_owned();
+    let forge = |args: &[&str]| {
+        let mut all = args.to_vec();
+        all.extend(["--project", &project_arg]);
+        let out = Command::new(FORGE)
+            .args(&all)
+            .env("FORGE_DB", &db)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    forge(&[
+        "memory",
+        "add",
+        "error",
+        "Tests that include_str! another file fail on Windows (CRLF checkout)",
+        "Compare after normalizing line endings.",
+    ]);
+    forge(&[
+        "memory",
+        "add",
+        "decision",
+        "Alert sounds play through afplay",
+        "Notifications are silent.",
+    ]);
+    let query = [
+        "memory",
+        "search",
+        "--brief",
+        "la prueba falla por los saltos de línea",
+    ];
+    assert!(
+        !forge(&query).contains("CRLF"),
+        "sin vectores, por palabras no la encuentra"
+    );
+    assert!(forge(&["memory", "embed"]).contains('2'));
+    let hint = forge(&query);
+    assert!(hint.contains("CRLF") && !hint.contains("afplay"), "{hint}");
 }

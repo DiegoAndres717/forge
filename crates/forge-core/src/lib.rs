@@ -4,6 +4,7 @@ pub mod accounts;
 pub mod agents;
 pub mod candidate;
 pub mod danger;
+pub mod embed;
 pub mod events;
 pub mod evidence;
 pub mod git;

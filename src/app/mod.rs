@@ -37,6 +37,7 @@ mod menu;
 mod notify;
 mod palette;
 mod project_forms;
+mod semantic;
 mod settings;
 mod sidebar;
 mod update;
@@ -364,6 +365,8 @@ pub struct App {
     events_checked: Option<Instant>,
     /// Versión nueva publicada: (etiqueta, página para descargarla).
     update: Arc<Mutex<Option<update::Update>>>,
+    /// Búsqueda por significado de Forge Memory: el modelo y el cálculo de vectores.
+    semantic: semantic::Semantic,
     /// Paso de la bienvenida que se muestra (la primera vez, o desde ⌘K).
     welcome: Option<usize>,
 }
@@ -415,6 +418,7 @@ impl App {
             palette: None,
             welcome: None,
             update: Arc::default(),
+            semantic: semantic::Semantic::new(),
             events_checked: None,
             // Fuera de macOS no hay semáforos: los botones van pegados al borde.
             traffic_end: if cfg!(target_os = "macos") { 72.0 } else { 0.0 },

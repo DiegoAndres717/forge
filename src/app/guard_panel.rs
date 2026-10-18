@@ -220,6 +220,9 @@ impl App {
     /// Guarda las ejecuciones terminadas (evidencia + historial) y vigila si el candidato
     /// cambia después de validar.
     pub(super) fn guard_tick(&mut self, ctx: &egui::Context) {
+        if let Some(store) = &self.store {
+            self.semantic.tick(store, ctx);
+        }
         let mut to_save = Vec::new();
         for ws in &mut self.workspaces {
             let Some(run) = &ws.guard.run else { continue };
