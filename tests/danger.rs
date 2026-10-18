@@ -27,6 +27,13 @@ fn setup(name: &str) -> Env {
     vars.insert("FORGE_APP_PID".into(), std::process::id().to_string());
     vars.insert("FORGE_PROJECT".into(), repo.to_string_lossy().into_owned());
     vars.insert("FORGE_ORIGIN".into(), "Claude Code".into());
+    // El agente tiene su propia carpeta temporal: el proyecto de prueba (que vive en la del
+    // sistema) y `../otro` quedan fuera de ella, como en un equipo de verdad.
+    let agent_tmp = base.join("agent-tmp");
+    std::fs::create_dir_all(&agent_tmp).unwrap();
+    for var in ["TMPDIR", "TEMP", "TMP"] {
+        vars.insert(var.into(), agent_tmp.to_string_lossy().into_owned());
+    }
     let path = std::env::join_paths(
         std::iter::once(std::path::PathBuf::from(&vars["FORGE_SHIMS"]))
             .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
