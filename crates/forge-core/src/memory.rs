@@ -254,23 +254,26 @@ impl Store {
         chars: usize,
     ) -> Result<(), String> {
         let at = now();
+        // Una sola escritura: al empezar una sesión pueden ser decenas de memorias.
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|e| e.to_string())?;
         for id in ids {
-            self.conn
-                .execute(
-                    "INSERT INTO memory_stats (memory_id, sent, last_sent) VALUES (?1, 1, ?2)
+            tx.execute(
+                "INSERT INTO memory_stats (memory_id, sent, last_sent) VALUES (?1, 1, ?2)
                      ON CONFLICT(memory_id) DO UPDATE SET sent = sent + 1, last_sent = ?2",
-                    params![id, at],
-                )
-                .map_err(|e| e.to_string())?;
-        }
-        self.conn
-            .execute(
-                "INSERT INTO memory_sent_daily (project, day, chars) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(project, day) DO UPDATE SET chars = chars + ?3",
-                params![self.project_key(project), at / 86_400, chars as i64],
+                params![id, at],
             )
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        }
+        tx.execute(
+            "INSERT INTO memory_sent_daily (project, day, chars) VALUES (?1, ?2, ?3)
+             ON CONFLICT(project, day) DO UPDATE SET chars = chars + ?3",
+            params![self.project_key(project), at / 86_400, chars as i64],
+        )
+        .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())
     }
 
     /// El dueño marcó que un agente no tuvo en cuenta esta memoria.
