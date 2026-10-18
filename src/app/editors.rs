@@ -199,7 +199,7 @@ pub(super) fn open(store: Option<&Store>, bundle: &str, folder: &Path) -> Result
         let program = bundle;
         std::process::Command::new(program)
     };
-    cmd.arg(folder).spawn().map_err(|e| e.to_string())?;
+    crate::launch(cmd.arg(folder)).map_err(|e| e.to_string())?;
     if let Some(store) = store {
         store.set_setting("editor", bundle)?;
     }

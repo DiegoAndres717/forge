@@ -1506,7 +1506,7 @@ impl Terminal {
                         // ⌘+clic abre la URL en el navegador predeterminado.
                         if let Some(url) = hover_url.clone().or_else(|| url_at_point(&term, point))
                         {
-                            let _ = crate::open_command().arg(url).spawn();
+                            let _ = crate::launch(crate::open_command().arg(url));
                         }
                     } else {
                         term.selection = Some(Selection::new(SelectionType::Simple, point, side));

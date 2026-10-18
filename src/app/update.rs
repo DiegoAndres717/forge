@@ -82,7 +82,7 @@ impl App {
                     release.checksum.clone(),
                     updates::current_app(),
                 ) else {
-                    let _ = crate::open_command().arg(&release.page).spawn();
+                    let _ = crate::launch(crate::open_command().arg(&release.page));
                     return;
                 };
                 *self.update.lock().unwrap() = Some(Update::Downloading);
