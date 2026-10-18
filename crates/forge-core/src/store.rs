@@ -714,12 +714,12 @@ impl Store {
             .prepare(
                 "SELECT id, project_key, branch, agent, pid, updated_at
                  FROM agent_sessions
-                 WHERE project_key = ?1 AND branch = ?2 AND (?3 IS NULL OR id != ?3)
+                 WHERE project_key = ?1 AND branch = ?2
                  ORDER BY updated_at DESC",
             )
             .map_err(err)?;
         let rows = stmt
-            .query_map(params![key, branch.trim(), exclude_id], |r| {
+            .query_map(params![key, branch.trim()], |r| {
                 Ok(ActiveAgentSession {
                     id: r.get(0)?,
                     project_key: r.get(1)?,
@@ -730,7 +730,19 @@ impl Store {
                 })
             })
             .map_err(err)?;
-        rows.collect::<rusqlite::Result<_>>().map_err(err)
+        let list: Vec<ActiveAgentSession> = rows.collect::<rusqlite::Result<_>>().map_err(err)?;
+        if let Some(ex) = exclude_id.map(str::trim).filter(|s| !s.is_empty()) {
+            Ok(list
+                .into_iter()
+                .filter(|s| {
+                    s.id != ex
+                        && !s.id.ends_with(&format!(":{ex}"))
+                        && !ex.ends_with(&format!(":{}", s.id))
+                })
+                .collect())
+        } else {
+            Ok(list)
+        }
     }
 
     /// Todas las sesiones activas en el repositorio del proyecto.
@@ -760,6 +772,30 @@ impl Store {
             .map_err(err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
+}
+
+/// Identificador de sesión para un panel de un proceso de Forge.
+pub fn session_id_for_panel(app_pid: u32, panel_id: u64) -> String {
+    format!("{app_pid}:{panel_id}")
+}
+
+/// Identificador de la sesión del agente actual a partir de variables de entorno (si existe).
+pub fn current_session_id() -> Option<String> {
+    if let Ok(id) = std::env::var("FORGE_SESSION_ID") {
+        let trimmed = id.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+    if let (Ok(app_pid), Ok(panel)) = (std::env::var("FORGE_APP_PID"), std::env::var("FORGE_PANEL"))
+        && let (Ok(pid), Ok(p_id)) = (app_pid.trim().parse::<u32>(), panel.trim().parse::<u64>())
+    {
+        return Some(session_id_for_panel(pid, p_id));
+    }
+    std::env::var("FORGE_PANEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// "hace 5 min", "hace 2 h", "hace 3 días".
@@ -1066,5 +1102,27 @@ mod tests {
             .unwrap();
         assert_eq!(after_prune.len(), 1);
         assert_eq!(after_prune[0].id, "s1");
+
+        // Exclusión con formato compuesto <app_pid>:<panel> o panel simple
+        let comp_id = session_id_for_panel(9999, 42);
+        assert_eq!(comp_id, "9999:42");
+        store
+            .register_agent_session(&comp_id, p, "feat/comp", "claude", None)
+            .unwrap();
+        // Excluyendo con "42" (panel simple) debe excluir "9999:42"
+        let res = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("42"))
+            .unwrap();
+        assert!(res.is_empty());
+        // Excluyendo con "9999:42" debe excluir "9999:42"
+        let res2 = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("9999:42"))
+            .unwrap();
+        assert!(res2.is_empty());
+        // Excluyendo con otro panel ("43") no lo excluye
+        let res3 = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("43"))
+            .unwrap();
+        assert_eq!(res3.len(), 1);
     }
 }

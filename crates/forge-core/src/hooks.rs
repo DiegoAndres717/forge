@@ -208,6 +208,26 @@ pub fn push_range(stdin: &str) -> Option<String> {
     })
 }
 
+/// Rama que se empuja a partir del stdin de pre-push:
+/// "<ref local> <sha local> <ref remota> <sha remota>" por línea.
+pub fn push_branch(stdin: &str) -> Option<String> {
+    stdin.lines().find_map(|line| {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        let [local_ref, local_sha, ..] = parts[..] else {
+            return None;
+        };
+        if local_sha.chars().all(|c| c == '0') {
+            return None; // borrado de rama remota: no hay colisión activa
+        }
+        let branch = local_ref.strip_prefix("refs/heads/").unwrap_or(local_ref);
+        if !branch.is_empty() && branch != "(delete)" {
+            Some(branch.to_string())
+        } else {
+            None
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -227,6 +247,16 @@ mod tests {
         );
         assert_eq!(
             push_range(&format!("(delete) {z} refs/heads/x {b}\n")),
+            None
+        );
+        assert_eq!(
+            push_branch(&format!(
+                "refs/heads/feat/conflict {a} refs/heads/feat/conflict {b}\n"
+            )),
+            Some("feat/conflict".to_string())
+        );
+        assert_eq!(
+            push_branch(&format!("refs/heads/x {z} refs/heads/x {b}\n")),
             None
         );
     }

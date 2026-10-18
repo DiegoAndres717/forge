@@ -2709,4 +2709,12 @@ pub const EN: &[(&str, &str)] = &[
         "lee un archivo con secretos ({p0})",
         "reads a file with secrets ({p0})",
     ),
+    (
+        "⚠ ATENCIÓN: otra sesión de agente ({agents}) está activa en la misma rama «{branch}». Coordínate o cambia de rama para evitar pisaros ni duplicar trabajo.",
+        "⚠ WARNING: another agent session ({agents}) is active on the same branch \"{branch}\". Coordinate or switch branches to avoid conflicts or duplicate work.",
+    ),
+    (
+        "  ⚠ Advertencia: otra sesión de agente ({agents}) está activa en la rama «{branch}».",
+        "  ⚠ Warning: another agent session ({agents}) is active on branch \"{branch}\".",
+    ),
 ];
