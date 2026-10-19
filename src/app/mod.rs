@@ -1339,7 +1339,7 @@ impl App {
     }
 
     /// Sincroniza paneles de agente activos con la tabla `agent_sessions` de Forge y detecta colisiones de rama.
-    fn agent_sessions_tick(&mut self, _ctx: &egui::Context) {
+    fn agent_sessions_tick(&mut self) {
         let stale = self
             .last_sessions_sync
             .is_none_or(|t| t.elapsed() > Duration::from_secs(2));
@@ -1368,22 +1368,16 @@ impl App {
                     let _ = store.register_agent_session(&sid, &ws.project.path, b, agent, *pid);
                 }
 
-                // Consultar colisiones por rama para cada panel
-                let mut conflicts_map = HashMap::new();
-                for (id, _, _) in &panels {
-                    let sid = store::session_id_for_panel(app_pid, *id);
-                    if let Ok(conflicts) =
-                        store.active_agent_sessions_on_branch(&ws.project.path, b, Some(&sid))
-                        && !conflicts.is_empty()
-                    {
-                        let mut names: Vec<String> =
-                            conflicts.into_iter().map(|s| s.agent).collect();
-                        names.sort();
-                        names.dedup();
-                        conflicts_map.insert(*id, names);
-                    }
-                }
-                ws.set_branch_conflicts(conflicts_map);
+                // Colisiones de rama de cada panel (sin contarse a sí mismo).
+                let conflicts = panels
+                    .iter()
+                    .filter_map(|(id, _, _)| {
+                        let sid = store::session_id_for_panel(app_pid, *id);
+                        let names = store.other_agents_on_branch(&ws.project.path, b, Some(&sid));
+                        (!names.is_empty()).then_some((*id, names))
+                    })
+                    .collect();
+                ws.set_branch_conflicts(conflicts);
             } else {
                 ws.set_branch_conflicts(HashMap::new());
             }
@@ -1573,7 +1567,7 @@ impl eframe::App for App {
         }
         self.notify_tick(&ctx);
         self.update_tick(&ctx);
-        self.agent_sessions_tick(&ctx);
+        self.agent_sessions_tick();
         // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
         ctx.request_repaint_after(Duration::from_secs(2));
 

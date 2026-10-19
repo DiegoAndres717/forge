@@ -733,11 +733,15 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
 
-    /// Agentes de las otras sesiones activas en esta rama (sin contar la actual), sin repetir.
-    pub fn other_agents_on_branch(&self, project: &Path, branch: &str) -> Vec<String> {
-        let me = current_session_id();
+    /// Agentes de las otras sesiones activas en esta rama (sin contar `me`), sin repetir.
+    pub fn other_agents_on_branch(
+        &self,
+        project: &Path,
+        branch: &str,
+        me: Option<&str>,
+    ) -> Vec<String> {
         let mut agents: Vec<String> = self
-            .active_agent_sessions_on_branch(project, branch, me.as_deref())
+            .active_agent_sessions_on_branch(project, branch, me)
             .unwrap_or_default()
             .into_iter()
             .map(|s| s.agent)

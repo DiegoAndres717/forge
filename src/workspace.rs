@@ -2869,10 +2869,11 @@ impl Workspace {
             let (text, color) = if has_conflict {
                 let agents = conflict_agents.unwrap().join(", ");
                 (
+                    // El aviso va primero: si no cabe, se recorta la rama, no el aviso.
                     format!(
-                        "{}  {branch}  ⚠ {}",
+                        "⚠ {}  {}  {branch}",
+                        tr!("Otra sesión de {agent}", agent = agents),
                         icon::GIT_BRANCH,
-                        tr!("Otra sesión de {agent}", agent = agents)
                     ),
                     theme::ORANGE,
                 )

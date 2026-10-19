@@ -419,7 +419,10 @@ fn gate(
         });
         let agents = branch
             .as_deref()
-            .map(|b| store.other_agents_on_branch(project_dir, b))
+            .map(|b| {
+                let me = forge_core::store::current_session_id();
+                store.other_agents_on_branch(project_dir, b, me.as_deref())
+            })
             .unwrap_or_default();
         if let (Some(b), false) = (&branch, agents.is_empty()) {
             out.line(&out.paint(
