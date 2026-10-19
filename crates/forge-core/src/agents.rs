@@ -40,6 +40,9 @@ pub enum McpStyle {
     /// suma a la del usuario sin tocarla; `--standalone` porque el servicio de fondo de
     /// OpenCode no ve el entorno de esta terminal.
     OpenCodeEnv,
+    /// `~/.gemini/config/mcp_config.json`: Antigravity CLI lee sus servidores MCP de
+    /// su configuración de usuario; Forge añade o actualiza el servidor `forge` sin tocar el resto.
+    AgyConfig,
 }
 
 /// Servidor MCP que se conecta a los agentes (la memoria de Forge u otro proveedor).
@@ -145,11 +148,22 @@ impl AgentSpec {
     /// así sirven también para subcomandos como `codex resume --last`).
     pub fn with_mcp(&self, command: &str, server: &McpServer) -> String {
         let standalone = OPENCODE_STANDALONE.load(std::sync::atomic::Ordering::Relaxed);
-        self.with_mcp_for(command, server, standalone)
+        self.with_mcp_at(command, server, standalone, None)
     }
 
     /// Como `with_mcp`, diciendo si OpenCode admite `--standalone`.
     pub fn with_mcp_for(&self, command: &str, server: &McpServer, standalone: bool) -> String {
+        self.with_mcp_at(command, server, standalone, None)
+    }
+
+    /// Como `with_mcp_for`, permitiendo especificar una carpeta `home` (para pruebas).
+    pub fn with_mcp_at(
+        &self,
+        command: &str,
+        server: &McpServer,
+        standalone: bool,
+        home: Option<&Path>,
+    ) -> String {
         let Some(style) = self.mcp_style else {
             return command.to_string();
         };
@@ -190,6 +204,13 @@ impl AgentSpec {
                     quote(&format!("mcp_servers.{}.args={args}", server.name))
                 )
             }
+            McpStyle::AgyConfig => {
+                let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
+                if let Some(h) = home_path {
+                    let _ = ensure_agy_mcp(&h, server);
+                }
+                return command.to_string();
+            }
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -216,7 +237,8 @@ impl AgentSpec {
                 format!("-c {}", quote(&format!("notify={notify}")))
             }
             // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
-            Some(McpStyle::OpenCodeEnv) | None => return command.to_string(),
+            // agy se añade en la fase 2.
+            Some(McpStyle::OpenCodeEnv | McpStyle::AgyConfig) | None => return command.to_string(),
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -345,6 +367,73 @@ pub fn template() -> String {
     .into()
 }
 
+/// Registra o actualiza el servidor MCP de Forge en `~/.gemini/config/mcp_config.json` para
+/// Antigravity CLI (`agy`), preservando intactos los demás servidores y opciones existentes.
+pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
+    let config_dir = home.join(".gemini").join("config");
+    let config_file = config_dir.join("mcp_config.json");
+
+    let mut root: serde_json::Value = if config_file.exists() {
+        let content = std::fs::read_to_string(&config_file)
+            .map_err(|e| format!("{}: {e}", config_file.display()))?;
+        if content.trim().is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+        }
+    } else {
+        serde_json::json!({})
+    };
+
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+
+    let servers = root
+        .as_object_mut()
+        .unwrap()
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+
+    if !servers.is_object() {
+        *servers = serde_json::json!({});
+    }
+
+    // Para la configuración global de agy, omitimos `--project <path>` para que `forge mcp`
+    // detecte dinámicamente el proyecto en el que se ejecuta la sesión.
+    let mut args = Vec::new();
+    let mut skip_next = false;
+    for arg in &server.args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--project" {
+            skip_next = true;
+            continue;
+        }
+        args.push(arg.clone());
+    }
+
+    let new_entry = serde_json::json!({
+        "command": &server.command,
+        "args": args,
+    });
+
+    let servers_obj = servers.as_object_mut().unwrap();
+    if servers_obj.get(&server.name) == Some(&new_entry) {
+        return Ok(());
+    }
+
+    servers_obj.insert(server.name.clone(), new_entry);
+
+    std::fs::create_dir_all(&config_dir).map_err(|e| format!("{}: {e}", config_dir.display()))?;
+    let pretty = serde_json::to_string_pretty(&root).map_err(|e| format!("json error: {e}"))?;
+    std::fs::write(&config_file, pretty).map_err(|e| format!("{}: {e}", config_file.display()))?;
+
+    Ok(())
+}
+
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
 /// `--help` de cada CLI; las que no se pudieron comprobar se dejan vacías.
 pub fn builtins() -> Vec<AgentSpec> {
@@ -365,6 +454,7 @@ pub fn builtins() -> Vec<AgentSpec> {
             "claude" => Some(McpStyle::ClaudeJson),
             "codex" => Some(McpStyle::CodexConfig),
             "opencode" => Some(McpStyle::OpenCodeEnv),
+            "agy" => Some(McpStyle::AgyConfig),
             _ => None,
         },
         install_hint: Some(hint.into()),
@@ -838,6 +928,12 @@ mod tests {
                 .id,
             "opencode"
         );
+        assert_eq!(
+            planner_agent(&agents, &installed(&["agy"]), Some("agy"))
+                .unwrap()
+                .id,
+            "agy"
+        );
         // Uno que no está instalado o no existe: el de serie.
         let only_claude = installed(&["claude"]);
         assert_eq!(
@@ -1130,6 +1226,74 @@ mod tests {
             opencode.ends_with(" opencode --standalone --continue"),
             "{opencode}"
         );
+        let agy = get("agy");
+        assert_eq!(agy.mcp_style, Some(McpStyle::AgyConfig));
+        let agy_home =
+            std::env::temp_dir().join(format!("forge-agy-mcp-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&agy_home);
+        let agy_cmd = agy.with_mcp_at("agy --continue", &server, false, Some(&agy_home));
+        assert_eq!(agy_cmd, "agy --continue");
+        let written =
+            std::fs::read_to_string(agy_home.join(".gemini/config/mcp_config.json")).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(
+            json["mcpServers"]["forge"]["command"].as_str(),
+            Some("/Apps/Forge/forge")
+        );
+        let args: Vec<&str> = json["mcpServers"]["forge"]["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(args, vec!["mcp"]);
+        let _ = std::fs::remove_dir_all(&agy_home);
+    }
+
+    #[test]
+    fn ensure_agy_mcp_preserves_other_servers() {
+        let home = std::env::temp_dir().join(format!("forge-agy-preserve-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let cfg_dir = home.join(".gemini").join("config");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let existing = serde_json::json!({
+            "mcpServers": {
+                "sqlite": {
+                    "command": "sqlite-mcp",
+                    "args": ["mydb.sqlite"]
+                }
+            },
+            "customSetting": true
+        });
+        std::fs::write(
+            cfg_dir.join("mcp_config.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let server = McpServer {
+            name: "forge".into(),
+            command: "/usr/local/bin/forge".into(),
+            args: vec!["mcp".into(), "--project".into(), "/my/proj".into()],
+        };
+        ensure_agy_mcp(&home, &server).unwrap();
+
+        let updated_text = std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap();
+        let updated: serde_json::Value = serde_json::from_str(&updated_text).unwrap();
+        assert_eq!(updated["customSetting"], true);
+        assert_eq!(updated["mcpServers"]["sqlite"]["command"], "sqlite-mcp");
+        assert_eq!(
+            updated["mcpServers"]["forge"]["command"],
+            "/usr/local/bin/forge"
+        );
+        let forge_args: Vec<&str> = updated["mcpServers"]["forge"]["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(forge_args, vec!["mcp"]);
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
