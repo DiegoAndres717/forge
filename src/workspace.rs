@@ -1009,6 +1009,8 @@ impl Workspace {
         if spec.is_some() {
             // Los avisos del agente dicen de qué terminal vienen (p. ej. el de límite).
             env.insert("FORGE_PANEL".into(), id.to_string());
+            let session_id = forge_core::store::session_id_for_panel(std::process::id(), id);
+            env.insert("FORGE_SESSION_ID".into(), session_id);
         }
         if let Some(a) = &account {
             env.extend(a.env());

@@ -373,6 +373,7 @@ fn gate(
     }
     // pre-push: las referencias a subir llegan por stdin.
     let mut push_range = None;
+    let mut push_branch = None;
     if hook && stage == Stage::Push {
         let mut input = String::new();
         let _ = std::io::stdin().read_to_string(&mut input);
@@ -386,6 +387,7 @@ fn gate(
             return Ok(0);
         }
         push_range = hooks::push_range(&input);
+        push_branch = hooks::push_branch(&input);
     }
     let store = open_store();
     let (exceptions, evidence) = match &store {
@@ -407,6 +409,29 @@ fn gate(
         "1",
         &format!("Forge Guard · {} · {}", project.name(), stage.label()),
     ));
+    if stage == Stage::Push
+        && let Ok(store) = &store
+    {
+        let branch = push_branch.or_else(|| {
+            forge_core::git::status(project_dir)
+                .ok()
+                .and_then(|s| s.branch)
+        });
+        let agents = branch
+            .as_deref()
+            .map(|b| store.other_agents_on_branch(project_dir, b))
+            .unwrap_or_default();
+        if let (Some(b), false) = (&branch, agents.is_empty()) {
+            out.line(&out.paint(
+                "33;1",
+                &tr!(
+                    "  ⚠ Advertencia: otra sesión de agente ({agents}) está activa en la rama «{branch}».",
+                    agents = agents.join(", "),
+                    branch = b,
+                ),
+            ));
+        }
+    }
     let options = RunOptions {
         env: project.config.environment.clone(),
         exceptions,
@@ -1056,6 +1081,13 @@ fn plans_cli(
                     None => tr!("Plan #{id} «{title}» en progreso.", id = plan.id, title = plan.title),
                 })
                 .collect();
+            if let Some(warning) = forge_core::git::status(project)
+                .ok()
+                .and_then(|s| s.branch)
+                .and_then(|b| forge_core::mcp::branch_warning(&store, project, &b))
+            {
+                lines.insert(0, warning);
+            }
             if !lines.is_empty() {
                 lines.push(tr!("Si este trabajo avanza un plan: tacha cada tarea al terminarla (plan_update), sin esperar a que te lo pidan; Forge da la fase por hecha cuando su rama llega a main.").into());
             }

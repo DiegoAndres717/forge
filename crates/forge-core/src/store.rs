@@ -733,6 +733,20 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
 
+    /// Agentes de las otras sesiones activas en esta rama (sin contar la actual), sin repetir.
+    pub fn other_agents_on_branch(&self, project: &Path, branch: &str) -> Vec<String> {
+        let me = current_session_id();
+        let mut agents: Vec<String> = self
+            .active_agent_sessions_on_branch(project, branch, me.as_deref())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.agent)
+            .collect();
+        agents.sort();
+        agents.dedup();
+        agents
+    }
+
     /// Todas las sesiones activas en el repositorio del proyecto.
     pub fn active_agent_sessions(&self, project: &Path) -> Result<Vec<ActiveAgentSession>> {
         let _ = self.prune_stale_agent_sessions(30);
@@ -760,6 +774,19 @@ impl Store {
             .map_err(err)?;
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
+}
+
+/// Identificador de sesión para un panel de un proceso de Forge.
+pub fn session_id_for_panel(app_pid: u32, panel_id: u64) -> String {
+    format!("{app_pid}:{panel_id}")
+}
+
+/// Sesión del agente actual: la que Forge pone en el entorno de cada terminal de agente.
+pub fn current_session_id() -> Option<String> {
+    std::env::var("FORGE_SESSION_ID")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// "hace 5 min", "hace 2 h", "hace 3 días".
@@ -1066,5 +1093,27 @@ mod tests {
             .unwrap();
         assert_eq!(after_prune.len(), 1);
         assert_eq!(after_prune[0].id, "s1");
+
+        // Exclusión con formato compuesto <app_pid>:<panel> o panel simple
+        let comp_id = session_id_for_panel(9999, 42);
+        assert_eq!(comp_id, "9999:42");
+        store
+            .register_agent_session(&comp_id, p, "feat/comp", "claude", None)
+            .unwrap();
+        // Solo se excluye la sesión exacta: "42" puede ser el panel de otra instancia
+        let res = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("42"))
+            .unwrap();
+        assert_eq!(res.len(), 1);
+        // Excluyendo con "9999:42" debe excluir "9999:42"
+        let res2 = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("9999:42"))
+            .unwrap();
+        assert!(res2.is_empty());
+        // Excluyendo con otro panel ("43") no lo excluye
+        let res3 = store
+            .active_agent_sessions_on_branch(p, "feat/comp", Some("43"))
+            .unwrap();
+        assert_eq!(res3.len(), 1);
     }
 }

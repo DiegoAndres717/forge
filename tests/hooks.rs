@@ -94,6 +94,7 @@ fn isolate(cmd: &mut Command) {
     for var in [
         "FORGE_APPROVALS",
         "FORGE_APP_PID",
+        "FORGE_SESSION_ID",
         "FORGE_SHIMS",
         "FORGE_READ_SHIMS",
         "FORGE_EVENTS",
@@ -631,6 +632,67 @@ fn specialist_reviewers_by_path() {
         passed.contains("migración aprobada por el DBA")
             && passed.contains("Comparación de revisores: coinciden"),
         "{passed}"
+    );
+}
+
+#[test]
+fn branch_conflict_warning_in_guard_push_and_reminder() {
+    let repo = Repo::new("conflict");
+    repo.ok("git", &["checkout", "-b", "feat/conflict"]);
+    repo.write("a.txt", "cambio");
+    repo.ok("git", &["add", "."]);
+    repo.ok("git", &["commit", "-m", "cambio"]);
+
+    // Sin otra sesión: guard push no muestra advertencia de colisión
+    let out = repo.ok(FORGE, &["guard", "push"]);
+    assert!(!out.contains("Advertencia: otra sesión de agente"), "{out}");
+
+    // Reminder sin otra sesión: no muestra aviso
+    let out_rem = repo.ok(FORGE, &["plans", "reminder"]);
+    assert!(
+        !out_rem.contains("ATENCIÓN: otra sesión de agente"),
+        "{out_rem}"
+    );
+
+    // Registramos otra sesión en la base de datos de Forge para esta misma rama
+    let store = forge_core::store::Store::open(&repo.db).unwrap();
+    store
+        .register_agent_session("other-agent-1", &repo.dir, "feat/conflict", "claude", None)
+        .unwrap();
+
+    // Guard push muestra la advertencia
+    let out_conflict = repo.ok(FORGE, &["guard", "push"]);
+    assert!(
+        out_conflict
+            .contains("otra sesión de agente (claude) está activa en la rama «feat/conflict»")
+            || out_conflict
+                .contains("another agent session (claude) is active on branch \"feat/conflict\""),
+        "{out_conflict}"
+    );
+
+    // Plans reminder muestra la advertencia
+    let rem_conflict = repo.ok(FORGE, &["plans", "reminder"]);
+    assert!(
+        rem_conflict.contains(
+            "otra sesión de agente (claude) está activa en la misma rama «feat/conflict»"
+        ) || rem_conflict.contains(
+            "another agent session (claude) is active on the same branch \"feat/conflict\""
+        ),
+        "{rem_conflict}"
+    );
+
+    // Con sesión propia excluida (FORGE_SESSION_ID="other-agent-1"), no advierte
+    let mut cmd = Command::new(FORGE);
+    isolate(&mut cmd);
+    cmd.args(["guard", "push"])
+        .current_dir(&repo.dir)
+        .env("FORGE_DB", &repo.db)
+        .env("FORGE_SESSION_ID", "other-agent-1");
+    let output = cmd.output().unwrap();
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !text.contains("otra sesión de agente") && !text.contains("another agent session"),
+        "{text}"
     );
 }
 
