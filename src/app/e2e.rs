@@ -1799,6 +1799,7 @@ fn the_app_closes_phases_whose_branch_reached_main() {
         status: "doing".into(),
         branch: Some("feat/uno".into()),
         tasks: Vec::new(),
+        ..Default::default()
     };
     store
         .set_phases(Some(&dir), id, &[phase], "claude-code")

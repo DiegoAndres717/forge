@@ -1028,6 +1028,7 @@ mod tests {
             status: "doing".into(),
             branch: Some("feat/uno".into()),
             tasks: Vec::new(),
+            ..Default::default()
         };
         store
             .set_phases(Some(&dir), id, &[phase], "claude-code")

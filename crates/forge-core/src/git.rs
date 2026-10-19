@@ -267,6 +267,11 @@ fn commit(repo: &Path, r: &str) -> Option<String> {
     .map(|s| s.trim().to_string())
 }
 
+/// Resuelve la punta de `branch` (local o remota) como hash completo.
+pub fn resolve_commit(repo: &Path, branch: &str) -> Option<String> {
+    commit(repo, branch).or_else(|| commit(repo, &format!("origin/{branch}")))
+}
+
 /// ¿Ya está en la rama principal todo lo de `branch`? Vale con squash, merge o rebase.
 /// `None` si no se sabe (no existe la rama o no hay rama principal).
 pub fn branch_merged(repo: &Path, branch: &str) -> Option<bool> {
@@ -275,7 +280,7 @@ pub fn branch_merged(repo: &Path, branch: &str) -> Option<bool> {
 
 /// Como `branch_merged`, con la rama principal ya resuelta (`main_branch`).
 pub fn branch_merged_into(repo: &Path, base: &str, branch: &str) -> Option<bool> {
-    let tip = commit(repo, branch).or_else(|| commit(repo, &format!("origin/{branch}")))?;
+    let tip = resolve_commit(repo, branch)?;
     if git(repo, &["merge-base", "--is-ancestor", &tip, base]).is_ok() {
         // Ya alcanzable: fusionada con un merge, salvo que la punta esté en la línea
         // principal (creada desde main sin commits propios).
