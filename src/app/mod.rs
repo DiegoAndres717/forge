@@ -1686,6 +1686,10 @@ impl eframe::App for App {
 
     fn on_exit(&mut self) {
         self.save();
+        // Que otras sesiones no vean avisos de agentes que se cierran con la app.
+        if let Some(store) = &self.store {
+            let _ = store.remove_app_sessions(std::process::id());
+        }
         for ws in &self.workspaces {
             ws.save_session_notes();
         }
