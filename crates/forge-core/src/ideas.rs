@@ -273,7 +273,16 @@ impl Store {
     pub fn close_merged(&self, project: &Path) -> Result<Vec<String>, String> {
         let mut closed = Vec::new();
         let mut base = None;
-        for idea in self.list_ideas(Some(project), false)? {
+        // Incluye los planes terminados: sus puntas también cuentan.
+        let ideas = self.list_ideas(Some(project), true)?;
+        // Puntas con las que ya se cerró alguna fase del proyecto: otra rama que sigue
+        // en una de ellas se creó desde esa fase y aún no tiene commits propios.
+        let mut taken: std::collections::HashMap<String, String> = ideas
+            .iter()
+            .flat_map(|i| &i.phases)
+            .filter_map(|p| Some((p.branch_tip.clone()?, p.branch.clone()?)))
+            .collect();
+        for idea in ideas.into_iter().filter(|i| i.status != "done") {
             let mut phases = idea.phases;
             let mut changed = false;
             for n in 0..phases.len() {
@@ -297,25 +306,19 @@ impl Store {
                 if crate::git::branch_merged_into(project, base, &branch) != Some(true) {
                     continue;
                 }
-                // Si la punta no se movió desde que se asignó, el contenido en main
-                // viene de otra rama (p. ej. una ya fusionada con squash), no de esta.
-                if phases[n].branch_tip.as_deref() == Some(&tip) {
-                    continue;
-                }
-                // Si la rama apunta a la misma punta que una fase anterior del plan,
-                // se creó desde esa fase y aún no tiene commits propios.
-                let matches_earlier_phase = phases[..n].iter().any(|prev| {
-                    prev.branch_tip.as_deref() == Some(&tip)
-                        || prev
-                            .branch
-                            .as_deref()
-                            .and_then(|b| crate::git::resolve_commit(project, b))
-                            .as_deref()
-                            == Some(&tip)
+                // Lo que hay en main vino de otra rama (p. ej. una ya fusionada con squash):
+                // la punta es la de una fase ya cerrada o la de una fase anterior del plan.
+                let from_earlier_phase = phases[..n].iter().any(|prev| {
+                    prev.branch
+                        .as_deref()
+                        .and_then(|b| crate::git::resolve_commit(project, b))
+                        .as_deref()
+                        == Some(&tip)
                 });
-                if matches_earlier_phase {
+                if taken.get(&tip).is_some_and(|b| *b != branch) || from_earlier_phase {
                     continue;
                 }
+                taken.insert(tip.clone(), branch.clone());
                 let phase = &mut phases[n];
                 phase.status = "done".into();
                 phase.branch_tip = Some(tip);
@@ -410,11 +413,9 @@ impl Store {
                 phase.branch = None;
                 phase.branch_tip = None;
             } else {
-                let is_different = phase.branch.as_deref() != Some(branch);
-                if is_different || phase.branch_tip.is_none() {
-                    // Guardar la punta de la rama al asignarla: la fase no se cerrará
-                    // si la rama no tiene commits propios desde que se le asignó.
-                    phase.branch_tip = project.and_then(|p| crate::git::resolve_commit(p, branch));
+                // La punta guardada es la de esta rama al cerrarse: con otra rama no aplica.
+                if phase.branch.as_deref() != Some(branch) {
+                    phase.branch_tip = None;
                 }
                 phase.branch = Some(branch.to_string());
             }
@@ -786,28 +787,51 @@ mod tests {
             "solo feat/uno debe cerrarse; feat/tres apunta a una fase anterior"
         );
 
-        // Si un agente actualiza el plan completo mediante set_phases (p. ej. plan_update phases):
-        // la punta guardada branch_tip no debe borrarse:
-        let plan3 = store.get_idea(p, id3).unwrap().unwrap();
-        assert!(plan3.phases[0].branch_tip.is_some());
-        // Simular llamada MCP con fases que no traen branch_tip explícito:
-        let incoming = vec![Phase {
-            title: "Tres modificada".into(),
-            branch: Some("feat/tres".into()),
-            status: "doing".into(),
+        // Si un agente reescribe las fases (plan_update phases) sin traer branch_tip,
+        // la punta de las fases cerradas se conserva.
+        let before = store.get_idea(p, id).unwrap().unwrap();
+        assert!(before.phases[0].branch_tip.is_some());
+        let incoming: Vec<Phase> = before
+            .phases
+            .iter()
+            .map(|ph| Phase {
+                branch_tip: None,
+                ..ph.clone()
+            })
+            .collect();
+        store.set_phases(p, id, &incoming, "claude-code").unwrap();
+        let after = store.get_idea(p, id).unwrap().unwrap();
+        assert_eq!(after.phases[0].branch_tip, before.phases[0].branch_tip);
+        assert!(store.close_merged(&dir).unwrap().is_empty());
+    }
+
+    #[test]
+    fn phase_whose_branch_is_assigned_after_its_commits_still_closes() {
+        // Muchos agentes asignan la rama a la fase al final, con los commits ya hechos.
+        let dir = crate::git::test_repo(
+            "close-assigned-late",
+            "git switch -qc feat/x && echo 2 > b && git add -A && git commit -qm x",
+        );
+        let store = Store::in_memory().unwrap();
+        let p = Some(dir.as_path());
+        let id = store.add_idea(p, "Plan", "", "claude-code").unwrap();
+        store
+            .set_phases(p, id, &[Phase::new("X")], "claude-code")
+            .unwrap();
+        let change = PhaseChange {
+            branch: Some("feat/x"),
             ..Default::default()
-        }];
-        store.set_phases(p, id3, &incoming, "claude-code").unwrap();
-        let updated3 = store.get_idea(p, id3).unwrap().unwrap();
-        assert_eq!(
-            updated3.phases[0].branch_tip, plan3.phases[0].branch_tip,
-            "branch_tip se preserva en actualizaciones completas de fases"
-        );
-        let closed3_again = store.close_merged(&dir).unwrap();
-        assert!(
-            closed3_again.is_empty(),
-            "sigue sin cerrarse sin commits propios"
-        );
+        };
+        store.update_phase(p, id, 0, change, "claude-code").unwrap();
+        let merge = "git switch -q main && git merge -q --squash feat/x && git commit -qm 'x (#1)'";
+        let ok = Command::new("sh")
+            .args(["-c", merge])
+            .current_dir(&dir)
+            .status()
+            .unwrap();
+        assert!(ok.success());
+        let closed = store.close_merged(&dir).unwrap();
+        assert_eq!(closed, vec![format!("#{id} phase 1 (feat/x)")]);
     }
 
     #[test]
