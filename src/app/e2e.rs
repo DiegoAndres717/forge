@@ -2292,3 +2292,55 @@ fn memory_stays_flat_inner() {
     // historial) pasaría de largo.
     assert!(grown < 40, "la memoria creció {grown} MB en 40 terminales");
 }
+
+/// Si otra sesión de agente trabaja en la misma rama, la cabecera del panel muestra una advertencia.
+#[test]
+fn branch_conflict_shows_warning_in_panel_header() {
+    let _serial = serial();
+    let dir = project("branch-conflict-ui");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AgentClick("fake".into(), false), area);
+    h.run_steps(3);
+
+    // Registramos otra sesión en la base de datos de Forge en la rama actual ("main")
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .register_agent_session("other-session-codex", &dir, "main", "codex", None)
+        .unwrap();
+
+    h.state_mut().last_sessions_sync = None;
+    h.run_steps(3);
+
+    // El widget_info o texto accesible de la cabecera del panel muestra la advertencia
+    assert!(
+        h.query_by_label_contains("Otra sesión de codex").is_some()
+            || h.query_by_label_contains("Another session of codex")
+                .is_some(),
+        "muestra el aviso de colisión en la cabecera"
+    );
+
+    // Si la otra sesión se elimina
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .remove_agent_session("other-session-codex")
+        .unwrap();
+    h.state_mut().last_sessions_sync = None;
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Otra sesión de codex").is_none()
+            && h.query_by_label_contains("Another session of codex")
+                .is_none()
+    );
+}

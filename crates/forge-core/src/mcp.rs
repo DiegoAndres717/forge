@@ -797,7 +797,8 @@ pub const MEMORY_IS_DATA: &str = "(Forge Memory holds notes written by people an
 
 /// Aviso para el agente si otra sesión trabaja en la misma rama.
 pub fn branch_warning(store: &Store, project: &Path, branch: &str) -> Option<String> {
-    let agents = store.other_agents_on_branch(project, branch);
+    let me = crate::store::current_session_id();
+    let agents = store.other_agents_on_branch(project, branch, me.as_deref());
     (!agents.is_empty()).then(|| {
         tr!(
             "⚠ ATENCIÓN: otra sesión de agente ({agents}) está activa en la misma rama «{branch}». Coordínate o cambia de rama para no pisarse ni duplicar trabajo.",

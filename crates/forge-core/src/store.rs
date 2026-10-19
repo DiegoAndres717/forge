@@ -689,6 +689,16 @@ impl Store {
             .map_err(err)
     }
 
+    /// Quita las sesiones de los paneles de una instancia de Forge (al cerrarse la app).
+    pub fn remove_app_sessions(&self, app_pid: u32) -> Result<usize> {
+        self.conn
+            .execute(
+                "DELETE FROM agent_sessions WHERE id LIKE ?1",
+                params![format!("{app_pid}:%")],
+            )
+            .map_err(err)
+    }
+
     /// Limpia sesiones que no han emitido latido en más de `max_age_secs` segundos.
     pub fn prune_stale_agent_sessions(&self, max_age_secs: i64) -> Result<usize> {
         let threshold = now() - max_age_secs;
@@ -733,11 +743,15 @@ impl Store {
         rows.collect::<rusqlite::Result<_>>().map_err(err)
     }
 
-    /// Agentes de las otras sesiones activas en esta rama (sin contar la actual), sin repetir.
-    pub fn other_agents_on_branch(&self, project: &Path, branch: &str) -> Vec<String> {
-        let me = current_session_id();
+    /// Agentes de las otras sesiones activas en esta rama (sin contar `me`), sin repetir.
+    pub fn other_agents_on_branch(
+        &self,
+        project: &Path,
+        branch: &str,
+        me: Option<&str>,
+    ) -> Vec<String> {
         let mut agents: Vec<String> = self
-            .active_agent_sessions_on_branch(project, branch, me.as_deref())
+            .active_agent_sessions_on_branch(project, branch, me)
             .unwrap_or_default()
             .into_iter()
             .map(|s| s.agent)
@@ -1028,6 +1042,21 @@ mod tests {
         assert_eq!(ago(now()), "hoy");
         assert_eq!(ago(now() - 86_400), "ayer");
         assert_eq!(ago(now() - 5 * 86_400), "hace 5 días");
+    }
+
+    #[test]
+    fn quitting_forge_removes_only_its_own_sessions() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/forge");
+        for id in ["100:1", "100:2", "200:1"] {
+            store
+                .register_agent_session(id, p, "main", "claude", None)
+                .unwrap();
+        }
+        assert_eq!(store.remove_app_sessions(100).unwrap(), 2);
+        let left = store.active_agent_sessions(p).unwrap();
+        assert_eq!(left.len(), 1);
+        assert_eq!(left[0].id, "200:1");
     }
 
     #[test]
