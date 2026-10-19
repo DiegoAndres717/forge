@@ -251,6 +251,12 @@ pub fn run(args: &[String]) -> i32 {
         ),
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
         (Some("mcp"), _) => open_store().and_then(|store| {
+            // Sin --project (agy guarda una configuración para todos los proyectos): el de la
+            // terminal de Forge que abrió el agente, no la carpeta donde se lance el servidor.
+            let project = match std::env::var_os("FORGE_PROJECT") {
+                Some(p) if flag(args, "--project").is_none() => PathBuf::from(p),
+                _ => project.clone(),
+            };
             forge_core::mcp::serve(&project, &store, forge_core::mcp::Modes::from_args(args))
                 .map(|_| 0)
                 .map_err(|e| e.to_string())

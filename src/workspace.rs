@@ -1046,6 +1046,15 @@ impl Workspace {
                 state.command.clone()
             }
             (Some(spec), Some(command), Some(server)) => Some(spec.with_mcp(command, &server)),
+            // Memoria apagada: que agy (configuración global) deje de recibir la de Forge.
+            (Some(spec), Some(_), None)
+                if spec.mcp_style == Some(forge_core::agents::McpStyle::AgyConfig) =>
+            {
+                if let Some(home) = forge_core::home_dir() {
+                    let _ = forge_core::agents::remove_agy_mcp(&home);
+                }
+                state.command.clone()
+            }
             _ => state.command.clone(),
         };
         // Y que el agente avise él mismo al terminar o al necesitar al usuario.

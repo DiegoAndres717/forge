@@ -381,23 +381,47 @@ fn spanish_hint_finds_the_english_note_by_meaning() {
     assert!(hint.contains("CRLF") && !hint.contains("afplay"), "{hint}");
 }
 
+/// agy guarda una sola configuración para todos los proyectos (`forge mcp` sin
+/// `--project`): el servidor toma el proyecto de la terminal de Forge que abrió el agente,
+/// no de la carpeta en la que agy lo lance.
 #[test]
-fn agy_mcp_config_registers_and_connects() {
-    let base = std::env::temp_dir().join(format!("forge-it-agy-mcp-{}", std::process::id()));
+fn mcp_without_project_flag_uses_the_forge_terminal_project() {
+    let base = std::env::temp_dir().join(format!("forge-it-mcp-env-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
-    let home = base.join("home");
-    let server = forge_core::agents::McpServer {
-        name: "forge".into(),
-        command: FORGE.into(),
-        args: vec!["mcp".into(), "--project".into(), "/my/proj".into()],
-    };
-    forge_core::agents::ensure_agy_mcp(&home, &server).unwrap();
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(project.join(".forge")).unwrap();
+    std::fs::write(
+        project.join(".forge/project.toml"),
+        "[project]\nname = \"Ganaderia\"\n",
+    )
+    .unwrap();
+    let elsewhere = base.join("otra");
+    std::fs::create_dir_all(&elsewhere).unwrap();
 
-    let cfg_file = home.join(".gemini/config/mcp_config.json");
-    assert!(cfg_file.exists());
-    let content = std::fs::read_to_string(&cfg_file).unwrap();
-    let json: Value = serde_json::from_str(&content).unwrap();
-    assert_eq!(json["mcpServers"]["forge"]["command"], FORGE);
-    assert_eq!(json["mcpServers"]["forge"]["args"], json!(["mcp"]));
+    let mut child = Command::new(FORGE)
+        .arg("mcp")
+        .current_dir(&elsewhere)
+        .env("FORGE_DB", base.join("forge.db"))
+        .env("FORGE_PROJECT", &project)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    for message in [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "agy", "version": "1"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "project_context", "arguments": {}}}),
+    ] {
+        writeln!(stdin, "{message}").unwrap();
+    }
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    drop(stdin);
+    let _ = child.wait();
+    assert!(line.contains("Ganaderia"), "{line}");
     let _ = std::fs::remove_dir_all(&base);
 }
