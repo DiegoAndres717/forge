@@ -2823,7 +2823,7 @@ impl Workspace {
                     .agents
                     .iter()
                     .find(|s| &s.id == agent)
-                    .is_some_and(|s| matches!(s.program(), "claude" | "codex" | "opencode")) =>
+                    .is_some_and(|s| theme::has_agent_logo(s.program())) =>
             {
                 let program = self
                     .project

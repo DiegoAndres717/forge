@@ -306,6 +306,14 @@ pub fn hairline(ui: &Ui, rect: Rect, vertical: bool) {
     }
 }
 
+/// Agentes con logo propio (los demás usan el icono genérico).
+pub fn has_agent_logo(program: &str) -> bool {
+    matches!(
+        program,
+        "claude" | "codex" | "opencode" | "gemini" | "qwen" | "agy"
+    )
+}
+
 /// Logo del agente en el hueco del icono de la fila (atenuado si no está instalado).
 pub fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
     let tint = if dim {
@@ -316,6 +324,9 @@ pub fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
     let png: &[u8] = match program {
         "claude" => include_bytes!("../assets/agents/claude.png"),
         "opencode" => include_bytes!("../assets/agents/opencode.png"),
+        "gemini" => include_bytes!("../assets/agents/gemini.png"),
+        "qwen" => include_bytes!("../assets/agents/qwen.png"),
+        "agy" => include_bytes!("../assets/agents/agy.png"),
         _ => {
             // Codex: la marca de OpenAI (nudo de seis trazos) sobre fondo negro.
             let painter = ui.painter();

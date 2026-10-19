@@ -393,7 +393,7 @@ impl App {
                 ),
                 None => tr!("{p0} no está instalado", p0 = agent.program()),
             };
-            let has_logo = matches!(agent.program(), "claude" | "codex" | "opencode");
+            let has_logo = theme::has_agent_logo(agent.program());
             let glyph = if has_logo { "" } else { icon::ROBOT };
             let row = theme::row(
                 ui,
