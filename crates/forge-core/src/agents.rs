@@ -223,11 +223,23 @@ impl AgentSpec {
         }
     }
 
-    /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code y
-    /// `notify` en Codex, que llaman a `forge agent-event`. Otros agentes, sin cambios.
+    /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code,
+    /// `notify` en Codex, y hooks de ciclo de vida en Antigravity (`hooks.json`), que llaman a `forge agent-event`.
+    /// Otros agentes, sin cambios.
     /// `has_mod`: el mod de Forge para Claude Code se carga en las terminales de Forge
     /// (CLAUDE_CODE_PLUGIN_DIRS) y avisa él mismo; sin él, hooks de Claude por --settings.
     pub fn with_events(&self, command: &str, forge: &str, has_mod: bool) -> String {
+        self.with_events_at(command, forge, has_mod, None)
+    }
+
+    /// Como `with_events`, permitiendo especificar una carpeta `home` (para pruebas).
+    pub fn with_events_at(
+        &self,
+        command: &str,
+        forge: &str,
+        has_mod: bool,
+        home: Option<&Path>,
+    ) -> String {
         let flags = match self.mcp_style {
             Some(McpStyle::ClaudeJson) if has_mod => return command.to_string(),
             Some(McpStyle::ClaudeJson) => {
@@ -241,9 +253,15 @@ impl AgentSpec {
                     serde_json::to_string(&[forge, "agent-event", "stop"]).unwrap_or_default();
                 format!("-c {}", quote(&format!("notify={notify}")))
             }
+            Some(McpStyle::AgyConfig) => {
+                let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
+                if let Some(h) = home_path {
+                    let _ = ensure_agy_hooks(&h, forge);
+                }
+                return command.to_string();
+            }
             // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
-            // agy se añade en la fase 2.
-            Some(McpStyle::OpenCodeEnv | McpStyle::AgyConfig) | None => return command.to_string(),
+            Some(McpStyle::OpenCodeEnv) | None => return command.to_string(),
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -320,7 +338,7 @@ impl AgentSpec {
     pub fn sends_events(&self) -> bool {
         matches!(
             self.mcp_style,
-            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig)
+            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig | McpStyle::AgyConfig)
         )
     }
 
@@ -378,7 +396,7 @@ pub fn template() -> String {
 /// y los modos le llegan al servidor por el entorno de la terminal de Forge.
 pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
     let entry = serde_json::json!({"command": server.command, "args": ["mcp"]});
-    edit_agy_config(home, |servers| {
+    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
         let changed = servers.get(&server.name) != Some(&entry);
         servers.insert(server.name.clone(), entry);
         changed
@@ -387,16 +405,21 @@ pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
 
 /// Quita el servidor `forge` de la configuración de agy (memoria apagada u otro proveedor).
 pub fn remove_agy_mcp(home: &Path) -> Result<(), String> {
-    edit_agy_config(home, |servers| servers.remove("forge").is_some())
+    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
+        servers.remove("forge").is_some()
+    })
 }
 
-/// Cambia `mcpServers` de la configuración de agy. Si el archivo no se entiende (p. ej. con
-/// comentarios) no se toca: reescribirlo perdería los servidores del usuario.
-fn edit_agy_config(
+/// Cambia el objeto `key` de un archivo de configuración de agy (`~/.gemini/config/<name>`).
+/// Si el archivo no se entiende (p. ej. con comentarios) no se toca: reescribirlo perdería
+/// lo que el usuario tenga ahí.
+fn edit_agy_json(
     home: &Path,
+    name: &str,
+    key: &str,
     change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
 ) -> Result<(), String> {
-    let file = home.join(".gemini/config/mcp_config.json");
+    let file = home.join(".gemini/config").join(name);
     let text = std::fs::read_to_string(&file).unwrap_or_default();
     let mut root: serde_json::Value = if text.trim().is_empty() {
         serde_json::json!({})
@@ -406,10 +429,10 @@ fn edit_agy_config(
     let servers = root
         .as_object_mut()
         .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
-        .entry("mcpServers")
+        .entry(key)
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
-        .ok_or_else(|| format!("{}: mcpServers is not an object", file.display()))?;
+        .ok_or_else(|| format!("{}: {key} is not an object", file.display()))?;
     if !change(servers) {
         return Ok(());
     }
@@ -424,6 +447,25 @@ fn edit_agy_config(
         let _ = std::fs::remove_file(&tmp);
     }
     written.map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// Registra el hook `Stop` de Antigravity CLI (`agy`) en `~/.gemini/config/hooks.json`, un
+/// hook con nombre (`forge-events`) junto a los del usuario: llama a `forge agent-event stop`
+/// al terminar cada turno. Fuera de una terminal de Forge ese comando no hace nada.
+pub fn ensure_agy_hooks(home: &Path, forge: &str) -> Result<(), String> {
+    // agy lo ejecuta con `sh -c` en Unix y con `cmd /c` en Windows (sin comillas simples).
+    let program = if powershell() {
+        format!("\"{forge}\"")
+    } else {
+        posix_quote(forge)
+    };
+    let stop =
+        serde_json::json!([{"type": "command", "command": format!("{program} agent-event stop")}]);
+    edit_agy_json(home, "hooks.json", "forge-events", |hooks| {
+        let changed = hooks.get("Stop") != Some(&stop);
+        hooks.insert("Stop".into(), stop);
+        changed
+    })
 }
 
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
@@ -1319,6 +1361,58 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
             broken
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn ensure_agy_hooks_preserves_other_hooks_and_registers_stop() {
+        let home = std::env::temp_dir().join(format!("forge-agy-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let cfg_dir = home.join(".gemini").join("config");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let existing = serde_json::json!({
+            "my-linter": {
+                "PostToolUse": [{ "type": "command", "command": "./lint.sh" }]
+            }
+        });
+        std::fs::write(
+            cfg_dir.join("hooks.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let agy = builtins().into_iter().find(|a| a.id == "agy").unwrap();
+        assert!(agy.sends_events());
+        let cmd = agy.with_events_at("agy", "/bin/forge", false, Some(&home));
+        assert_eq!(cmd, "agy");
+
+        let updated_text = std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap();
+        let updated: serde_json::Value = serde_json::from_str(&updated_text).unwrap();
+        assert!(updated["my-linter"]["PostToolUse"].is_array());
+        let stop_cmd = updated["forge-events"]["Stop"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert_eq!(stop_cmd, "'/bin/forge' agent-event stop");
+
+        // En Windows agy lo ejecuta con `cmd /c`, que no entiende las comillas simples.
+        PS.with(|c| c.set(true));
+        ensure_agy_hooks(&home, r"C:\Program Files\Forge\forge.exe").unwrap();
+        PS.with(|c| c.set(false));
+        let updated: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            updated["forge-events"]["Stop"][0]["command"],
+            r#""C:\Program Files\Forge\forge.exe" agent-event stop"#
+        );
+
+        // Un hooks.json que no se entiende no se pisa.
+        std::fs::write(cfg_dir.join("hooks.json"), "{ // x").unwrap();
+        assert!(ensure_agy_hooks(&home, "/bin/forge").is_err());
+        assert_eq!(
+            std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap(),
+            "{ // x"
         );
         let _ = std::fs::remove_dir_all(&home);
     }

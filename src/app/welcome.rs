@@ -24,7 +24,7 @@ fn steps() -> [(&'static str, &'static str, &'static str); 4] {
             icon::ROBOT,
             tr!("Agentes con memoria"),
             tr!(
-                "Claude Code y Codex abiertos desde Forge comparten la Memoria y las Ideas del proyecto (⌘⇧M, ⌘⇧I): recuerdan decisiones, anotan pendientes y los tachan. Te avisan cuando terminan o te necesitan."
+                "Claude Code, Codex y Antigravity abiertos desde Forge comparten la Memoria y las Ideas del proyecto (⌘⇧M, ⌘⇧I): recuerdan decisiones, anotan pendientes y los tachan. Te avisan cuando terminan o te necesitan."
             ),
         ),
         (
