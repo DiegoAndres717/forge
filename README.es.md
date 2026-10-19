@@ -14,7 +14,7 @@ Terminales, procesos, agentes, **Forge Memory** y un Guard que revisa cada cambi
 ![Rust](https://img.shields.io/badge/hecho%20con-Rust-orange?logo=rust)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue)](LICENSE)
 
-[Descargar](#instalar) · [Funciones](#funciones) · [Cómo funciona](#cómo-funciona) · [Mod de Claude Code](#mod-de-claude-code) · [Atajos](#atajos-de-teclado) · [Preguntas](#preguntas-frecuentes) · [English](README.md)
+[⚡ Instalación en 30s](#-instalación-en-30-segundos) · [Por qué Forge](#por-qué-forge) · [Comparativa](#comparativa-con-otras-herramientas) · [Funciones](#funciones) · [Cómo funciona](#cómo-funciona) · [Mod de Claude Code](#mod-de-claude-code) · [Roadmap](ROADMAP.es.md) · [Preguntas](#preguntas-frecuentes) · [English](README.md)
 
 <img src="docs/demo.gif" width="900" alt="Demo de Forge">
 
@@ -22,14 +22,65 @@ Terminales, procesos, agentes, **Forge Memory** y un Guard que revisa cada cambi
 
 ---
 
+## ⚡ Instalación en 30 segundos
+
+Pega el comando correspondiente a tu sistema operativo:
+
+```sh
+# macOS y Linux (Terminal)
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.ps1 | iex
+
+# Homebrew (macOS)
+brew install --cask diegoandres717/tap/forge
+```
+
+> Se instala en menos de 30 segundos: descarga la última versión verificada, comprueba su SHA-256, enlaza `forge` a tu PATH y evita el bloqueo de Gatekeeper en macOS. Vuelve a ejecutarlo para actualizar. [Más opciones de instalación abajo](#instalar).
+
+---
+
 ## Por qué Forge
 
-Cuando trabajas con Claude Code, Codex u OpenCode, el día se reparte entre pestañas de terminal, servidores de desarrollo, notas y "¿pasaron los tests antes del push?". Forge reúne cada proyecto en un solo lugar:
+Programar con agentes de IA autónomos (Claude Code, Codex, OpenCode, Gemini CLI...) es completamente diferente al desarrollo tradicional. Ya no pasas horas escribiendo código repetitivo, sino orquestando agentes, supervisando procesos de fondo, revisando diffs y asegurando que la calidad se mantenga intacta.
 
-- **Abres una carpeta y recuperas todo**: terminales, divisiones, servidores y agentes tal como los dejaste.
-- **Agentes que planifican y recuerdan**: los planes por fases, el backlog y Forge Memory (la memoria del proyecto) se comparten con todos los agentes vía MCP.
-- **Nada sale roto**: Project Guard aplica tus reglas (tamaño, secretos, lint, tests, build) antes de cada commit, push y pull request.
-- **Nativo y ligero**: escrito en Rust con interfaz dibujada en GPU; sin Electron ni navegador embebido.
+Las herramientas tradicionales dejan este flujo fragmentado:
+- **Dispersión en terminales:** Servidores de desarrollo, tests y sesiones largas con agentes terminan repartidos entre pestañas desorganizadas. Si reinicias la máquina, pierdes la disposición de trabajo y el contexto.
+- **Contexto olvidado entre sesiones:** Al alternar entre Claude Code y Codex, o al iniciar una nueva conversación, el agente olvida las decisiones arquitectónicas previas, los fallos resueltos y las convenciones del proyecto.
+- **Ejecución rápida sin control de calidad:** Los agentes autónomos avanzan a gran velocidad, pero pueden enviar código roto a Git, incluir credenciales `.env`, saltarse suites de tests o consumir presupuestos caros de tokens explorando carpetas triviales.
+
+**Forge te ofrece un espacio de trabajo nativo por proyecto:**
+1. **Estado de trabajo persistente:** Abre cualquier carpeta y recupera tus terminales apiladas, divisiones, procesos en ejecución y sesiones de agentes exactamente como los dejaste.
+2. **Cerebro compartido del proyecto (Forge Memory y Planes):** Todos los agentes leen y escriben en la misma memoria persistente y plan por fases vía MCP, almacenado fuera del repositorio Git.
+3. **Seguridad determinista (Project Guard):** Cada commit, push y PR se prueba y valida en una copia aislada antes de salir de tu equipo, bloqueando fugas de secretos, tests rotos y cambios indebidos.
+4. **Optimización de costes y cuotas:** Ahorra hasta un 70% de tokens en Claude Code delegando automáticamente la exploración y revisión en subagentes más económicos (Haiku / Sonnet), y gestiona múltiples cuentas sin fricción.
+5. **Rendimiento nativo por GPU:** Construido 100% en Rust con interfaz dibujada en GPU (egui). Arranque instantáneo, sin sobrecarga de Electron y perfectamente integrado en macOS.
+
+---
+
+## Comparativa con otras herramientas
+
+| Capacidad | Forge | Emuladores de terminal (Warp, iTerm2, Ghostty) | IDEs con IA (Cursor, Windsurf, VS Code) | Agente CLI solo (Claude Code, Codex) |
+|---|:---:|:---:|:---:|:---:|
+| **Arquitectura** | Rust nativo (GPU, ~20 MB) | Nativo / Rust / Swift | Pesado (Electron / Chromium) | CLI headless / Node.js |
+| **Enfoque principal** | Orquestación de agentes y control de calidad | Ejecución interactiva de comandos | Edición y autocompletado en editor | Ejecución del agente en terminal |
+| **Memoria de proyecto entre agentes (MCP)** | ✅ Sí (Forge Memory) | ❌ No | ❌ No | ❌ No (aislada por herramienta) |
+| **Project Guard antes de commits/push** | ✅ Sí (worktree aislado) | ❌ No | ❌ No | ❌ No |
+| **Planes por fases y backlog fuera del repo** | ✅ Sí | ❌ No | ❌ No | ❌ No |
+| **Procesos en segundo plano y puertos** | ✅ Sí (con comprobaciones de salud) | ❌ No (pestañas sueltas) | ⚠️ Parcial (tareas / terminal) | ❌ No |
+| **Delegación económica a subagentes** | ✅ Sí (mod automático) | ❌ No | ❌ No | ❌ Manual |
+| **Múltiples cuentas y medidores de cuota** | ✅ Sí | ❌ No | ❌ No | ❌ Cerrar/iniciar sesión |
+| **Enlace con editor externo (`⌘⇧E`)** | ✅ Abre Cursor, VS Code, Zed | ❌ No | N/A | ❌ No |
+
+### Forge frente a agentes CLI (Claude Code, Codex, OpenCode)
+Forge **no** sustituye a los agentes: es su centro de mando. Potencia las herramientas de línea de comandos dándoles un espacio persistente, ahorro de costes mediante subagentes, seguimiento de cuotas en vivo, memoria compartida por MCP y validación automática antes de cada commit.
+
+### Forge frente a terminales inteligentes (Warp, iTerm2, Ghostty)
+Las terminales ofrecen una línea de comandos. Forge ofrece un **espacio consciente de tu proyecto**: los procesos de fondo se gestionan con detección de puertos, los comandos peligrosos se interceptan y los agentes comparten las convenciones del proyecto en cada sesión.
+
+### Forge frente a IDEs con IA (Cursor, Windsurf, VS Code)
+Los IDEs se centran en la edición manual con autocompletado de IA. Forge está diseñado para el **flujo de trabajo autónomo de agentes**. Cuando necesitas edición manual intensiva, pulsa `⌘⇧E` para abrir el proyecto al instante en Cursor, VS Code o Zed.
 
 ## Funciones
 
@@ -245,6 +296,22 @@ Por proyecto, en `.forge/` (súbelo al repo para compartirlo con tu equipo):
 La configuración global está en `~/.config/forge/config.toml` (fuentes y más). Planes, memoria e historial se guardan en la base de datos de Forge, nunca en el repo.
 
 La referencia completa de la CLI está en el [README en inglés](README.md#configuration) y en `forge help`.
+
+## Roadmap
+
+Forge se desarrolla en público. Consulta nuestro [Roadmap público](ROADMAP.es.md) para ver todos los detalles del progreso actual y futuras versiones:
+
+- 🟢 **Disponible:** Comandos MCP, Forge Memory, Project Guard, gestión de múltiples cuentas, vista previa en Linux y Windows, delegación económica a subagentes.
+- 🟡 **En desarrollo:** Notarización con Apple Developer, firma Authenticode en Windows, visor visual de diffs en Project Guard, divisiones multiventana.
+- 🔮 **Planificado:** Espacios de trabajo remotos por SSH o contenedores, sincronización cifrada de memoria en equipo, motor de plugins para Guard.
+
+## Contribuir y Good first issues
+
+¡Las contribuciones son bienvenidas! Si buscas un punto de partida accesible:
+
+- Explora los issues etiquetados como [**good first issue**](https://github.com/DiegoAndres717/forge/labels/good%20first%20issue) en GitHub.
+- Revisa la guía en [`docs/good-first-issues.md`](docs/good-first-issues.md) con tareas listas para implementar y referencias al código.
+- Consulta [`AGENTS.md`](AGENTS.md) y [`skills/`](skills/) para conocer las convenciones del código, tests y flujo de ramas/PRs.
 
 ## Preguntas frecuentes
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Forge Public Roadmap
+    url: https://github.com/DiegoAndres717/forge/blob/main/ROADMAP.md
+    about: Check planned features and milestones before opening a new issue.
+  - name: Good First Issues
+    url: https://github.com/DiegoAndres717/forge/labels/good%20first%20issue
+    about: Browse issues curated for first-time contributors.

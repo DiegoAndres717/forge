@@ -14,7 +14,7 @@ Terminals, processes, agents, **Forge Memory** and a Guard that checks every cha
 ![Rust](https://img.shields.io/badge/built%20with-Rust-orange?logo=rust)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Download](#install) · [Features](#features) · [How it works](#how-it-works) · [Claude Code mod](#claude-code-mod) · [Shortcuts](#keyboard-shortcuts) · [FAQ](#faq) · [Español](README.es.md)
+[⚡ 30s Install](#-30-second-install) · [Why Forge?](#why-forge) · [Comparison](#how-forge-compares) · [Features](#features) · [How it works](#how-it-works) · [Claude Code mod](#claude-code-mod) · [Roadmap](ROADMAP.md) · [FAQ](#faq) · [Español](README.es.md)
 
 <img src="docs/demo.gif" width="900" alt="Forge demo">
 
@@ -22,14 +22,65 @@ Terminals, processes, agents, **Forge Memory** and a Guard that checks every cha
 
 ---
 
+## ⚡ 30-second install
+
+Paste the command for your operating system:
+
+```sh
+# macOS & Linux (Terminal)
+curl -fsSL https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.sh | sh
+
+# Windows (PowerShell)
+irm https://raw.githubusercontent.com/DiegoAndres717/forge/main/scripts/install.ps1 | iex
+
+# Homebrew (macOS)
+brew install --cask diegoandres717/tap/forge
+```
+
+> Installs in under 30 seconds: downloads the latest verified release, checks SHA-256, links `forge` to your PATH, and avoids macOS Gatekeeper blocks. Run it again anytime to update. [More install options below](#install).
+
+---
+
 ## Why Forge
 
-When you work with Claude Code, Codex or OpenCode, your day is scattered across terminal tabs, dev servers, notes and "did the tests pass before I pushed?". Forge puts each project in one place:
+Building software with autonomous AI agents (Claude Code, Codex, OpenCode, Gemini CLI...) is fundamentally different from traditional coding. You spend less time writing repetitive code and more time orchestrating agents, supervising background processes, reviewing diffs, and keeping code quality intact.
 
-- **Open a folder, get your setup back** — terminals, splits, running dev servers and agents, exactly as you left them.
-- **Agents that plan and remember** — phased plans, the backlog and Forge Memory (the project memory) are shared with every agent through MCP.
-- **Nothing ships broken** — Project Guard runs your rules (size, secrets, lint, tests, build) before each commit, push and pull request.
-- **Native and light** — written in Rust with a GPU-rendered UI; no Electron, no embedded browser.
+Traditional tools leave this workflow fragmented:
+- **Terminal sprawl:** Background dev servers, test runners, and long-running agent sessions end up scattered across unorganized tabs. If your machine restarts, your workspace setup and agent context are lost.
+- **Forgotten context between sessions:** When switching between Claude Code, Codex, or opening a fresh conversation, the agent forgets previous architectural decisions, fixed errors, and project conventions.
+- **Fast execution without quality gates:** Autonomous agents work at high speed, but can push broken code, commit secret `.env` credentials, bypass test suites, or burn through expensive token budgets on trivial directory exploration.
+
+**Forge gives you one dedicated native workspace per project:**
+1. **Persistent Workspace State:** Reopen any project folder and instantly restore your stacked terminals, splits, running processes, and agent sessions exactly where you left them.
+2. **Shared Project Brain (Forge Memory & Plans):** Agents read and write the same persistent memory and phased roadmap over MCP, stored cleanly outside the Git repository.
+3. **Deterministic Safety (Project Guard):** Every commit, push, and PR is tested and validated in an isolated worktree before leaving your machine—catching secret leaks, failing tests, and unauthorized file edits.
+4. **Agent Cost & Quota Optimization:** Save up to 70% of Claude Code tokens by automatically delegating code exploration and test review to cheaper subagents (Haiku / Sonnet), while managing multiple accounts seamlessly.
+5. **Native GPU Performance:** Built 100% in Rust with an immediate-mode GPU-rendered UI (egui). Instant launch, zero Electron memory overhead, and smooth macOS desktop integration.
+
+---
+
+## How Forge compares
+
+| Capability | Forge | Terminal Emulators (Warp, iTerm2, Ghostty) | AI IDEs (Cursor, Windsurf, VS Code) | CLI Agent alone (Claude Code, Codex) |
+|---|:---:|:---:|:---:|:---:|
+| **Architecture** | Native Rust (GPU, ~20 MB) | Native / Rust / Swift | Heavyweight (Electron / Chromium) | Headless CLI / Node.js |
+| **Primary focus** | Agent orchestration & project safety | Interactive shell execution | Inline code editing & autocompletion | Autonomous terminal execution |
+| **Cross-agent project memory (MCP)** | ✅ Yes (Forge Memory) | ❌ No | ❌ No | ❌ No (isolated per tool) |
+| **Deterministic pre-commit Guard** | ✅ Yes (isolated worktree) | ❌ No | ❌ No | ❌ No |
+| **Phased plans & backlog (off-repo)** | ✅ Yes | ❌ No | ❌ No | ❌ No |
+| **Managed background processes & ports** | ✅ Yes (with health checks) | ❌ No (raw tabs) | ⚠️ Partial (tasks / terminal) | ❌ No |
+| **Subagent cost routing (Haiku/Sonnet)** | ✅ Yes (automatic mod) | ❌ No | ❌ No | ❌ Manual |
+| **Multi-account switching & quota meters** | ✅ Yes | ❌ No | ❌ No | ❌ Sign in / out |
+| **External editor bridge (`⌘⇧E`)** | ✅ Opens Cursor, VS Code, Zed | ❌ No | N/A | ❌ No |
+
+### Forge vs. CLI Agents (Claude Code, Codex, OpenCode)
+Forge is **not** an agent replacement—it is their command center. It supercharges CLI agents with a persistent workspace, cost-saving subagent routing, live quota tracking, cross-session memory via MCP, and automatic pre-commit verification.
+
+### Forge vs. Smart Terminals (Warp, iTerm2, Ghostty)
+Terminals give you a shell. Forge gives you a **project-aware workspace**: background processes stay organized with port detection, dangerous commands are intercepted, and agents share project conventions across every session.
+
+### Forge vs. AI IDEs (Cursor, Windsurf, VS Code)
+IDEs are built around writing code manually with inline AI autocomplete. Forge is built around **autonomous agent workflows and orchestration**. When you do need heavy manual file editing, press `⌘⇧E` to instantly open your current project in Cursor, VS Code, or Zed.
 
 ## Features
 
@@ -263,6 +314,22 @@ forge mcp                             MCP server for agents
 Run `forge help` for every option.
 
 </details>
+
+## Roadmap
+
+Forge is developed openly in public. See our full [Public Roadmap](ROADMAP.md) for details on current progress and future milestones:
+
+- 🟢 **Shipped:** MCP commands, Forge Memory, Project Guard, multi-account manager, Linux & Windows preview, subagent cost delegation.
+- 🟡 **In Progress:** Apple Developer notarization, Windows Authenticode signing, Project Guard visual diff viewer, multi-window splits.
+- 🔮 **Planned:** Remote SSH / container workspaces, encrypted team sync for Forge Memory, WebAssembly Guard plugin engine.
+
+## Contributing & Good first issues
+
+Contributions are very welcome! If you are looking for an accessible place to start:
+
+- Browse our [**good first issues**](https://github.com/DiegoAndres717/forge/labels/good%20first%20issue) on GitHub.
+- Read the starter guide in [`docs/good-first-issues.md`](docs/good-first-issues.md) for ready-to-implement tasks with pointers to relevant source files.
+- Review [`AGENTS.md`](AGENTS.md) and [`skills/`](skills/) for coding guidelines, tests, and branch/PR workflows.
 
 ## FAQ
 
