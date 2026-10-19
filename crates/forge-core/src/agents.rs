@@ -416,10 +416,14 @@ fn edit_agy_config(
     // Se escribe aparte y se renombra: agy nunca lee un archivo a medias.
     let dir = file.parent().unwrap_or(home);
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let tmp = file.with_extension("json.forge-tmp");
+    // Con el pid: dos ventanas de Forge que abren agy a la vez no se pisan el temporal.
+    let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, pretty).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &file).map_err(|e| format!("{}: {e}", file.display()))
+    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map_err(|e| format!("{}: {e}", file.display()))
 }
 
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
