@@ -94,6 +94,7 @@ fn isolate(cmd: &mut Command) {
     for var in [
         "FORGE_APPROVALS",
         "FORGE_APP_PID",
+        "FORGE_SESSION_ID",
         "FORGE_SHIMS",
         "FORGE_READ_SHIMS",
         "FORGE_EVENTS",
@@ -682,11 +683,11 @@ fn branch_conflict_warning_in_guard_push_and_reminder() {
 
     // Con sesión propia excluida (FORGE_SESSION_ID="other-agent-1"), no advierte
     let mut cmd = Command::new(FORGE);
+    isolate(&mut cmd);
     cmd.args(["guard", "push"])
         .current_dir(&repo.dir)
         .env("FORGE_DB", &repo.db)
         .env("FORGE_SESSION_ID", "other-agent-1");
-    isolate(&mut cmd);
     let output = cmd.output().unwrap();
     let text = String::from_utf8_lossy(&output.stdout);
     assert!(

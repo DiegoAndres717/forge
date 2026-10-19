@@ -417,24 +417,19 @@ fn gate(
                 .ok()
                 .and_then(|s| s.branch)
         });
-        if let Some(b) = branch {
-            let exclude = forge_core::store::current_session_id();
-            if let Ok(conflicts) =
-                store.active_agent_sessions_on_branch(project_dir, &b, exclude.as_deref())
-                && !conflicts.is_empty()
-            {
-                let mut agents: Vec<&str> = conflicts.iter().map(|s| s.agent.as_str()).collect();
-                agents.sort();
-                agents.dedup();
-                out.line(&out.paint(
-                    "33;1",
-                    &tr!(
-                        "  ⚠ Advertencia: otra sesión de agente ({agents}) está activa en la rama «{branch}».",
-                        agents = agents.join(", "),
-                        branch = b,
-                    ),
-                ));
-            }
+        let agents = branch
+            .as_deref()
+            .map(|b| store.other_agents_on_branch(project_dir, b))
+            .unwrap_or_default();
+        if let (Some(b), false) = (&branch, agents.is_empty()) {
+            out.line(&out.paint(
+                "33;1",
+                &tr!(
+                    "  ⚠ Advertencia: otra sesión de agente ({agents}) está activa en la rama «{branch}».",
+                    agents = agents.join(", "),
+                    branch = b,
+                ),
+            ));
         }
     }
     let options = RunOptions {
@@ -1086,25 +1081,12 @@ fn plans_cli(
                     None => tr!("Plan #{id} «{title}» en progreso.", id = plan.id, title = plan.title),
                 })
                 .collect();
-            if let Some(branch) = forge_core::git::status(project).ok().and_then(|s| s.branch) {
-                let exclude = forge_core::store::current_session_id();
-                if let Ok(conflicts) =
-                    store.active_agent_sessions_on_branch(project, &branch, exclude.as_deref())
-                    && !conflicts.is_empty()
-                {
-                    let mut agents: Vec<&str> =
-                        conflicts.iter().map(|s| s.agent.as_str()).collect();
-                    agents.sort();
-                    agents.dedup();
-                    lines.insert(
-                        0,
-                        tr!(
-                            "⚠ ATENCIÓN: otra sesión de agente ({agents}) está activa en la misma rama «{branch}». Coordínate o cambia de rama para evitar pisaros ni duplicar trabajo.",
-                            agents = agents.join(", "),
-                            branch = branch
-                        ),
-                    );
-                }
+            if let Some(warning) = forge_core::git::status(project)
+                .ok()
+                .and_then(|s| s.branch)
+                .and_then(|b| forge_core::mcp::branch_warning(&store, project, &b))
+            {
+                lines.insert(0, warning);
             }
             if !lines.is_empty() {
                 lines.push(tr!("Si este trabajo avanza un plan: tacha cada tarea al terminarla (plan_update), sin esperar a que te lo pidan; Forge da la fase por hecha cuando su rama llega a main.").into());

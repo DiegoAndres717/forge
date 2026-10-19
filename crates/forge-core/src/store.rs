@@ -714,12 +714,12 @@ impl Store {
             .prepare(
                 "SELECT id, project_key, branch, agent, pid, updated_at
                  FROM agent_sessions
-                 WHERE project_key = ?1 AND branch = ?2
+                 WHERE project_key = ?1 AND branch = ?2 AND (?3 IS NULL OR id != ?3)
                  ORDER BY updated_at DESC",
             )
             .map_err(err)?;
         let rows = stmt
-            .query_map(params![key, branch.trim()], |r| {
+            .query_map(params![key, branch.trim(), exclude_id], |r| {
                 Ok(ActiveAgentSession {
                     id: r.get(0)?,
                     project_key: r.get(1)?,
@@ -730,19 +730,21 @@ impl Store {
                 })
             })
             .map_err(err)?;
-        let list: Vec<ActiveAgentSession> = rows.collect::<rusqlite::Result<_>>().map_err(err)?;
-        if let Some(ex) = exclude_id.map(str::trim).filter(|s| !s.is_empty()) {
-            Ok(list
-                .into_iter()
-                .filter(|s| {
-                    s.id != ex
-                        && !s.id.ends_with(&format!(":{ex}"))
-                        && !ex.ends_with(&format!(":{}", s.id))
-                })
-                .collect())
-        } else {
-            Ok(list)
-        }
+        rows.collect::<rusqlite::Result<_>>().map_err(err)
+    }
+
+    /// Agentes de las otras sesiones activas en esta rama (sin contar la actual), sin repetir.
+    pub fn other_agents_on_branch(&self, project: &Path, branch: &str) -> Vec<String> {
+        let me = current_session_id();
+        let mut agents: Vec<String> = self
+            .active_agent_sessions_on_branch(project, branch, me.as_deref())
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.agent)
+            .collect();
+        agents.sort();
+        agents.dedup();
+        agents
     }
 
     /// Todas las sesiones activas en el repositorio del proyecto.
@@ -779,20 +781,9 @@ pub fn session_id_for_panel(app_pid: u32, panel_id: u64) -> String {
     format!("{app_pid}:{panel_id}")
 }
 
-/// Identificador de la sesión del agente actual a partir de variables de entorno (si existe).
+/// Sesión del agente actual: la que Forge pone en el entorno de cada terminal de agente.
 pub fn current_session_id() -> Option<String> {
-    if let Ok(id) = std::env::var("FORGE_SESSION_ID") {
-        let trimmed = id.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_string());
-        }
-    }
-    if let (Ok(app_pid), Ok(panel)) = (std::env::var("FORGE_APP_PID"), std::env::var("FORGE_PANEL"))
-        && let (Ok(pid), Ok(p_id)) = (app_pid.trim().parse::<u32>(), panel.trim().parse::<u64>())
-    {
-        return Some(session_id_for_panel(pid, p_id));
-    }
-    std::env::var("FORGE_PANEL")
+    std::env::var("FORGE_SESSION_ID")
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
@@ -1109,11 +1100,11 @@ mod tests {
         store
             .register_agent_session(&comp_id, p, "feat/comp", "claude", None)
             .unwrap();
-        // Excluyendo con "42" (panel simple) debe excluir "9999:42"
+        // Solo se excluye la sesión exacta: "42" puede ser el panel de otra instancia
         let res = store
             .active_agent_sessions_on_branch(p, "feat/comp", Some("42"))
             .unwrap();
-        assert!(res.is_empty());
+        assert_eq!(res.len(), 1);
         // Excluyendo con "9999:42" debe excluir "9999:42"
         let res2 = store
             .active_agent_sessions_on_branch(p, "feat/comp", Some("9999:42"))
