@@ -419,7 +419,7 @@ impl App {
         let Some(i) = self.active else { return };
         let Some((agent, _)) = self.planner(i) else {
             self.error = Some(
-                tr!("Para planificar con IA hace falta Claude Code, Codex u OpenCode instalado")
+                tr!("Para planificar con IA hace falta Claude Code, Codex, OpenCode o Antigravity instalado")
                     .into(),
             );
             return;

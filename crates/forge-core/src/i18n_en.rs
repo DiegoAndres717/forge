@@ -1435,8 +1435,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Agentes con memoria", "Agents with memory"),
     (
-        "Claude Code y Codex abiertos desde Forge comparten la Memoria y las Ideas del proyecto (⌘⇧M, ⌘⇧I): recuerdan decisiones, anotan pendientes y los tachan. Te avisan cuando terminan o te necesitan.",
-        "Claude Code and Codex opened from Forge share the project Memory and Ideas (⌘⇧M, ⌘⇧I): they remember decisions, write down to-dos and check them off. They notify you when they finish or need you.",
+        "Claude Code, Codex y Antigravity abiertos desde Forge comparten la Memoria y las Ideas del proyecto (⌘⇧M, ⌘⇧I): recuerdan decisiones, anotan pendientes y los tachan. Te avisan cuando terminan o te necesitan.",
+        "Claude Code, Codex and Antigravity opened from Forge share the project Memory and Ideas (⌘⇧M, ⌘⇧I): they remember decisions, write down to-dos and check them off. They notify you when they finish or need you.",
     ),
     ("Guard y Git", "Guard and Git"),
     (
@@ -1654,8 +1654,8 @@ pub const EN: &[(&str, &str)] = &[
         "New idea for the backlog… (Enter)",
     ),
     (
-        "Para planificar con IA hace falta Claude Code, Codex u OpenCode instalado",
-        "Planning with AI needs Claude Code, Codex or OpenCode installed",
+        "Para planificar con IA hace falta Claude Code, Codex, OpenCode o Antigravity instalado",
+        "Planning with AI needs Claude Code, Codex, OpenCode or Antigravity installed",
     ),
     ("Planes", "Plans"),
     ("Planes generales", "General plans"),

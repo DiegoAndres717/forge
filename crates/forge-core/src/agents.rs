@@ -223,11 +223,23 @@ impl AgentSpec {
         }
     }
 
-    /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code y
-    /// `notify` en Codex, que llaman a `forge agent-event`. Otros agentes, sin cambios.
+    /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code,
+    /// `notify` en Codex, y hooks de ciclo de vida en Antigravity (`hooks.json`), que llaman a `forge agent-event`.
+    /// Otros agentes, sin cambios.
     /// `has_mod`: el mod de Forge para Claude Code se carga en las terminales de Forge
     /// (CLAUDE_CODE_PLUGIN_DIRS) y avisa él mismo; sin él, hooks de Claude por --settings.
     pub fn with_events(&self, command: &str, forge: &str, has_mod: bool) -> String {
+        self.with_events_at(command, forge, has_mod, None)
+    }
+
+    /// Como `with_events`, permitiendo especificar una carpeta `home` (para pruebas).
+    pub fn with_events_at(
+        &self,
+        command: &str,
+        forge: &str,
+        has_mod: bool,
+        home: Option<&Path>,
+    ) -> String {
         let flags = match self.mcp_style {
             Some(McpStyle::ClaudeJson) if has_mod => return command.to_string(),
             Some(McpStyle::ClaudeJson) => {
@@ -241,9 +253,15 @@ impl AgentSpec {
                     serde_json::to_string(&[forge, "agent-event", "stop"]).unwrap_or_default();
                 format!("-c {}", quote(&format!("notify={notify}")))
             }
+            Some(McpStyle::AgyConfig) => {
+                let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
+                if let Some(h) = home_path {
+                    let _ = ensure_agy_hooks(&h, forge);
+                }
+                return command.to_string();
+            }
             // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
-            // agy se añade en la fase 2.
-            Some(McpStyle::OpenCodeEnv | McpStyle::AgyConfig) | None => return command.to_string(),
+            Some(McpStyle::OpenCodeEnv) | None => return command.to_string(),
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -320,7 +338,7 @@ impl AgentSpec {
     pub fn sends_events(&self) -> bool {
         matches!(
             self.mcp_style,
-            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig)
+            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig | McpStyle::AgyConfig)
         )
     }
 
@@ -417,6 +435,49 @@ fn edit_agy_config(
     let dir = file.parent().unwrap_or(home);
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     // Con el pid: dos ventanas de Forge que abren agy a la vez no se pisan el temporal.
+    let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
+    let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map_err(|e| format!("{}: {e}", file.display()))
+}
+
+/// Registra el hook de ciclo de vida `Stop` para Antigravity CLI (`agy`) en
+/// `~/.gemini/config/hooks.json`, llamando a `forge agent-event stop` cuando termina la ejecución.
+pub fn ensure_agy_hooks(home: &Path, forge: &str) -> Result<(), String> {
+    let file = home.join(".gemini/config/hooks.json");
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut root: serde_json::Value = if text.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?
+    };
+    let forge_events = root
+        .as_object_mut()
+        .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
+        .entry("forge-events")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| format!("{}: forge-events is not an object", file.display()))?;
+
+    let stop_cmd = format!("{} agent-event stop", posix_quote(forge));
+    let stop_handler = serde_json::json!([
+        {
+            "type": "command",
+            "command": stop_cmd,
+        }
+    ]);
+
+    if forge_events.get("Stop") == Some(&stop_handler) {
+        return Ok(());
+    }
+
+    forge_events.insert("Stop".into(), stop_handler);
+
+    let dir = file.parent().unwrap_or(home);
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
     let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
@@ -1320,6 +1381,38 @@ mod tests {
             std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
             broken
         );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn ensure_agy_hooks_preserves_other_hooks_and_registers_stop() {
+        let home = std::env::temp_dir().join(format!("forge-agy-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let cfg_dir = home.join(".gemini").join("config");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let existing = serde_json::json!({
+            "my-linter": {
+                "PostToolUse": [{ "type": "command", "command": "./lint.sh" }]
+            }
+        });
+        std::fs::write(
+            cfg_dir.join("hooks.json"),
+            serde_json::to_string_pretty(&existing).unwrap(),
+        )
+        .unwrap();
+
+        let agy = builtins().into_iter().find(|a| a.id == "agy").unwrap();
+        assert!(agy.sends_events());
+        let cmd = agy.with_events_at("agy", "/bin/forge", false, Some(&home));
+        assert_eq!(cmd, "agy");
+
+        let updated_text = std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap();
+        let updated: serde_json::Value = serde_json::from_str(&updated_text).unwrap();
+        assert!(updated["my-linter"]["PostToolUse"].is_array());
+        let stop_cmd = updated["forge-events"]["Stop"][0]["command"]
+            .as_str()
+            .unwrap();
+        assert!(stop_cmd.contains("forge") && stop_cmd.contains("agent-event stop"));
         let _ = std::fs::remove_dir_all(&home);
     }
 

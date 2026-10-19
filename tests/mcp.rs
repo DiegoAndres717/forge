@@ -425,3 +425,19 @@ fn mcp_without_project_flag_uses_the_forge_terminal_project() {
     assert!(line.contains("Ganaderia"), "{line}");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn agy_hooks_registers_stop_event() {
+    let base = std::env::temp_dir().join(format!("forge-it-agy-hooks-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    forge_core::agents::ensure_agy_hooks(&home, FORGE).unwrap();
+
+    let hooks_file = home.join(".gemini/config/hooks.json");
+    assert!(hooks_file.exists());
+    let content = std::fs::read_to_string(&hooks_file).unwrap();
+    let json: Value = serde_json::from_str(&content).unwrap();
+    let cmd = json["forge-events"]["Stop"][0]["command"].as_str().unwrap();
+    assert!(cmd.contains("agent-event stop"));
+    let _ = std::fs::remove_dir_all(&base);
+}
