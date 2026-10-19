@@ -205,9 +205,14 @@ impl AgentSpec {
                 )
             }
             McpStyle::AgyConfig => {
-                let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
-                if let Some(h) = home_path {
-                    let _ = ensure_agy_mcp(&h, server);
+                // ponytail: un proveedor de memoria externo no se conecta a agy (su
+                // configuración es global y lo pasaría a todos los proyectos).
+                if let Some(h) = home.map(Path::to_path_buf).or_else(crate::home_dir) {
+                    let _ = if server.name == "forge" {
+                        ensure_agy_mcp(&h, server)
+                    } else {
+                        remove_agy_mcp(&h)
+                    };
                 }
                 return command.to_string();
             }
@@ -367,71 +372,58 @@ pub fn template() -> String {
     .into()
 }
 
-/// Registra o actualiza el servidor MCP de Forge en `~/.gemini/config/mcp_config.json` para
-/// Antigravity CLI (`agy`), preservando intactos los demás servidores y opciones existentes.
+/// Conecta el servidor MCP de Forge a Antigravity CLI (`agy`) en su configuración de
+/// usuario, `~/.gemini/config/mcp_config.json`, sin tocar los demás servidores.
+/// La configuración es una para todos los proyectos: solo se guarda `forge mcp`; el proyecto
+/// y los modos le llegan al servidor por el entorno de la terminal de Forge.
 pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
-    let config_dir = home.join(".gemini").join("config");
-    let config_file = config_dir.join("mcp_config.json");
+    let entry = serde_json::json!({"command": server.command, "args": ["mcp"]});
+    edit_agy_config(home, |servers| {
+        let changed = servers.get(&server.name) != Some(&entry);
+        servers.insert(server.name.clone(), entry);
+        changed
+    })
+}
 
-    let mut root: serde_json::Value = if config_file.exists() {
-        let content = std::fs::read_to_string(&config_file)
-            .map_err(|e| format!("{}: {e}", config_file.display()))?;
-        if content.trim().is_empty() {
-            serde_json::json!({})
-        } else {
-            serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
-        }
-    } else {
+/// Quita el servidor `forge` de la configuración de agy (memoria apagada u otro proveedor).
+pub fn remove_agy_mcp(home: &Path) -> Result<(), String> {
+    edit_agy_config(home, |servers| servers.remove("forge").is_some())
+}
+
+/// Cambia `mcpServers` de la configuración de agy. Si el archivo no se entiende (p. ej. con
+/// comentarios) no se toca: reescribirlo perdería los servidores del usuario.
+fn edit_agy_config(
+    home: &Path,
+    change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
+) -> Result<(), String> {
+    let file = home.join(".gemini/config/mcp_config.json");
+    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    let mut root: serde_json::Value = if text.trim().is_empty() {
         serde_json::json!({})
+    } else {
+        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?
     };
-
-    if !root.is_object() {
-        root = serde_json::json!({});
-    }
-
     let servers = root
         .as_object_mut()
-        .unwrap()
+        .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
         .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
-
-    if !servers.is_object() {
-        *servers = serde_json::json!({});
-    }
-
-    // Para la configuración global de agy, omitimos `--project <path>` para que `forge mcp`
-    // detecte dinámicamente el proyecto en el que se ejecuta la sesión.
-    let mut args = Vec::new();
-    let mut skip_next = false;
-    for arg in &server.args {
-        if skip_next {
-            skip_next = false;
-            continue;
-        }
-        if arg == "--project" {
-            skip_next = true;
-            continue;
-        }
-        args.push(arg.clone());
-    }
-
-    let new_entry = serde_json::json!({
-        "command": &server.command,
-        "args": args,
-    });
-
-    let servers_obj = servers.as_object_mut().unwrap();
-    if servers_obj.get(&server.name) == Some(&new_entry) {
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .ok_or_else(|| format!("{}: mcpServers is not an object", file.display()))?;
+    if !change(servers) {
         return Ok(());
     }
-
-    servers_obj.insert(server.name.clone(), new_entry);
-
-    std::fs::create_dir_all(&config_dir).map_err(|e| format!("{}: {e}", config_dir.display()))?;
-    let pretty = serde_json::to_string_pretty(&root).map_err(|e| format!("json error: {e}"))?;
-    std::fs::write(&config_file, pretty).map_err(|e| format!("{}: {e}", config_file.display()))?;
-
-    Ok(())
+    // Se escribe aparte y se renombra: agy nunca lee un archivo a medias.
+    let dir = file.parent().unwrap_or(home);
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    // Con el pid: dos ventanas de Forge que abren agy a la vez no se pisan el temporal.
+    let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
+    let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
+    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map_err(|e| format!("{}: {e}", file.display()))
 }
 
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
@@ -1277,6 +1269,22 @@ mod tests {
             args: vec!["mcp".into(), "--project".into(), "/my/proj".into()],
         };
         ensure_agy_mcp(&home, &server).unwrap();
+        let before = std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap();
+        // Los modos del proyecto llegan por el entorno: la configuración global no los guarda.
+        let with_modes = McpServer {
+            args: vec![
+                "mcp".into(),
+                "--project".into(),
+                "/my/proj".into(),
+                "--tests-first".into(),
+            ],
+            ..server.clone()
+        };
+        ensure_agy_mcp(&home, &with_modes).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
+            before
+        );
 
         let updated_text = std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap();
         let updated: serde_json::Value = serde_json::from_str(&updated_text).unwrap();
@@ -1293,6 +1301,25 @@ mod tests {
             .map(|v| v.as_str().unwrap())
             .collect();
         assert_eq!(forge_args, vec!["mcp"]);
+
+        // Con la memoria apagada se quita `forge` y lo demás queda.
+        remove_agy_mcp(&home).unwrap();
+        let removed: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(removed["mcpServers"].get("forge").is_none());
+        assert_eq!(removed["mcpServers"]["sqlite"]["command"], "sqlite-mcp");
+
+        // Un archivo que no se entiende no se pisa: se perderían los servidores del usuario.
+        let broken = "{ // comentario\n \"mcpServers\": { \"sqlite\": {} } }";
+        std::fs::write(cfg_dir.join("mcp_config.json"), broken).unwrap();
+        assert!(ensure_agy_mcp(&home, &server).is_err());
+        assert!(remove_agy_mcp(&home).is_err());
+        assert_eq!(
+            std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
+            broken
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 
