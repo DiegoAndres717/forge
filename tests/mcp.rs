@@ -380,3 +380,24 @@ fn spanish_hint_finds_the_english_note_by_meaning() {
     let hint = forge(&query);
     assert!(hint.contains("CRLF") && !hint.contains("afplay"), "{hint}");
 }
+
+#[test]
+fn agy_mcp_config_registers_and_connects() {
+    let base = std::env::temp_dir().join(format!("forge-it-agy-mcp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let home = base.join("home");
+    let server = forge_core::agents::McpServer {
+        name: "forge".into(),
+        command: FORGE.into(),
+        args: vec!["mcp".into(), "--project".into(), "/my/proj".into()],
+    };
+    forge_core::agents::ensure_agy_mcp(&home, &server).unwrap();
+
+    let cfg_file = home.join(".gemini/config/mcp_config.json");
+    assert!(cfg_file.exists());
+    let content = std::fs::read_to_string(&cfg_file).unwrap();
+    let json: Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(json["mcpServers"]["forge"]["command"], FORGE);
+    assert_eq!(json["mcpServers"]["forge"]["args"], json!(["mcp"]));
+    let _ = std::fs::remove_dir_all(&base);
+}
