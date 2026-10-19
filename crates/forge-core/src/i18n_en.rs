@@ -2717,4 +2717,9 @@ pub const EN: &[(&str, &str)] = &[
         "  ⚠ Advertencia: otra sesión de agente ({agents}) está activa en la rama «{branch}».",
         "  ⚠ Warning: another agent session ({agents}) is active on branch \"{branch}\".",
     ),
+    ("Otra sesión de {agent}", "Another session of {agent}"),
+    (
+        "Otra sesión de {agent} está activa en esta misma rama",
+        "Another session of {agent} is active on this same branch",
+    ),
 ];

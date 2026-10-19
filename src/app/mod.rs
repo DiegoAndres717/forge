@@ -330,6 +330,8 @@ pub struct App {
     /// (ver `ideas_tick`).
     merged_check: Instant,
     merging: Arc<AtomicBool>,
+    /// Sincronización periódica de paneles de agente activos con agent_sessions.
+    last_sessions_sync: Option<Instant>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
     /// Notificaciones de macOS (desactivadas en tests).
@@ -449,6 +451,7 @@ impl App {
             approvals: Arc::default(),
             approvals_dir: None,
             approval_seen: None,
+            last_sessions_sync: None,
         };
         if let Some(dir) = crate::terminal::SHELL_ENV
             .get()
@@ -1334,6 +1337,58 @@ impl App {
         }
         self.save();
     }
+
+    /// Sincroniza paneles de agente activos con la tabla `agent_sessions` de Forge y detecta colisiones de rama.
+    fn agent_sessions_tick(&mut self, _ctx: &egui::Context) {
+        let stale = self
+            .last_sessions_sync
+            .is_none_or(|t| t.elapsed() > Duration::from_secs(2));
+        if !stale {
+            return;
+        }
+        self.last_sessions_sync = Some(Instant::now());
+        let app_pid = std::process::id();
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+
+        for ws in &mut self.workspaces {
+            // Desregistrar paneles cerrados o terminados
+            for id in ws.take_closed_panels() {
+                let sid = store::session_id_for_panel(app_pid, id);
+                let _ = store.remove_agent_session(&sid);
+            }
+
+            // Registrar / latido de paneles con agente activo
+            let branch = ws.branch();
+            let panels = ws.active_agent_panels();
+            if let Some(ref b) = branch {
+                for (id, agent, pid) in &panels {
+                    let sid = store::session_id_for_panel(app_pid, *id);
+                    let _ = store.register_agent_session(&sid, &ws.project.path, b, agent, *pid);
+                }
+
+                // Consultar colisiones por rama para cada panel
+                let mut conflicts_map = HashMap::new();
+                for (id, _, _) in &panels {
+                    let sid = store::session_id_for_panel(app_pid, *id);
+                    if let Ok(conflicts) =
+                        store.active_agent_sessions_on_branch(&ws.project.path, b, Some(&sid))
+                        && !conflicts.is_empty()
+                    {
+                        let mut names: Vec<String> =
+                            conflicts.into_iter().map(|s| s.agent).collect();
+                        names.sort();
+                        names.dedup();
+                        conflicts_map.insert(*id, names);
+                    }
+                }
+                ws.set_branch_conflicts(conflicts_map);
+            } else {
+                ws.set_branch_conflicts(HashMap::new());
+            }
+        }
+    }
 }
 
 /// Esconde Forge entero (como ⌘H): macOS lo vuelve a mostrar al activarlo desde el Dock.
@@ -1518,6 +1573,7 @@ impl eframe::App for App {
         }
         self.notify_tick(&ctx);
         self.update_tick(&ctx);
+        self.agent_sessions_tick(&ctx);
         // Las ideas visibles se releen cada pocos segundos (los agentes escriben aparte).
         ctx.request_repaint_after(Duration::from_secs(2));
 

@@ -374,6 +374,10 @@ pub struct Workspace {
     next_id: PanelId,
     renaming: Option<(PanelId, String)>,
     branch: (Option<String>, Option<Instant>),
+    /// Colisiones de rama detectadas para cada panel con agente (panel_id -> lista de agentes).
+    pub(crate) branch_conflicts: HashMap<PanelId, Vec<String>>,
+    /// Paneles de agente cerrados (para desregistrar de agent_sessions).
+    pub(crate) closed_panels: Vec<PanelId>,
     /// Última sesión de cada agente en la carpeta (id de agente → sesión), releída cada poco.
     sessions: (HashMap<String, LastSession>, Option<Instant>),
     /// Cuentas de los agentes (todas) y la elegida en este proyecto para cada programa.
@@ -501,6 +505,8 @@ impl Workspace {
             renaming: None,
             tabs: Vec::new(),
             branch: (None, None),
+            branch_conflicts: HashMap::new(),
+            closed_panels: Vec::new(),
             sessions: (HashMap::new(), None),
             accounts: Vec::new(),
             chosen: HashMap::new(),
@@ -1759,6 +1765,46 @@ impl Workspace {
         self.branch.0.clone()
     }
 
+    /// Paneles con agentes activos y sus datos para sincronizar con agent_sessions:
+    /// (panel_id, agent_name, Option<pid>)
+    pub fn active_agent_panels(&mut self) -> Vec<(PanelId, String, Option<u32>)> {
+        let mut list = Vec::new();
+        for (&id, panel) in &mut self.panels {
+            if let Some(agent_id) = &panel.agent
+                && let Content::Shell(term) = &mut panel.content
+                && term.exit_code().is_none()
+            {
+                let name = self
+                    .project
+                    .agents
+                    .iter()
+                    .find(|a| &a.id == agent_id)
+                    .map(|a| a.name.clone())
+                    .unwrap_or_else(|| agent_id.clone());
+                list.push((id, name, term.pid()));
+            }
+        }
+        list
+    }
+
+    /// Paneles cerrados o cuyos procesos de agente ya terminaron (para desregistrarlos de agent_sessions).
+    pub fn take_closed_panels(&mut self) -> Vec<PanelId> {
+        let mut closed = std::mem::take(&mut self.closed_panels);
+        for (&id, panel) in &mut self.panels {
+            if panel.agent.is_some()
+                && let Content::Shell(term) = &mut panel.content
+                && term.exit_code().is_some()
+            {
+                closed.push(id);
+            }
+        }
+        closed
+    }
+
+    pub fn set_branch_conflicts(&mut self, conflicts: HashMap<PanelId, Vec<String>>) {
+        self.branch_conflicts = conflicts;
+    }
+
     fn label(&self, id: PanelId) -> String {
         let Some(p) = self.panels.get(&id) else {
             return String::new();
@@ -1931,6 +1977,8 @@ impl Workspace {
             self.layout.remove(id);
         }
         self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
+        self.closed_panels.push(id);
+        self.branch_conflicts.remove(&id);
         self.limited.retain(|p| *p != id);
         self.compacting.retain(|p| *p != id);
         if self.maximized == Some(id) {
@@ -2816,8 +2864,22 @@ impl Workspace {
         };
         // Rama de Git a la derecha, junto a los botones (se omite si no cabe).
         if let Some(branch) = branch {
-            let text = format!("{}  {branch}", icon::GIT_BRANCH);
-            let galley = painter.layout_no_wrap(text, FontId::proportional(11.5), theme::TEXT_4);
+            let conflict_agents = self.branch_conflicts.get(&id);
+            let has_conflict = conflict_agents.is_some_and(|a| !a.is_empty());
+            let (text, color) = if has_conflict {
+                let agents = conflict_agents.unwrap().join(", ");
+                (
+                    format!(
+                        "{}  {branch}  ⚠ {}",
+                        icon::GIT_BRANCH,
+                        tr!("Otra sesión de {agent}", agent = agents)
+                    ),
+                    theme::ORANGE,
+                )
+            } else {
+                (format!("{}  {branch}", icon::GIT_BRANCH), theme::TEXT_4)
+            };
+            let galley = painter.layout_no_wrap(text, FontId::proportional(11.5), color);
             let max = (right - rect.min.x - 32.0) * 0.45;
             if max > 60.0 {
                 let width = galley.size().x.min(max);
@@ -2828,10 +2890,21 @@ impl Workspace {
                 painter.with_clip_rect(at).galley(
                     egui::pos2(at.min.x, rect.center().y - galley.size().y / 2.0),
                     galley,
-                    theme::TEXT_4,
+                    color,
                 );
-                ui.interact(at, egui::Id::new(("branch", &key, id)), Sense::hover())
-                    .on_hover_text(&branch);
+                let response = ui.interact(at, egui::Id::new(("branch", &key, id)), Sense::hover());
+                if has_conflict {
+                    let agents = conflict_agents.unwrap().join(", ");
+                    let tooltip = tr!(
+                        "Otra sesión de {agent} está activa en esta misma rama",
+                        agent = agents
+                    );
+                    response.on_hover_text(&tooltip).widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Other, true, &tooltip)
+                    });
+                } else {
+                    response.on_hover_text(&branch);
+                }
                 right = at.min.x - 6.0;
             }
         }
