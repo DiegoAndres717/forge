@@ -396,7 +396,7 @@ pub fn template() -> String {
 /// y los modos le llegan al servidor por el entorno de la terminal de Forge.
 pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
     let entry = serde_json::json!({"command": server.command, "args": ["mcp"]});
-    edit_agy_config(home, |servers| {
+    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
         let changed = servers.get(&server.name) != Some(&entry);
         servers.insert(server.name.clone(), entry);
         changed
@@ -405,16 +405,21 @@ pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
 
 /// Quita el servidor `forge` de la configuración de agy (memoria apagada u otro proveedor).
 pub fn remove_agy_mcp(home: &Path) -> Result<(), String> {
-    edit_agy_config(home, |servers| servers.remove("forge").is_some())
+    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
+        servers.remove("forge").is_some()
+    })
 }
 
-/// Cambia `mcpServers` de la configuración de agy. Si el archivo no se entiende (p. ej. con
-/// comentarios) no se toca: reescribirlo perdería los servidores del usuario.
-fn edit_agy_config(
+/// Cambia el objeto `key` de un archivo de configuración de agy (`~/.gemini/config/<name>`).
+/// Si el archivo no se entiende (p. ej. con comentarios) no se toca: reescribirlo perdería
+/// lo que el usuario tenga ahí.
+fn edit_agy_json(
     home: &Path,
+    name: &str,
+    key: &str,
     change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
 ) -> Result<(), String> {
-    let file = home.join(".gemini/config/mcp_config.json");
+    let file = home.join(".gemini/config").join(name);
     let text = std::fs::read_to_string(&file).unwrap_or_default();
     let mut root: serde_json::Value = if text.trim().is_empty() {
         serde_json::json!({})
@@ -424,10 +429,10 @@ fn edit_agy_config(
     let servers = root
         .as_object_mut()
         .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
-        .entry("mcpServers")
+        .entry(key)
         .or_insert_with(|| serde_json::json!({}))
         .as_object_mut()
-        .ok_or_else(|| format!("{}: mcpServers is not an object", file.display()))?;
+        .ok_or_else(|| format!("{}: {key} is not an object", file.display()))?;
     if !change(servers) {
         return Ok(());
     }
@@ -444,47 +449,23 @@ fn edit_agy_config(
     written.map_err(|e| format!("{}: {e}", file.display()))
 }
 
-/// Registra el hook de ciclo de vida `Stop` para Antigravity CLI (`agy`) en
-/// `~/.gemini/config/hooks.json`, llamando a `forge agent-event stop` cuando termina la ejecución.
+/// Registra el hook `Stop` de Antigravity CLI (`agy`) en `~/.gemini/config/hooks.json`, un
+/// hook con nombre (`forge-events`) junto a los del usuario: llama a `forge agent-event stop`
+/// al terminar cada turno. Fuera de una terminal de Forge ese comando no hace nada.
 pub fn ensure_agy_hooks(home: &Path, forge: &str) -> Result<(), String> {
-    let file = home.join(".gemini/config/hooks.json");
-    let text = std::fs::read_to_string(&file).unwrap_or_default();
-    let mut root: serde_json::Value = if text.trim().is_empty() {
-        serde_json::json!({})
+    // agy lo ejecuta con `sh -c` en Unix y con `cmd /c` en Windows (sin comillas simples).
+    let program = if powershell() {
+        format!("\"{forge}\"")
     } else {
-        serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?
+        posix_quote(forge)
     };
-    let forge_events = root
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
-        .entry("forge-events")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: forge-events is not an object", file.display()))?;
-
-    let stop_cmd = format!("{} agent-event stop", posix_quote(forge));
-    let stop_handler = serde_json::json!([
-        {
-            "type": "command",
-            "command": stop_cmd,
-        }
-    ]);
-
-    if forge_events.get("Stop") == Some(&stop_handler) {
-        return Ok(());
-    }
-
-    forge_events.insert("Stop".into(), stop_handler);
-
-    let dir = file.parent().unwrap_or(home);
-    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
-    let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
-    if written.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    written.map_err(|e| format!("{}: {e}", file.display()))
+    let stop =
+        serde_json::json!([{"type": "command", "command": format!("{program} agent-event stop")}]);
+    edit_agy_json(home, "hooks.json", "forge-events", |hooks| {
+        let changed = hooks.get("Stop") != Some(&stop);
+        hooks.insert("Stop".into(), stop);
+        changed
+    })
 }
 
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
@@ -1412,7 +1393,27 @@ mod tests {
         let stop_cmd = updated["forge-events"]["Stop"][0]["command"]
             .as_str()
             .unwrap();
-        assert!(stop_cmd.contains("forge") && stop_cmd.contains("agent-event stop"));
+        assert_eq!(stop_cmd, "'/bin/forge' agent-event stop");
+
+        // En Windows agy lo ejecuta con `cmd /c`, que no entiende las comillas simples.
+        PS.with(|c| c.set(true));
+        ensure_agy_hooks(&home, r"C:\Program Files\Forge\forge.exe").unwrap();
+        PS.with(|c| c.set(false));
+        let updated: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            updated["forge-events"]["Stop"][0]["command"],
+            r#""C:\Program Files\Forge\forge.exe" agent-event stop"#
+        );
+
+        // Un hooks.json que no se entiende no se pisa.
+        std::fs::write(cfg_dir.join("hooks.json"), "{ // x").unwrap();
+        assert!(ensure_agy_hooks(&home, "/bin/forge").is_err());
+        assert_eq!(
+            std::fs::read_to_string(cfg_dir.join("hooks.json")).unwrap(),
+            "{ // x"
+        );
         let _ = std::fs::remove_dir_all(&home);
     }
 
