@@ -1809,7 +1809,7 @@ mod tests {
         "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd()";
 
     /// Proveedor falso (sin gastar) en el shell de `shell_command`: lee el prompt de stdin, lo
-    /// guarda en `save` si se pide y responde `reply` (sin comillas simples).
+    /// guarda en `save` si se pide y responde `reply` (ASCII y sin comillas simples).
     fn fake_command(reply: &str, save: Option<&Path>) -> String {
         if cfg!(windows) {
             let save = save
@@ -2245,7 +2245,8 @@ mod tests {
         config.providers.insert(
             "revisor".into(),
             ProviderDef {
-                command: fake_command("{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"clave expuesta\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"clave en el código\"},{\"severity\":\"warning\",\"file\":\"a.txt\",\"line\":1,\"message\":\"nombre poco claro\"}]}", None),
+                // `ó` (ó) en ASCII: PowerShell escribe stdout en la página de códigos OEM.
+                command: fake_command("{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"clave expuesta\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"clave en el c\\u00f3digo\"},{\"severity\":\"warning\",\"file\":\"a.txt\",\"line\":1,\"message\":\"nombre poco claro\"}]}", None),
                 format: OutputFormat::Text,
                 cost_per_call_usd: 0.10,
                 local: false,

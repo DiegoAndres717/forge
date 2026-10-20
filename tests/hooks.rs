@@ -89,7 +89,7 @@ fn text(out: &Output) -> String {
 
 /// Proveedor de IA falso (sin gastar) en el shell en que Forge ejecuta los comandos (sh en
 /// macOS y Linux, PowerShell en Windows): lee el prompt de stdin, lo guarda en `save` si se
-/// pide y responde `reply` (sin comillas simples).
+/// pide y responde `reply` (ASCII y sin comillas simples: PowerShell escribe en OEM).
 fn fake_provider(reply: &str, save: Option<&Path>) -> String {
     if cfg!(windows) {
         let save = save
