@@ -1,4 +1,3 @@
-#![cfg(unix)]
 // Las órdenes que usa el mod (`forge anchor`, `forge secret`) se ejecutan en la CLI y no
 // abren la app, y los lectores de las terminales de agente piden permiso antes de leer
 // secretos.
@@ -9,26 +8,40 @@ const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
 /// Ejecuta con un tiempo máximo: si abriera la ventana, no terminaría.
 fn run(cmd: &mut Command) -> (i32, String) {
-    use std::os::unix::process::CommandExt;
-    // Sin terminal de control: nada puede preguntar por /dev/tty y quedarse esperando.
-    // SAFETY: setsid entre fork y exec, sin memoria compartida.
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Sin terminal de control: nada puede preguntar por /dev/tty y quedarse esperando.
+        // SAFETY: setsid entre fork y exec, sin memoria compartida.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
     }
     let mut child = cmd
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .stdin(Stdio::null())
         .spawn()
         .unwrap();
     let start = Instant::now();
+    let timeout = Duration::from_secs(if cfg!(windows) { 30 } else { 10 });
     while child.try_wait().unwrap().is_none() {
-        if start.elapsed() > Duration::from_secs(10) {
-            child.kill().unwrap();
-            panic!("{cmd:?} no terminó: ¿abrió la app?");
+        if start.elapsed() > timeout {
+            let _ = child.kill();
+            let out = child.wait_with_output().ok();
+            let (stdout, stderr) = out
+                .as_ref()
+                .map(|o| {
+                    (
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr),
+                    )
+                })
+                .unwrap_or_default();
+            panic!("{cmd:?} no terminó: ¿abrió la app?\nstdout:\n{stdout}\nstderr:\n{stderr}");
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -43,7 +56,7 @@ fn base(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("forge-it-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    dir.canonicalize().unwrap()
+    forge_core::canonical(&dir)
 }
 
 #[test]
@@ -75,6 +88,7 @@ fn mod_commands_run_in_the_cli() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn agent_readers_ask_before_reading_secrets() {
     let dir = base("readers");

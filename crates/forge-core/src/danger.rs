@@ -32,11 +32,15 @@ const SECRET_CASE: &str = "*.env|*.env.*|*/.ssh/*|*.pem|*.key|*.p12|*.pfx|*id_rs
 /// Si `arg` (relativo a `cwd`, con `~`) es un archivo con secretos, cuál.
 pub fn secret_file(arg: &str, cwd: &Path) -> Option<String> {
     let arg = arg.trim_matches(|c| c == '\'' || c == '"');
-    let home = crate::home_dir();
-    let path = match (arg.strip_prefix("~/").or(arg.strip_prefix("~\\")), &home) {
-        (Some(rest), Some(h)) => h.join(rest),
-        _ => cwd.join(arg),
-    };
+    // En minúsculas: Windows y macOS no las distinguen y `.ENV` abre el mismo `.env`.
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let home = crate::home_dir().map(|h| lower(&h));
+    let path = lower(
+        &match (arg.strip_prefix("~/").or(arg.strip_prefix("~\\")), &home) {
+            (Some(rest), Some(h)) => h.join(rest),
+            _ => cwd.join(arg),
+        },
+    );
     let name = path.file_name()?.to_str()?;
     let ext = path
         .extension()
@@ -770,15 +774,18 @@ PATH="$FORGE_SHIMS:${PATH//"$FORGE_SHIMS:"/}"
 /// Git Bash en Windows (el shell de Claude Code allí): su /etc/profile pone /mingw64/bin y
 /// /usr/bin, con el git.exe y el rm.exe de Git, delante del PATH. Bash lee BASH_ENV en los
 /// shells no interactivos (`bash -c`, también con `-l`, tras el perfil): ahí los enlaces de
-/// Guard vuelven a ir primero.
-// ponytail: un Git Bash interactivo no lee BASH_ENV; los lectores de secretos, aún sin
-// probar en Git Bash, no se ponen aquí.
+/// Guard y los lectores de secretos vuelven a ir primero.
 const BASH_ENV: &str = r#"# Generado por Forge: lo lee bash (BASH_ENV) tras el perfil.
 [ -n "$FORGE_USER_BASH_ENV" ] && . "$FORGE_USER_BASH_ENV"
 if [ -n "$FORGE_SHIMS" ]; then
   forge_shims=$(cygpath -u "$FORGE_SHIMS" 2>/dev/null || printf '%s' "$FORGE_SHIMS")
   PATH="$forge_shims:${PATH//"$forge_shims:"/}"
   unset forge_shims
+fi
+if [ -n "$FORGE_ORIGIN" ] && [ -n "$FORGE_READ_SHIMS" ]; then
+  forge_read_shims=$(cygpath -u "$FORGE_READ_SHIMS" 2>/dev/null || printf '%s' "$FORGE_READ_SHIMS")
+  PATH="$forge_read_shims:${PATH//"$forge_read_shims:"/}"
+  unset forge_read_shims
 fi
 "#;
 
@@ -802,6 +809,7 @@ IFS=:
 for d in $PATH; do
   [ "$d" = "$here" ] && continue
   [ -x "$d/{name}" ] && exec "$d/{name}" "$@"
+  [ -x "$d/{name}.exe" ] && exec "$d/{name}.exe" "$@"
 done
 echo "forge: {name} not found" >&2
 exit 127
@@ -1131,6 +1139,11 @@ mod tests {
             "~/.aws/credentials",
             "~/.config/gh/hosts.yml",
             "~/.npmrc",
+            // Windows y macOS no distinguen mayúsculas: `.ENV` abre el mismo archivo.
+            ".ENV",
+            "ID_RSA",
+            "certs/server.PEM",
+            "~/.SSH/id_rsa",
         ] {
             assert!(secret(yes), "{yes} tiene secretos");
         }
@@ -1140,6 +1153,7 @@ mod tests {
             "src/env.rs",
             "~/.ssh/id_ed25519.pub",
             "~/.ssh/known_hosts",
+            ".ENV.EXAMPLE",
             "keys.md",
             "README.md",
         ] {
