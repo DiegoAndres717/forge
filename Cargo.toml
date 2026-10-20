@@ -2,7 +2,7 @@
 members = ["crates/forge-core"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.11.0"
 repository = "https://github.com/DiegoAndres717/forge"
 edition = "2024"
 # Mínimo para compilar (lo exigen egui y otras dependencias): cargo avisa claro con un Rust
