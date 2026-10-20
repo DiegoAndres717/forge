@@ -306,6 +306,9 @@ pub fn run(args: &[String]) -> i32 {
         }
         // ¿Lee un archivo con secretos? (`--path p` o `--command "…"`; el mod de Claude Code
         // lo pregunta antes de Read, Grep y Bash). Sale 0 con el motivo si sí, 1 si no.
+        (Some("secret"), _) if flag(args, "--agent-hook").is_some() => {
+            forge_core::danger::secret_hook_main(&flag(args, "--agent-hook").unwrap_or_default())
+        }
         (Some("secret"), _) => {
             let cwd = std::env::current_dir().unwrap_or_default();
             let found = match (flag(args, "--path"), flag(args, "--command")) {

@@ -251,12 +251,31 @@ impl AgentSpec {
             Some(McpStyle::CodexConfig) => {
                 let notify =
                     serde_json::to_string(&[forge, "agent-event", "stop"]).unwrap_or_default();
-                format!("-c {}", quote(&format!("notify={notify}")))
+                // Antes de cada comando, el hook de secretos (Codex pide confiar en él una vez).
+                // Las cadenas de JSON valen como cadenas de TOML.
+                let json = |s: String| serde_json::to_string(&s).unwrap_or_default();
+                let unix = json(format!("{} secret --agent-hook codex", posix_quote(forge)));
+                let windows = json(format!("\"{forge}\" secret --agent-hook codex"));
+                let hooks = format!(
+                    "hooks.PreToolUse=[{{matcher=\"Bash|exec_command|shell|local_shell\",hooks=[{{type=\"command\",command={unix},commandWindows={windows},timeout=130}}]}}]"
+                );
+                format!(
+                    "-c {} -c {}",
+                    quote(&format!("notify={notify}")),
+                    quote(&hooks)
+                )
             }
             Some(McpStyle::AgyConfig) => {
                 let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
                 if let Some(h) = home_path {
                     let _ = ensure_agy_hooks(&h, forge);
+                }
+                return command.to_string();
+            }
+            None if self.id == "gemini" => {
+                let home_path = home.map(Path::to_path_buf).or_else(crate::home_dir);
+                if let Some(h) = home_path {
+                    let _ = ensure_gemini_hooks(&h, forge);
                 }
                 return command.to_string();
             }
@@ -396,31 +415,42 @@ pub fn template() -> String {
 /// y los modos le llegan al servidor por el entorno de la terminal de Forge.
 pub fn ensure_agy_mcp(home: &Path, server: &McpServer) -> Result<(), String> {
     let entry = serde_json::json!({"command": server.command, "args": ["mcp"]});
-    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
-        let changed = servers.get(&server.name) != Some(&entry);
-        servers.insert(server.name.clone(), entry);
-        changed
-    })
+    edit_json(
+        &home.join(".gemini/config/mcp_config.json"),
+        "mcpServers",
+        |servers| {
+            let changed = servers.get(&server.name) != Some(&entry);
+            servers.insert(server.name.clone(), entry);
+            changed
+        },
+    )
 }
 
 /// Quita el servidor `forge` de la configuración de agy (memoria apagada u otro proveedor).
 pub fn remove_agy_mcp(home: &Path) -> Result<(), String> {
-    edit_agy_json(home, "mcp_config.json", "mcpServers", |servers| {
-        servers.remove("forge").is_some()
-    })
+    edit_json(
+        &home.join(".gemini/config/mcp_config.json"),
+        "mcpServers",
+        |servers| servers.remove("forge").is_some(),
+    )
 }
 
-/// Cambia el objeto `key` de un archivo de configuración de agy (`~/.gemini/config/<name>`).
+/// Cambia el objeto `key` de un archivo JSON de configuración de un agente (agy, Gemini).
 /// Si el archivo no se entiende (p. ej. con comentarios) no se toca: reescribirlo perdería
 /// lo que el usuario tenga ahí.
-fn edit_agy_json(
-    home: &Path,
-    name: &str,
+fn edit_json(
+    file: &Path,
     key: &str,
     change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
 ) -> Result<(), String> {
-    let file = home.join(".gemini/config").join(name);
-    let text = std::fs::read_to_string(&file).unwrap_or_default();
+    // Si es un enlace (gestores de dotfiles), se cambia el archivo al que apunta.
+    let file = &std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
+    // Solo un archivo que no existe cuenta como vacío: si no se puede leer, no se toca.
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", file.display())),
+    };
     let mut root: serde_json::Value = if text.trim().is_empty() {
         serde_json::json!({})
     } else {
@@ -437,12 +467,12 @@ fn edit_agy_json(
         return Ok(());
     }
     // Se escribe aparte y se renombra: agy nunca lee un archivo a medias.
-    let dir = file.parent().unwrap_or(home);
+    let dir = file.parent().unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     // Con el pid: dos ventanas de Forge que abren agy a la vez no se pisan el temporal.
     let tmp = file.with_extension(format!("json.forge-{}", std::process::id()));
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
-    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, &file));
+    let written = std::fs::write(&tmp, pretty).and_then(|()| std::fs::rename(&tmp, file));
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -461,10 +491,57 @@ pub fn ensure_agy_hooks(home: &Path, forge: &str) -> Result<(), String> {
     };
     let stop =
         serde_json::json!([{"type": "command", "command": format!("{program} agent-event stop")}]);
-    edit_agy_json(home, "hooks.json", "forge-events", |hooks| {
-        let changed = hooks.get("Stop") != Some(&stop);
-        hooks.insert("Stop".into(), stop);
-        changed
+    // Antes de leer o ejecutar: pregunta por los archivos con secretos (`forge secret`).
+    let secrets = serde_json::json!([{
+        "matcher": "run_command|view_file|view_file_outline|view_code_item|grep_search|read_file",
+        "hooks": [{"type": "command", "command": format!("{program} secret --agent-hook agy"), "timeout": 130}],
+    }]);
+    edit_json(
+        &home.join(".gemini/config/hooks.json"),
+        "forge-events",
+        |hooks| {
+            let changed =
+                hooks.get("Stop") != Some(&stop) || hooks.get("PreToolUse") != Some(&secrets);
+            hooks.insert("Stop".into(), stop);
+            hooks.insert("PreToolUse".into(), secrets);
+            changed
+        },
+    )
+}
+
+/// Registra en Gemini CLI (`~/.gemini/settings.json`, hooks `BeforeTool`) el hook de Forge
+/// que pregunta antes de leer archivos con secretos, junto a los del usuario. Es global:
+/// fuera de una terminal de agente de Forge, `forge secret --agent-hook` no hace nada.
+pub fn ensure_gemini_hooks(home: &Path, forge: &str) -> Result<(), String> {
+    // Gemini ejecuta los hooks con `sh -c` en Unix y con PowerShell en Windows.
+    let program = if powershell() {
+        format!("& {}", ps_quote(forge))
+    } else {
+        posix_quote(forge)
+    };
+    let ours = serde_json::json!({
+        "matcher": "run_shell_command|read_file|read_many_files|grep_search|search_file_content|glob",
+        "hooks": [{
+            "name": "forge-secrets",
+            "type": "command",
+            "command": format!("{program} secret --agent-hook gemini"),
+            "timeout": 130_000,
+        }],
+    });
+    let is_ours = |g: &serde_json::Value| g["hooks"][0]["name"] == "forge-secrets";
+    edit_json(&home.join(".gemini/settings.json"), "hooks", |hooks| {
+        let before = hooks
+            .entry("BeforeTool")
+            .or_insert_with(|| serde_json::json!([]));
+        let Some(groups) = before.as_array_mut() else {
+            return false;
+        };
+        if groups.contains(&ours) {
+            return false;
+        }
+        groups.retain(|g| !is_ours(g));
+        groups.push(ours.clone());
+        true
     })
 }
 
@@ -1031,10 +1108,16 @@ mod tests {
         assert!(claude.contains("agent-event waiting"));
         assert!(claude.ends_with(" --continue"));
         let codex = get("codex").with_events("codex", "/A/forge", false);
-        assert_eq!(
-            codex,
-            r#"codex -c 'notify=["/A/forge","agent-event","stop"]'"#
+        assert!(
+            codex.starts_with(
+                r#"codex -c 'notify=["/A/forge","agent-event","stop"]' -c 'hooks.PreToolUse="#
+            ),
+            "{codex}"
         );
+        // El hook de secretos, con el formato que se probó con `codex exec` (0.162).
+        assert!(codex.contains(r#"matcher="Bash|exec_command"#), "{codex}");
+        assert!(codex.contains(r#"secret --agent-hook codex"#), "{codex}");
+        assert!(codex.contains("commandWindows="), "{codex}");
         assert_eq!(
             get("opencode").with_events("opencode", "/A/forge", false),
             "opencode"
@@ -1366,6 +1449,44 @@ mod tests {
     }
 
     #[test]
+    fn gemini_gets_the_secrets_hook_next_to_the_users() {
+        let home = std::env::temp_dir().join(format!("forge-gemini-hooks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join(".gemini")).unwrap();
+        let settings = home.join(".gemini/settings.json");
+        let mine = serde_json::json!({"matcher": "write_file", "hooks": [{"name": "mine", "type": "command", "command": "./lint.sh"}]});
+        std::fs::write(
+            &settings,
+            serde_json::json!({"theme": "dark", "hooks": {"BeforeTool": [mine]}}).to_string(),
+        )
+        .unwrap();
+        let gemini = builtins().into_iter().find(|a| a.id == "gemini").unwrap();
+        // Dos veces: el de Forge no se repite.
+        for _ in 0..2 {
+            assert_eq!(
+                gemini.with_events_at("gemini", "/bin/forge", false, Some(&home)),
+                "gemini"
+            );
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
+        assert_eq!(v["theme"], "dark");
+        let before = v["hooks"]["BeforeTool"].as_array().unwrap();
+        assert_eq!(before.len(), 2, "{before:?}");
+        assert_eq!(before[0], mine);
+        assert_eq!(before[1]["hooks"][0]["name"], "forge-secrets");
+        assert_eq!(
+            before[1]["hooks"][0]["command"],
+            "'/bin/forge' secret --agent-hook gemini"
+        );
+        // Un settings.json que no se entiende (p. ej. con comentarios) no se pisa.
+        std::fs::write(&settings, "{ // x").unwrap();
+        gemini.with_events_at("gemini", "/bin/forge", false, Some(&home));
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ // x");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
     fn ensure_agy_hooks_preserves_other_hooks_and_registers_stop() {
         let home = std::env::temp_dir().join(format!("forge-agy-hooks-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&home);
@@ -1394,6 +1515,12 @@ mod tests {
             .as_str()
             .unwrap();
         assert_eq!(stop_cmd, "'/bin/forge' agent-event stop");
+        let pre = &updated["forge-events"]["PreToolUse"][0];
+        assert!(pre["matcher"].as_str().unwrap().contains("view_file"));
+        assert_eq!(
+            pre["hooks"][0]["command"],
+            "'/bin/forge' secret --agent-hook agy"
+        );
 
         // En Windows agy lo ejecuta con `cmd /c`, que no entiende las comillas simples.
         PS.with(|c| c.set(true));
