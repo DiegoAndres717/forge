@@ -248,17 +248,11 @@ impl Terminal {
         if cfg!(windows) {
             // PowerShell 7 si está (si no, Windows PowerShell), con su perfil y el de Forge.
             cmd = CommandBuilder::new(forge_core::powershell());
-            let read_guard = if env.contains_key("FORGE_ORIGIN") {
-                format!("{}\n", forge_core::danger::PWSH_READ_GUARD)
-            } else {
-                String::new()
-            };
             // Tras el perfil: los enlaces de Guard primero y el prompt que avisa la carpeta.
             cmd.args(pwsh_args(&format!(
-                "{}\n{}\n{}{PWSH_INIT}",
+                "{}\n{}\n{PWSH_INIT}",
                 forge_core::danger::PWSH_GUARD,
-                forge_core::danger::PWSH_REMOVE,
-                read_guard,
+                forge_core::danger::PWSH_REMOVE
             )));
         } else if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
             cmd = CommandBuilder::new(cmd.get_shell());
@@ -286,17 +280,11 @@ impl Terminal {
             // Windows: PowerShell, con el perfil del usuario (PATH de nvm, etc.).
             _ if cfg!(windows) => {
                 cmd = CommandBuilder::new(forge_core::powershell());
-                let read_guard = if env.contains_key("FORGE_ORIGIN") {
-                    format!("{}\n", forge_core::danger::PWSH_READ_GUARD)
-                } else {
-                    String::new()
-                };
                 // También aquí los enlaces de Guard primero (el perfil puede reordenar el PATH).
                 let guarded = format!(
-                    "{}\n{}\n{}{command}",
+                    "{}\n{}\n{command}",
                     forge_core::danger::PWSH_GUARD,
-                    forge_core::danger::PWSH_REMOVE,
-                    read_guard,
+                    forge_core::danger::PWSH_REMOVE
                 );
                 cmd.args(["-NoLogo", "-Command", &guarded]);
             }

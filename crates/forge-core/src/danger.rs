@@ -32,11 +32,15 @@ const SECRET_CASE: &str = "*.env|*.env.*|*/.ssh/*|*.pem|*.key|*.p12|*.pfx|*id_rs
 /// Si `arg` (relativo a `cwd`, con `~`) es un archivo con secretos, cuál.
 pub fn secret_file(arg: &str, cwd: &Path) -> Option<String> {
     let arg = arg.trim_matches(|c| c == '\'' || c == '"');
-    let home = crate::home_dir();
-    let path = match (arg.strip_prefix("~/").or(arg.strip_prefix("~\\")), &home) {
-        (Some(rest), Some(h)) => h.join(rest),
-        _ => cwd.join(arg),
-    };
+    // En minúsculas: Windows y macOS no las distinguen y `.ENV` abre el mismo `.env`.
+    let lower = |p: &Path| PathBuf::from(p.to_string_lossy().to_lowercase());
+    let home = crate::home_dir().map(|h| lower(&h));
+    let path = lower(
+        &match (arg.strip_prefix("~/").or(arg.strip_prefix("~\\")), &home) {
+            (Some(rest), Some(h)) => h.join(rest),
+            _ => cwd.join(arg),
+        },
+    );
     let name = path.file_name()?.to_str()?;
     let ext = path
         .extension()
@@ -500,50 +504,6 @@ Set-Item function:global:Remove-Item ([scriptblock]::Create([System.Management.A
 Remove-Variable forgeMeta, forgeBody
 "#;
 
-/// PowerShell: `cat`, `type` y `gc` son alias de Get-Content. En terminales de agente
-/// (`FORGE_ORIGIN`), un proxy global consulta a Forge antes de leer archivos con secretos.
-pub const PWSH_READ_GUARD: &str = r#"$forgeReadMeta = [System.Management.Automation.CommandMetadata]::new((Get-Command Microsoft.PowerShell.Management\Get-Content -CommandType Cmdlet))
-$forgeReadBody = @'
-begin { $forgePath = [System.Collections.Generic.List[string]]::new(); $forgeLiteral = [System.Collections.Generic.List[string]]::new() }
-process { if ($Path) { $forgePath.AddRange([string[]]$Path) }; if ($LiteralPath) { $forgeLiteral.AddRange([string[]]$LiteralPath) } }
-end {
-  if ($env:FORGE_ORIGIN -and $env:FORGE_BIN) {
-    $rawTargets = @($forgePath) + @($forgeLiteral)
-    if ($rawTargets.Count) {
-      $forgeTargets = @()
-      foreach ($t in $rawTargets) {
-        try {
-          $resolved = @($ExecutionContext.SessionState.Path.GetResolvedProviderPathFromPSPath($t))
-          if ($resolved.Count) { $forgeTargets += $resolved } else { $forgeTargets += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($t) }
-        } catch {
-          $forgeTargets += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($t)
-        }
-      }
-      $needsCheck = $false
-      foreach ($target in $forgeTargets) {
-        $leaf = [System.IO.Path]::GetFileName($target)
-        if ($leaf -match '^\.env(\..+)?$' -or $leaf -match '\.(pem|key|p12|pfx|keychain-db|kdbx)$' -or $leaf -match '^(id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials(\.json)?)$' -or $target -match '[/\\](\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config[/\\](gcloud|gh))[/\\]') {
-          $needsCheck = $true
-          break
-        }
-      }
-      if ($needsCheck) {
-        & $env:FORGE_BIN --guard-check-read Get-Content -- @forgeTargets
-        if ($LASTEXITCODE -ne 0) { Write-Error -Category PermissionDenied ('Forge: Get-Content ' + ($forgeTargets -join ', ')); return }
-      }
-    }
-  }
-  $forgeRest = @{} + $PSBoundParameters
-  [void]$forgeRest.Remove('Path'); [void]$forgeRest.Remove('LiteralPath')
-  if ($forgePath.Count) { Microsoft.PowerShell.Management\Get-Content -Path $forgePath @forgeRest }
-  if ($forgeLiteral.Count) { Microsoft.PowerShell.Management\Get-Content -LiteralPath $forgeLiteral @forgeRest }
-  if (-not $forgePath.Count -and -not $forgeLiteral.Count) { Microsoft.PowerShell.Management\Get-Content @forgeRest }
-}
-'@
-Set-Item function:global:Get-Content ([scriptblock]::Create([System.Management.Automation.ProxyCommand]::GetCmdletBindingAttribute($forgeReadMeta) + "`nparam(" + [System.Management.Automation.ProxyCommand]::GetParamBlock($forgeReadMeta) + ")`n" + $forgeReadBody))
-Remove-Variable forgeReadMeta, forgeReadBody
-"#;
-
 /// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
 /// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
 pub const SHIMS_MARKER: &str = ".forge-shims";
@@ -597,26 +557,6 @@ fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
 /// se puede seguir y con 126 si se denegó; lo usa el Remove-Item de PowerShell.
 pub fn guard_check_main(name: &str, args: Vec<String>) -> ! {
     guard(name, &args);
-    std::process::exit(0)
-}
-
-/// Punto de entrada cuando un shell (PowerShell `Get-Content`) consulta si se permite leer
-/// uno o más archivos. Sale con 0 si ninguno contiene secretos o si el usuario autorizó la lectura;
-/// sale con 126 si se denegó.
-pub fn guard_check_read_main(name: &str, files: &[String]) -> ! {
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let agent = std::env::var_os("FORGE_ORIGIN").is_some();
-    if agent {
-        let found = files
-            .iter()
-            .filter(|a| !a.starts_with('-'))
-            .find_map(|a| secret_file(a, &cwd));
-        if let Some(reason) = found {
-            crate::i18n::init_from_store();
-            let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
-            authorize(name, files, reason, cwd, project);
-        }
-    }
     std::process::exit(0)
 }
 
@@ -1199,6 +1139,11 @@ mod tests {
             "~/.aws/credentials",
             "~/.config/gh/hosts.yml",
             "~/.npmrc",
+            // Windows y macOS no distinguen mayúsculas: `.ENV` abre el mismo archivo.
+            ".ENV",
+            "ID_RSA",
+            "certs/server.PEM",
+            "~/.SSH/id_rsa",
         ] {
             assert!(secret(yes), "{yes} tiene secretos");
         }
@@ -1208,6 +1153,7 @@ mod tests {
             "src/env.rs",
             "~/.ssh/id_ed25519.pub",
             "~/.ssh/known_hosts",
+            ".ENV.EXAMPLE",
             "keys.md",
             "README.md",
         ] {
