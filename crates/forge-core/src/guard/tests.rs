@@ -317,10 +317,6 @@ mod unit {
 
     /// Fase 7: los checks prueban el candidato exacto y la evidencia solo vale para él.
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "its checks are sh commands (grep, single quotes); port to Windows: plan #11"
-    )]
     fn checks_run_on_frozen_candidate_and_reuse_evidence() {
         let dir = std::env::temp_dir().join(format!("forge-frozen-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -342,14 +338,14 @@ mod unit {
         );
         sh("echo v0 > a.txt && git add . && git commit -qm inicio");
         sh("echo v1 > a.txt && git add a.txt && echo 'v2 sin preparar' > a.txt");
-        let counter = dir
-            .parent()
-            .unwrap()
-            .join(format!("forge-frozen-count-{}", std::process::id()));
+        // Sin canonicalizar: en Windows sería `\\?\C:\…`, que el `>>` de PowerShell no abre.
+        let counter =
+            std::env::temp_dir().join(format!("forge-frozen-count-{}", std::process::id()));
         let _ = std::fs::remove_file(&counter);
+        // Vale igual en sh y en PowerShell (Windows): `echo >>`, `;` y `git grep`, no `grep`.
         let rules = |_: &Path| -> Rules {
             toml::from_str(&format!(
-                "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = \"echo x >> {} && grep -q v1 a.txt\"\n",
+                "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = '''echo x >> '{}'; git grep --no-index -q v1 a.txt'''\n",
                 counter.display()
             ))
             .unwrap()

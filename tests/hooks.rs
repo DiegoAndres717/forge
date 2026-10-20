@@ -87,6 +87,35 @@ fn text(out: &Output) -> String {
     )
 }
 
+/// Proveedor de IA falso (sin gastar) en el shell en que Forge ejecuta los comandos (sh en
+/// macOS y Linux, PowerShell en Windows): lee el prompt de stdin, lo guarda en `save` si se
+/// pide y responde `reply` (ASCII y sin comillas simples: PowerShell escribe en OEM).
+fn fake_provider(reply: &str, save: Option<&Path>) -> String {
+    if cfg!(windows) {
+        let save = save
+            .map(|p| format!("; Set-Content -LiteralPath '{}' -Value $p", p.display()))
+            .unwrap_or_default();
+        format!(
+            "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd(){save}; echo '{reply}'"
+        )
+    } else {
+        let save = save.map_or("/dev/null".into(), |p| format!("'{}'", p.display()));
+        format!("cat > {save}; echo '{reply}'")
+    }
+}
+
+/// routing.toml con el proveedor `falso` (de pago, barato) en todas las tareas.
+fn routing_with_fake(provider: &str) -> String {
+    format!(
+        "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
+         [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
+         [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
+         [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
+         [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
+         [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
+    )
+}
+
 /// Corriendo `cargo test` dentro de una terminal de Forge, los procesos heredarían la conexión
 /// con la app de verdad (sus solicitudes de autorización le llegarían al usuario y la prueba
 /// esperaría su respuesta) y los shims de Guard en el PATH (backlog #12): se quitan.
@@ -252,19 +281,16 @@ fn secrets_and_push_are_blocked() {
 /// Fase 7: validar una vez y hacer commit reutiliza la evidencia del mismo candidato,
 /// y los checks prueban lo que se commitea aunque haya cambios sin preparar.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "its checks are sh commands (grep, single quotes); port to Windows: plan #11"
-)]
 fn hook_reuses_evidence_of_same_candidate() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("evidence");
+    // Vale igual en sh y en PowerShell (Windows): `echo >>`, `;` y `git grep`, no `grep`.
     let counter = repo.dir.parent().unwrap().join("runs");
     repo.write(
         ".forge/rules.toml",
         &format!(
-            "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = \"echo x >> '{}' && grep -q listo estado.txt\"\n",
+            "[commit]\nrequire_tests = true\n[[checks]]\nid = \"tests\"\ncommand = '''echo x >> '{}'; git grep --no-index -q listo estado.txt'''\n",
             counter.display()
         ),
     );
@@ -304,32 +330,20 @@ fn hook_reuses_evidence_of_same_candidate() {
 
 /// Fase 9: revisión con IA en el hook, con proveedores simulados (sin gastar).
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn ai_review_in_hook_with_fake_providers() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("ai");
-    let verdict_file = repo.dir.parent().unwrap().join("veredicto");
-    std::fs::write(&verdict_file, "approve").unwrap();
-    let provider = format!(
-        "cat > /dev/null; v=$(cat '{}'); echo \"{{\\\"verdict\\\":\\\"$v\\\",\\\"confidence\\\":0.9,\\\"summary\\\":\\\"revisado\\\",\\\"findings\\\":[]}}\"",
-        verdict_file.display()
-    );
+    let routing = |verdict: &str| {
+        routing_with_fake(&fake_provider(
+            &format!(
+                "{{\"verdict\":\"{verdict}\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}}"
+            ),
+            None,
+        ))
+    };
     repo.write(".forge/rules.toml", "[commit]\nrequire_ai_review = true\n");
-    repo.write(
-        ".forge/routing.toml",
-        &format!(
-            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
-             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
-             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
-        ),
-    );
+    repo.write(".forge/routing.toml", &routing("approve"));
     assert!(repo.forge(&["hooks", "install"]).status.success());
 
     repo.write("a.txt", "uno\n");
@@ -338,7 +352,7 @@ fn ai_review_in_hook_with_fake_providers() {
     assert!(out.contains("Revisión de IA: aprobada"), "{out}");
 
     // El revisor bloquea → el commit no se crea.
-    std::fs::write(&verdict_file, "block").unwrap();
+    repo.write(".forge/routing.toml", &routing("block"));
     repo.write("b.txt", "dos\n");
     repo.ok("git", &["add", "b.txt"]);
     let blocked = repo.fails("git", &["commit", "-m", "bloqueado"]);
@@ -363,26 +377,15 @@ fn ai_review_in_hook_with_fake_providers() {
 /// Plan #42, fase 4: `forge review` revisa con IA los cambios sin commit aunque ningún paso
 /// la pida en rules.toml (la lanzan a mano el dueño o un agente).
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn review_command_forces_the_ai_review() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("review");
-    let provider = "cat > /dev/null; echo '{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}'";
-    repo.write(
-        ".forge/routing.toml",
-        &format!(
-            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
-             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
-             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
-        ),
+    let provider = fake_provider(
+        "{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}",
+        None,
     );
+    repo.write(".forge/routing.toml", &routing_with_fake(&provider));
     repo.write("a.txt", "uno\n");
     repo.ok("git", &["add", "."]);
     repo.ok("git", &["commit", "-m", "base"]);
@@ -401,26 +404,15 @@ fn review_command_forces_the_ai_review() {
 /// posible secreto, demasiados archivos): quien la pide quiere la revisión. Medido en
 /// dtplatform-v1: 2 de 5 PR no llegaban a los jueces. En el commit normal se sigue esperando.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn manual_review_runs_even_when_deterministic_checks_block() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("review-blocked");
-    let provider = "cat > /dev/null; echo '{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}'";
-    repo.write(
-        ".forge/routing.toml",
-        &format!(
-            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
-             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
-             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
-        ),
+    let provider = fake_provider(
+        "{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"revisado\",\"findings\":[]}",
+        None,
     );
+    repo.write(".forge/routing.toml", &routing_with_fake(&provider));
     repo.write("a.txt", "uno\n");
     repo.ok("git", &["add", "."]);
     repo.ok("git", &["commit", "-m", "base"]);
@@ -437,26 +429,15 @@ fn manual_review_runs_even_when_deterministic_checks_block() {
 /// Plan #49: `forge review --judgment` pasa el cambio por dos jueces a ciegas; lo que ven los
 /// dos bloquea.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn review_judgment_runs_two_judges() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("judgment");
-    let provider = "cat > /dev/null; echo '{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"visto\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"doble clic\"}]}'";
-    repo.write(
-        ".forge/routing.toml",
-        &format!(
-            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
-             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
-             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
-        ),
+    let provider = fake_provider(
+        "{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"visto\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"doble clic\"}]}",
+        None,
     );
+    repo.write(".forge/routing.toml", &routing_with_fake(&provider));
     repo.write("a.txt", "uno\n");
     repo.ok("git", &["add", "."]);
     repo.ok("git", &["commit", "-m", "base"]);
@@ -472,34 +453,25 @@ fn review_judgment_runs_two_judges() {
 /// Plan #42, fase 5: la revisión con IA aprobada en el commit se reutiliza en el push del
 /// mismo código (mismo árbol y mismos modelos): no se paga dos veces.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn approved_ai_review_is_reused_on_push() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
     let repo = Repo::new("reuse-ai");
     let calls = repo.dir.parent().unwrap().join("llamadas");
+    // `echo x >> archivo` vale igual en sh y en PowerShell: cuenta las llamadas.
     let provider = format!(
-        "cat > /dev/null; echo x >> '{}'; echo '{{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"ok\",\"findings\":[]}}'",
-        calls.display()
+        "echo x >> '{}'; {}",
+        calls.display(),
+        fake_provider(
+            "{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"ok\",\"findings\":[]}",
+            None
+        )
     );
     repo.write(
         ".forge/rules.toml",
         "[commit]\nrequire_ai_review = true\n[push]\nrequire_ai_review = true\n",
     );
-    repo.write(
-        ".forge/routing.toml",
-        &format!(
-            "[routing]\nprefer_local = false\nmonthly_budget_usd = 5.0\nmax_cost_per_call_usd = 0.1\n\
-             [routing.providers.falso]\ncommand = '''{provider}'''\ncost_per_call_usd = 0.02\n\
-             [routing.tasks.classification]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.code_review]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.architecture]\nprovider = \"falso\"\nmodel = \"m\"\n\
-             [routing.tasks.security]\nprovider = \"falso\"\nmodel = \"m\"\n"
-        ),
-    );
+    repo.write(".forge/routing.toml", &routing_with_fake(&provider));
     repo.ok("git", &["add", "."]);
     repo.ok("git", &["commit", "-m", "base"]);
     // Un remoto con la base: el push compara con él.
@@ -539,10 +511,6 @@ fn approved_ai_review_is_reused_on_push() {
 
 /// Fase 11: revisores especializados activados por rutas, bloqueantes o informativos.
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-)]
 fn specialist_reviewers_by_path() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
     unsafe { std::env::set_var("FORGE_LANG", "es") };
@@ -551,8 +519,13 @@ fn specialist_reviewers_by_path() {
     // Proveedor simulado: guarda el prompt y responde el veredicto que se le indica.
     let fake = |name: &str, verdict: &str| {
         format!(
-            "[routing.providers.{name}]\ncommand = '''cat > '{}/prompt-{name}'; echo '{{\"verdict\":\"{verdict}\",\"confidence\":0.9,\"summary\":\"{name} dice {verdict}\",\"findings\":[]}}' '''\ncost_per_call_usd = 0.01\n",
-            dir.display()
+            "[routing.providers.{name}]\ncommand = '''{} '''\ncost_per_call_usd = 0.01\n",
+            fake_provider(
+                &format!(
+                    "{{\"verdict\":\"{verdict}\",\"confidence\":0.9,\"summary\":\"{name} dice {verdict}\",\"findings\":[]}}"
+                ),
+                Some(&dir.join(format!("prompt-{name}"))),
+            )
         )
     };
     repo.write(".forge/rules.toml", "[commit]\nrequire_ai_review = true\n");

@@ -1804,6 +1804,24 @@ mod tests {
         }
     }
 
+    /// Lee todo stdin en `$p` (PowerShell, el shell de `shell_command` en Windows), en UTF-8.
+    const READ_PROMPT_PS: &str =
+        "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd()";
+
+    /// Proveedor falso (sin gastar) en el shell de `shell_command`: lee el prompt de stdin, lo
+    /// guarda en `save` si se pide y responde `reply` (ASCII y sin comillas simples).
+    fn fake_command(reply: &str, save: Option<&Path>) -> String {
+        if cfg!(windows) {
+            let save = save
+                .map(|p| format!("; Set-Content -LiteralPath '{}' -Value $p", p.display()))
+                .unwrap_or_default();
+            format!("{READ_PROMPT_PS}{save}; echo '{reply}'")
+        } else {
+            let save = save.map_or("/dev/null".into(), |p| format!("'{}'", p.display()));
+            format!("cat > {save}; echo '{reply}'")
+        }
+    }
+
     #[test]
     fn risk_signals_and_levels() {
         let low = assess(&[file("src/utils/format.ts", 20)], 0);
@@ -1913,10 +1931,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-    )]
     fn judgment_runs_two_blind_judges_in_parallel() {
         let dir = std::env::temp_dir().join(format!("forge-judgment-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1930,18 +1944,26 @@ mod tests {
         // Cada juez responde según su letra; los dos ven el mismo fallo en a.txt.
         let json = |line: u32| {
             format!(
-                "{{\\\"verdict\\\":\\\"block\\\",\\\"confidence\\\":0.9,\\\"summary\\\":\\\"x\\\",\\\"findings\\\":[{{\\\"severity\\\":\\\"blocking\\\",\\\"file\\\":\\\"a.txt\\\",\\\"line\\\":{line},\\\"message\\\":\\\"doble clic\\\"}}]}}"
+                "{{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"x\",\"findings\":[{{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":{line},\"message\":\"doble clic\"}}]}}"
             )
         };
         let mut config = RouterConfig::default();
         config.providers.insert(
             "juez".into(),
             ProviderDef {
-                command: format!(
-                    "p=$(cat); case \"$p\" in *'Juez A'*) echo \"{}\";; *'Juez B'*) echo \"{}\";; esac",
-                    json(2),
-                    json(3)
-                ),
+                command: if cfg!(windows) {
+                    format!(
+                        "{READ_PROMPT_PS}; if ($p.Contains('Juez A')) {{ echo '{}' }} elseif ($p.Contains('Juez B')) {{ echo '{}' }}",
+                        json(2),
+                        json(3)
+                    )
+                } else {
+                    format!(
+                        "p=$(cat); case \"$p\" in *'Juez A'*) echo '{}';; *'Juez B'*) echo '{}';; esac",
+                        json(2),
+                        json(3)
+                    )
+                },
                 format: OutputFormat::Text,
                 cost_per_call_usd: 0.10,
                 local: false,
@@ -2122,10 +2144,6 @@ mod tests {
 
     /// Repo real + proveedores falsos (sin gastar): escalado por desacuerdo y presupuesto.
     #[test]
-    #[cfg_attr(
-        windows,
-        ignore = "fake providers are sh scripts (port to Windows: plan #11)"
-    )]
     fn escalation_with_fake_providers() {
         let dir = std::env::temp_dir().join(format!("forge-router-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2151,9 +2169,11 @@ mod tests {
         // El proveedor guarda el prompt para comprobar la reducción de contexto.
         let prompt_file = dir.join("prompt.txt");
         let fake = |verdict: &str, confidence: f64| ProviderDef {
-            command: format!(
-                "cat > '{}'; echo '{{\"verdict\":\"{verdict}\",\"confidence\":{confidence},\"summary\":\"{verdict}\",\"findings\":[]}}'",
-                prompt_file.display()
+            command: fake_command(
+                &format!(
+                    "{{\"verdict\":\"{verdict}\",\"confidence\":{confidence},\"summary\":\"{verdict}\",\"findings\":[]}}"
+                ),
+                Some(&prompt_file),
             ),
             format: OutputFormat::Text,
             cost_per_call_usd: 0.10,
@@ -2225,7 +2245,8 @@ mod tests {
         config.providers.insert(
             "revisor".into(),
             ProviderDef {
-                command: "cat > /dev/null; echo '{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"clave expuesta\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"clave en el código\"},{\"severity\":\"warning\",\"file\":\"a.txt\",\"line\":1,\"message\":\"nombre poco claro\"}]}'".into(),
+                // `ó` (ó) en ASCII: PowerShell escribe stdout en la página de códigos OEM.
+                command: fake_command("{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"clave expuesta\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"a.txt\",\"line\":2,\"message\":\"clave en el c\\u00f3digo\"},{\"severity\":\"warning\",\"file\":\"a.txt\",\"line\":1,\"message\":\"nombre poco claro\"}]}", None),
                 format: OutputFormat::Text,
                 cost_per_call_usd: 0.10,
                 local: false,
@@ -2273,7 +2294,7 @@ mod tests {
         config.providers.insert(
             "potente".into(),
             ProviderDef {
-                command: "cat > /dev/null; echo basura".into(),
+                command: fake_command("basura", None),
                 format: OutputFormat::Text,
                 cost_per_call_usd: 0.10,
                 local: false,
