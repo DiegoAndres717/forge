@@ -500,6 +500,50 @@ Set-Item function:global:Remove-Item ([scriptblock]::Create([System.Management.A
 Remove-Variable forgeMeta, forgeBody
 "#;
 
+/// PowerShell: `cat`, `type` y `gc` son alias de Get-Content. En terminales de agente
+/// (`FORGE_ORIGIN`), un proxy global consulta a Forge antes de leer archivos con secretos.
+pub const PWSH_READ_GUARD: &str = r#"$forgeReadMeta = [System.Management.Automation.CommandMetadata]::new((Get-Command Microsoft.PowerShell.Management\Get-Content -CommandType Cmdlet))
+$forgeReadBody = @'
+begin { $forgePath = [System.Collections.Generic.List[string]]::new(); $forgeLiteral = [System.Collections.Generic.List[string]]::new() }
+process { if ($Path) { $forgePath.AddRange([string[]]$Path) }; if ($LiteralPath) { $forgeLiteral.AddRange([string[]]$LiteralPath) } }
+end {
+  if ($env:FORGE_ORIGIN -and $env:FORGE_BIN) {
+    $rawTargets = @($forgePath) + @($forgeLiteral)
+    if ($rawTargets.Count) {
+      $forgeTargets = @()
+      foreach ($t in $rawTargets) {
+        try {
+          $resolved = @($ExecutionContext.SessionState.Path.GetResolvedProviderPathFromPSPath($t))
+          if ($resolved.Count) { $forgeTargets += $resolved } else { $forgeTargets += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($t) }
+        } catch {
+          $forgeTargets += $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($t)
+        }
+      }
+      $needsCheck = $false
+      foreach ($target in $forgeTargets) {
+        $leaf = [System.IO.Path]::GetFileName($target)
+        if ($leaf -match '^\.env(\..+)?$' -or $leaf -match '\.(pem|key|p12|pfx|keychain-db|kdbx)$' -or $leaf -match '^(id_rsa|id_ed25519|id_ecdsa|id_dsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials(\.json)?)$' -or $target -match '[/\\](\.ssh|\.aws|\.gnupg|\.kube|\.docker|\.config[/\\](gcloud|gh))[/\\]') {
+          $needsCheck = $true
+          break
+        }
+      }
+      if ($needsCheck) {
+        & $env:FORGE_BIN --guard-check-read Get-Content -- @forgeTargets
+        if ($LASTEXITCODE -ne 0) { Write-Error -Category PermissionDenied ('Forge: Get-Content ' + ($forgeTargets -join ', ')); return }
+      }
+    }
+  }
+  $forgeRest = @{} + $PSBoundParameters
+  [void]$forgeRest.Remove('Path'); [void]$forgeRest.Remove('LiteralPath')
+  if ($forgePath.Count) { Microsoft.PowerShell.Management\Get-Content -Path $forgePath @forgeRest }
+  if ($forgeLiteral.Count) { Microsoft.PowerShell.Management\Get-Content -LiteralPath $forgeLiteral @forgeRest }
+  if (-not $forgePath.Count -and -not $forgeLiteral.Count) { Microsoft.PowerShell.Management\Get-Content @forgeRest }
+}
+'@
+Set-Item function:global:Get-Content ([scriptblock]::Create([System.Management.Automation.ProxyCommand]::GetCmdletBindingAttribute($forgeReadMeta) + "`nparam(" + [System.Management.Automation.ProxyCommand]::GetParamBlock($forgeReadMeta) + ")`n" + $forgeReadBody))
+Remove-Variable forgeReadMeta, forgeReadBody
+"#;
+
 /// Archivo que marca una carpeta de enlaces de Forge: `real_program` nunca busca en ella (un
 /// enlace duro no se reconoce como Forge al canonicalizar, y se llamaría a sí mismo).
 pub const SHIMS_MARKER: &str = ".forge-shims";
@@ -553,6 +597,26 @@ fn real_program(name: &str, shims: Option<&Path>) -> Option<PathBuf> {
 /// se puede seguir y con 126 si se denegó; lo usa el Remove-Item de PowerShell.
 pub fn guard_check_main(name: &str, args: Vec<String>) -> ! {
     guard(name, &args);
+    std::process::exit(0)
+}
+
+/// Punto de entrada cuando un shell (PowerShell `Get-Content`) consulta si se permite leer
+/// uno o más archivos. Sale con 0 si ninguno contiene secretos o si el usuario autorizó la lectura;
+/// sale con 126 si se denegó.
+pub fn guard_check_read_main(name: &str, files: &[String]) -> ! {
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let agent = std::env::var_os("FORGE_ORIGIN").is_some();
+    if agent {
+        let found = files
+            .iter()
+            .filter(|a| !a.starts_with('-'))
+            .find_map(|a| secret_file(a, &cwd));
+        if let Some(reason) = found {
+            crate::i18n::init_from_store();
+            let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+            authorize(name, files, reason, cwd, project);
+        }
+    }
     std::process::exit(0)
 }
 
@@ -770,15 +834,18 @@ PATH="$FORGE_SHIMS:${PATH//"$FORGE_SHIMS:"/}"
 /// Git Bash en Windows (el shell de Claude Code allí): su /etc/profile pone /mingw64/bin y
 /// /usr/bin, con el git.exe y el rm.exe de Git, delante del PATH. Bash lee BASH_ENV en los
 /// shells no interactivos (`bash -c`, también con `-l`, tras el perfil): ahí los enlaces de
-/// Guard vuelven a ir primero.
-// ponytail: un Git Bash interactivo no lee BASH_ENV; los lectores de secretos, aún sin
-// probar en Git Bash, no se ponen aquí.
+/// Guard y los lectores de secretos vuelven a ir primero.
 const BASH_ENV: &str = r#"# Generado por Forge: lo lee bash (BASH_ENV) tras el perfil.
 [ -n "$FORGE_USER_BASH_ENV" ] && . "$FORGE_USER_BASH_ENV"
 if [ -n "$FORGE_SHIMS" ]; then
   forge_shims=$(cygpath -u "$FORGE_SHIMS" 2>/dev/null || printf '%s' "$FORGE_SHIMS")
   PATH="$forge_shims:${PATH//"$forge_shims:"/}"
   unset forge_shims
+fi
+if [ -n "$FORGE_ORIGIN" ] && [ -n "$FORGE_READ_SHIMS" ]; then
+  forge_read_shims=$(cygpath -u "$FORGE_READ_SHIMS" 2>/dev/null || printf '%s' "$FORGE_READ_SHIMS")
+  PATH="$forge_read_shims:${PATH//"$forge_read_shims:"/}"
+  unset forge_read_shims
 fi
 "#;
 
@@ -802,6 +869,7 @@ IFS=:
 for d in $PATH; do
   [ "$d" = "$here" ] && continue
   [ -x "$d/{name}" ] && exec "$d/{name}" "$@"
+  [ -x "$d/{name}.exe" ] && exec "$d/{name}.exe" "$@"
 done
 echo "forge: {name} not found" >&2
 exit 127

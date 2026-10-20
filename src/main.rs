@@ -299,6 +299,25 @@ fn main() -> eframe::Result {
             .collect();
         forge_core::danger::guard_check_main(&name.to_string_lossy(), args);
     }
+    // Comprobación de lectura de secretos (usada por Get-Content en PowerShell).
+    if raw.first().is_some_and(|a| a == "--guard-check-read") {
+        let args: Vec<String> = raw[1..]
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let (name, files) = match args.split_first() {
+            Some((n, rest)) => {
+                let rest = if rest.first().is_some_and(|x| x == "--") {
+                    &rest[1..]
+                } else {
+                    rest
+                };
+                (n.as_str(), rest)
+            }
+            None => ("Get-Content", &[][..]),
+        };
+        forge_core::danger::guard_check_read_main(name, files);
+    }
     // Un lector (`cat`, `grep`…) de una terminal de agente con un posible secreto.
     if raw.first().is_some_and(|a| a == "--secret-read") {
         let args = raw[1..]
