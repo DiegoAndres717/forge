@@ -8,6 +8,9 @@ use forge_core::danger;
 
 const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
+/// Tiempo de espera holgado para que un comando emita su solicitud en CI (Windows es más lento).
+const WAIT_REQUEST: Duration = Duration::from_secs(if cfg!(windows) { 30 } else { 10 });
+
 struct Env {
     base: PathBuf,
     repo: PathBuf,
@@ -66,8 +69,20 @@ fn sh(e: &Env, script: &str) -> Output {
 
 /// Lanza el comando, espera su solicitud y la responde.
 fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
+    let which = shell(e, "command -v git rm; echo \"$PATH\"");
+    wait_and_answer(e, shell(e, script), which, allow)
+}
+
+/// Espera la solicitud del comando y la responde. Si el comando termina antes o no
+/// llega a tiempo, falla con su salida y `which` (dónde están git/rm y el PATH).
+fn wait_and_answer(
+    e: &Env,
+    mut cmd: Command,
+    mut which: Command,
+    allow: bool,
+) -> (Output, danger::Request) {
     let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
-    let child = shell(e, script)
+    let mut child = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -77,14 +92,25 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
         if let Some(r) = danger::pending(&dir).into_iter().next() {
             break r;
         }
-        if start.elapsed() > Duration::from_secs(10) {
-            let which = sh(e, "command -v git rm; echo \"$PATH\"");
-            panic!(
-                "no llegó la solicitud. git y rm, y PATH:\n{}",
-                String::from_utf8_lossy(&which.stdout)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(20));
+        let why = match child.try_wait().unwrap() {
+            Some(status) => format!("el comando terminó antes de pedir autorización ({status})"),
+            None if start.elapsed() > WAIT_REQUEST => {
+                let _ = child.kill();
+                format!("no llegó la solicitud en {WAIT_REQUEST:?}")
+            }
+            None => {
+                std::thread::sleep(Duration::from_millis(20));
+                continue;
+            }
+        };
+        let out = child.wait_with_output().unwrap();
+        let which = which.output().map(|w| w.stdout).unwrap_or_default();
+        panic!(
+            "{why}:\nstdout:\n{}\nstderr:\n{}\ngit y rm, y PATH:\n{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            String::from_utf8_lossy(&which)
+        );
     };
     danger::answer(&dir, &request.id, allow).unwrap();
     (child.wait_with_output().unwrap(), request)
@@ -291,30 +317,11 @@ fn pwsh(e: &Env, script: &str) -> Command {
 /// Lanza el script de PowerShell, espera su solicitud y la responde.
 #[cfg(windows)]
 fn pwsh_answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
-    let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
-    let mut child = pwsh(e, script)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let start = Instant::now();
-    let request = loop {
-        if let Some(r) = danger::pending(&dir).into_iter().next() {
-            break r;
-        }
-        if start.elapsed() > Duration::from_secs(20) {
-            let _ = child.kill();
-            let out = child.wait_with_output().unwrap();
-            panic!(
-                "no llegó la solicitud:\n{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
-            );
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    danger::answer(&dir, &request.id, allow).unwrap();
-    (child.wait_with_output().unwrap(), request)
+    let which = pwsh(
+        e,
+        "(Get-Command git, rm -ErrorAction SilentlyContinue).Source; $env:Path",
+    );
+    wait_and_answer(e, pwsh(e, script), which, allow)
 }
 
 /// `rm`/`Remove-Item` recursivo fuera del proyecto espera autorización en PowerShell; con
