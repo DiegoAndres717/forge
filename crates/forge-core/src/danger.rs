@@ -64,10 +64,44 @@ pub fn secret_file(arg: &str, cwd: &Path) -> Option<String> {
 
 /// Un comando de shell que menciona un archivo con secretos (para el mod de Claude Code).
 pub fn secret_in_command(command: &str, cwd: &Path) -> Option<String> {
+    // ponytail: palabras sueltas, sin un parser de shell; `.env*` cuenta como `.env`, pero
+    // trucos como `.e""nv` pasan (esto frena despistes, no a quien quiera saltárselo).
     command
-        .split(|c: char| c.is_whitespace() || ";|&<>()=".contains(c))
+        .split(|c: char| c.is_whitespace() || ";|&<>()=`{},".contains(c))
+        .map(|w| w.trim_end_matches(['*', '?']))
         .filter(|w| !w.is_empty() && !w.starts_with('-'))
         .find_map(|w| secret_file(w, cwd))
+}
+
+/// Lo que un agente va a usar, tal como llega a su hook previo (`tool_input` en Codex,
+/// Claude y Gemini CLI; `toolCall.args` en Antigravity): el motivo si toca un archivo con
+/// secretos. Los comandos se miran palabra a palabra y cualquier otro texto de una línea,
+/// como una ruta; así sirve para cualquier herramienta sin conocer sus argumentos.
+pub fn secret_in_tool_call(input: &serde_json::Value, cwd: &Path) -> Option<String> {
+    use serde_json::Value;
+    fn walk(v: &Value, key: &str, cwd: &Path) -> Option<String> {
+        let command = ["command", "CommandLine", "cmd"].contains(&key);
+        // Fuera de un comando, solo lo que parece una ruta: un patrón de búsqueda como
+        // «credentials» no es un archivo.
+        let path = |s: &str| {
+            !s.contains('\n') && (s.contains(['/', '\\', '*']) || s.starts_with(['.', '~']))
+        };
+        match v {
+            Value::String(s) if command => secret_in_command(s, cwd),
+            Value::String(s) if path(s) => secret_file(s, cwd),
+            Value::Array(items) if command => {
+                let words: Vec<&str> = items.iter().filter_map(Value::as_str).collect();
+                secret_in_command(&words.join(" "), cwd)
+            }
+            Value::Array(items) => items.iter().find_map(|i| walk(i, key, cwd)),
+            Value::Object(map) => map.iter().find_map(|(k, v)| walk(v, k, cwd)),
+            _ => None,
+        }
+    }
+    let args = input
+        .get("tool_input")
+        .or_else(|| input.pointer("/toolCall/args"))?;
+    walk(args, "", cwd)
 }
 
 /// Si una línea de shell (con `;`, `&&`, `||`, `|`) tiene un comando peligroso, el motivo.
@@ -637,54 +671,120 @@ pub fn authorize(
     cwd: PathBuf,
     project: Option<PathBuf>,
 ) {
-    {
-        let mut command = vec![name.to_string()];
-        command.extend(args.iter().cloned());
-        let request = Request {
-            id: format!(
-                "{}-{}",
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_millis()),
-                std::process::id()
-            ),
-            command: command.join(" "),
-            reason,
-            cwd,
-            project,
-            origin: std::env::var("FORGE_ORIGIN").ok(),
-            pid: std::process::id(),
-        };
-        let dir = std::env::var_os("FORGE_APPROVALS").map(PathBuf::from);
-        let app = std::env::var("FORGE_APP_PID")
-            .ok()
-            .and_then(|p| p.parse().ok());
-        let decision = match &dir {
-            Some(dir) => ask(dir, &request, app),
-            None => ask_tty(&request),
-        };
-        match decision {
-            Ok(true) => {}
-            Ok(false) => {
-                eprintln!(
-                    "{}",
-                    tr!("Forge: comando rechazado: {p0}", p0 = request.command)
-                );
-                std::process::exit(126);
-            }
-            Err(e) => {
-                eprintln!(
-                    "{}",
-                    tr!(
-                        "Forge: comando bloqueado ({e}): {p0}",
-                        p0 = request.command,
-                        e = e
-                    )
-                );
-                std::process::exit(126);
-            }
+    let command = [name.to_string()]
+        .into_iter()
+        .chain(args.iter().cloned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match ask_person(&command, reason, cwd, project) {
+        Ok(true) => {}
+        Ok(false) => {
+            eprintln!("{}", tr!("Forge: comando rechazado: {p0}", p0 = command));
+            std::process::exit(126);
+        }
+        Err(e) => {
+            eprintln!(
+                "{}",
+                tr!("Forge: comando bloqueado ({e}): {p0}", p0 = command, e = e)
+            );
+            std::process::exit(126);
         }
     }
+}
+
+/// Pregunta a la persona (en la app, o en la terminal sin ella) si se permite `command`.
+/// `Err` si no hay a quién preguntar o no contestó a tiempo.
+fn ask_person(
+    command: &str,
+    reason: String,
+    cwd: PathBuf,
+    project: Option<PathBuf>,
+) -> Result<bool, String> {
+    let request = Request {
+        id: format!(
+            "{}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis()),
+            std::process::id()
+        ),
+        command: command.to_string(),
+        reason,
+        cwd,
+        project,
+        origin: std::env::var("FORGE_ORIGIN").ok(),
+        pid: std::process::id(),
+    };
+    let dir = std::env::var_os("FORGE_APPROVALS").map(PathBuf::from);
+    let app = std::env::var("FORGE_APP_PID")
+        .ok()
+        .and_then(|p| p.parse().ok());
+    match &dir {
+        Some(dir) => ask(dir, &request, app),
+        None => ask_tty(&request),
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// Hook previo de un agente (`forge secret --agent-hook <formato>`, stdin con la llamada): si va
+/// a tocar un archivo con secretos, pregunta a la persona como los lectores de Unix, y si
+/// no lo permite contesta «deny» en el formato del agente (`codex`: el de Claude Code;
+/// `agy` y `gemini`: `{"decision": …}`). Siempre sale con 0: con otro código, Codex y
+/// Gemini lo tomarían por un fallo del hook y dejarían seguir la llamada.
+pub fn secret_hook_main(format: &str) -> ! {
+    let mut input = String::new();
+    let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
+    let call: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    // agy ejecuta sus hooks desde ~/.gemini/config: el proyecto viene en la llamada.
+    let cwd = call["cwd"]
+        .as_str()
+        .or_else(|| call["workspacePaths"][0].as_str())
+        .map(PathBuf::from)
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_default();
+    // Los hooks de agy y Gemini son globales: fuera de una terminal de agente de Forge no hacen nada.
+    let found = std::env::var_os("FORGE_ORIGIN").and_then(|_| secret_in_tool_call(&call, &cwd));
+    let denied = found.and_then(|reason| {
+        crate::i18n::init_from_store();
+        // En la ventana de Forge, el comando si lo hay; si no, la herramienta.
+        let args = call
+            .get("tool_input")
+            .or_else(|| call.pointer("/toolCall/args"));
+        let command = ["command", "CommandLine", "cmd"]
+            .iter()
+            .find_map(|k| args?.get(*k)?.as_str())
+            .or_else(|| call["toolCall"]["name"].as_str())
+            .or_else(|| call["tool_name"].as_str())
+            .unwrap_or("tool")
+            .to_string();
+        // Sin la app no se pregunta en la terminal: es la del agente, y le quitaría la entrada.
+        if std::env::var_os("FORGE_APPROVALS").is_none() {
+            return Some(format!(
+                "Forge: blocked ({reason}): Forge is not open to authorize it"
+            ));
+        }
+        let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+        match ask_person(&command, reason.clone(), cwd, project) {
+            Ok(true) => None,
+            Ok(false) => Some(format!("Forge: the user denied it ({reason})")),
+            Err(e) => Some(format!("Forge: blocked ({reason}): {e}")),
+        }
+    });
+    let reply = match (format, denied) {
+        ("codex", Some(why)) => serde_json::json!({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": why,
+        }})
+        .to_string(),
+        (_, Some(why)) => serde_json::json!({"decision": "deny", "reason": why}).to_string(),
+        // Codex sigue sin salida; agy y Gemini esperan un JSON (vacío: sin decisión).
+        ("codex", None) => String::new(),
+        (_, None) => "{}".into(),
+    };
+    // Sin pánico si el agente cerró la salida: un código distinto de 0 dejaría pasar la llamada.
+    let _ = writeln!(std::io::stdout(), "{reply}");
+    std::process::exit(0)
 }
 
 fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
@@ -1163,6 +1263,51 @@ mod tests {
         assert!(secret_in_command("source ./.env.local && npm run dev", cwd).is_some());
         assert!(secret_in_command("cat .env.example", cwd).is_none());
         assert!(secret_in_command("cargo test --features env", cwd).is_none());
+    }
+
+    #[test]
+    fn tool_calls_of_every_agent_that_touch_secrets() {
+        let cwd = Path::new("/p/app");
+        let check = |v: serde_json::Value| secret_in_tool_call(&v, cwd).is_some();
+        // Codex (y Claude): `tool_input.command`, a veces como lista.
+        assert!(check(
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "cat .env"}})
+        ));
+        assert!(check(
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": ["bash", "-lc", "cat ~/.ssh/id_rsa"]}})
+        ));
+        assert!(check(
+            serde_json::json!({"tool_name": "exec_command", "tool_input": {"cmd": "echo `cat .env`"}})
+        ));
+        assert!(check(
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "cat .env*"}})
+        ));
+        // Gemini CLI: herramientas de lectura con `file_path` o patrones.
+        assert!(check(
+            serde_json::json!({"tool_name": "read_file", "tool_input": {"file_path": "config/.env.production"}})
+        ));
+        assert!(check(
+            serde_json::json!({"tool_name": "read_many_files", "tool_input": {"include": ["src/**", "**/.env"]}})
+        ));
+        // Antigravity: `toolCall.args`, con las claves en mayúscula.
+        assert!(check(
+            serde_json::json!({"toolCall": {"name": "run_command", "args": {"CommandLine": "type .ENV", "Cwd": "/p/app"}}})
+        ));
+        assert!(check(
+            serde_json::json!({"toolCall": {"name": "view_file", "args": {"AbsolutePath": "/p/app/certs/server.pem"}}})
+        ));
+        for no in [
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "cat .env.example && cargo test"}}),
+            serde_json::json!({"tool_name": "read_file", "tool_input": {"file_path": "src/main.rs"}}),
+            serde_json::json!({"toolCall": {"name": "run_command", "args": {"CommandLine": "npm test"}}}),
+            // Un texto de varias líneas (lo que se escribe en un archivo) no es una ruta.
+            serde_json::json!({"tool_name": "write_file", "tool_input": {"file_path": "README.md", "content": "Copy .env.example\nto .env"}}),
+            serde_json::json!({"hook_event_name": "Stop"}),
+            // Un patrón de búsqueda no es una ruta.
+            serde_json::json!({"tool_name": "grep_search", "tool_input": {"pattern": "credentials", "dir_path": "src"}}),
+        ] {
+            assert!(!check(no.clone()), "{no}");
+        }
     }
 
     #[test]
