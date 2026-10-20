@@ -8,6 +8,9 @@ use forge_core::danger;
 
 const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
+/// Tiempo de espera holgado para que un comando emita su solicitud en CI (Windows es más lento).
+const WAIT_REQUEST: Duration = Duration::from_secs(if cfg!(windows) { 30 } else { 10 });
+
 struct Env {
     base: PathBuf,
     repo: PathBuf,
@@ -67,7 +70,7 @@ fn sh(e: &Env, script: &str) -> Output {
 /// Lanza el comando, espera su solicitud y la responde.
 fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
     let dir = PathBuf::from(&e.vars["FORGE_APPROVALS"]);
-    let child = shell(e, script)
+    let mut child = shell(e, script)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -77,11 +80,49 @@ fn answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request) {
         if let Some(r) = danger::pending(&dir).into_iter().next() {
             break r;
         }
-        if start.elapsed() > Duration::from_secs(10) {
-            let which = sh(e, "command -v git rm; echo \"$PATH\"");
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = child.wait_with_output().ok();
+                let (stdout, stderr) = out
+                    .as_ref()
+                    .map(|o| {
+                        (
+                            String::from_utf8_lossy(&o.stdout),
+                            String::from_utf8_lossy(&o.stderr),
+                        )
+                    })
+                    .unwrap_or_default();
+                let which = shell(e, "command -v git rm; echo \"$PATH\"")
+                    .output()
+                    .ok()
+                    .map(|w| String::from_utf8_lossy(&w.stdout).into_owned())
+                    .unwrap_or_default();
+                panic!(
+                    "el comando terminó antes de pedir autorización ({status}):\nstdout:\n{stdout}\nstderr:\n{stderr}\ngit y rm, y PATH:\n{which}"
+                );
+            }
+            Err(err) => panic!("error al consultar el proceso: {err}"),
+            Ok(None) => {}
+        }
+        if start.elapsed() > WAIT_REQUEST {
+            let _ = child.kill();
+            let out = child.wait_with_output().ok();
+            let (stdout, stderr) = out
+                .as_ref()
+                .map(|o| {
+                    (
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr),
+                    )
+                })
+                .unwrap_or_default();
+            let which = shell(e, "command -v git rm; echo \"$PATH\"")
+                .output()
+                .ok()
+                .map(|w| String::from_utf8_lossy(&w.stdout).into_owned())
+                .unwrap_or_default();
             panic!(
-                "no llegó la solicitud. git y rm, y PATH:\n{}",
-                String::from_utf8_lossy(&which.stdout)
+                "no llegó la solicitud en {WAIT_REQUEST:?}:\nstdout:\n{stdout}\nstderr:\n{stderr}\ngit y rm, y PATH:\n{which}"
             );
         }
         std::thread::sleep(Duration::from_millis(20));
@@ -302,13 +343,55 @@ fn pwsh_answered(e: &Env, script: &str, allow: bool) -> (Output, danger::Request
         if let Some(r) = danger::pending(&dir).into_iter().next() {
             break r;
         }
-        if start.elapsed() > Duration::from_secs(20) {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let out = child.wait_with_output().ok();
+                let (stdout, stderr) = out
+                    .as_ref()
+                    .map(|o| {
+                        (
+                            String::from_utf8_lossy(&o.stdout),
+                            String::from_utf8_lossy(&o.stderr),
+                        )
+                    })
+                    .unwrap_or_default();
+                let which = pwsh(
+                    e,
+                    "(Get-Command git, rm -ErrorAction SilentlyContinue).Source; $env:Path",
+                )
+                .output()
+                .ok()
+                .map(|w| String::from_utf8_lossy(&w.stdout).into_owned())
+                .unwrap_or_default();
+                panic!(
+                    "el comando terminó antes de pedir autorización ({status}):\nstdout:\n{stdout}\nstderr:\n{stderr}\ncomandos y Path:\n{which}"
+                );
+            }
+            Err(err) => panic!("error al consultar el proceso pwsh: {err}"),
+            Ok(None) => {}
+        }
+        if start.elapsed() > WAIT_REQUEST {
             let _ = child.kill();
-            let out = child.wait_with_output().unwrap();
+            let out = child.wait_with_output().ok();
+            let (stdout, stderr) = out
+                .as_ref()
+                .map(|o| {
+                    (
+                        String::from_utf8_lossy(&o.stdout),
+                        String::from_utf8_lossy(&o.stderr),
+                    )
+                })
+                .unwrap_or_default();
+            let which = pwsh(
+                e,
+                "(Get-Command git, rm -ErrorAction SilentlyContinue).Source; $env:Path",
+            )
+            .output()
+            .ok()
+            .map(|w| String::from_utf8_lossy(&w.stdout).into_owned())
+            .unwrap_or_default();
             panic!(
-                "no llegó la solicitud:\n{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr)
+                "no llegó la solicitud en {WAIT_REQUEST:?}:\nstdout:\n{stdout}\nstderr:\n{stderr}\ncomandos y Path:\n{which}"
             );
         }
         std::thread::sleep(Duration::from_millis(20));
