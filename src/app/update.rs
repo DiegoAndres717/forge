@@ -24,6 +24,22 @@ pub(super) enum Update {
 /// Cada cuánto se vuelve a mirar con Forge abierto.
 const CHECK_EVERY: Duration = Duration::from_secs(4 * 3600);
 
+/// Resultado de una búsqueda. Si mientras tanto se descargó (o se está descargando) la
+/// versión, no se pisa: una búsqueda lenta borraba el «Reiniciar para actualizar».
+fn apply_check(state: &mut Option<Update>, found: Result<Release, String>, manual: bool) {
+    if matches!(state, Some(Update::Downloading | Update::Ready(_))) {
+        return;
+    }
+    match found {
+        Ok(r) if updates::is_newer(&r.tag, env!("CARGO_PKG_VERSION")) => {
+            *state = Some(Update::Available(r))
+        }
+        Ok(_) if manual => *state = Some(Update::UpToDate(Instant::now())),
+        Err(e) if manual => *state = Some(Update::CheckFailed(Instant::now(), e)),
+        _ => {}
+    }
+}
+
 impl App {
     /// Cada fotograma (solo la app real tiene `next_update_check`): ¿toca mirar otra vez?
     pub(super) fn update_tick(&mut self, ctx: &egui::Context) {
@@ -52,16 +68,7 @@ impl App {
         let (slot, ctx) = (self.update.clone(), ctx.clone());
         std::thread::spawn(move || {
             let found = updates::latest(env!("CARGO_PKG_REPOSITORY"));
-            let mut state = slot.lock().unwrap();
-            match found {
-                Ok(r) if updates::is_newer(&r.tag, env!("CARGO_PKG_VERSION")) => {
-                    *state = Some(Update::Available(r))
-                }
-                Ok(_) if manual => *state = Some(Update::UpToDate(Instant::now())),
-                Err(e) if manual => *state = Some(Update::CheckFailed(Instant::now(), e)),
-                _ => {}
-            }
-            drop(state);
+            apply_check(&mut slot.lock().unwrap(), found, manual);
             ctx.request_repaint();
             // Para que "Forge está al día" se vaya solo.
             ctx.request_repaint_after(Duration::from_secs(5));
@@ -178,4 +185,36 @@ pub(super) fn update_pill(ui: &mut egui::Ui, state: &Option<Update>, cmds: &mut 
         cmds.push(UiCmd::Update);
     }
     ui.add_space(6.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release() -> Release {
+        Release {
+            tag: "v9.9.9".into(),
+            page: "https://example.com".into(),
+            dmg: None,
+            checksum: None,
+        }
+    }
+
+    #[test]
+    fn a_late_search_does_not_undo_a_downloaded_update() {
+        // Una búsqueda lenta (GitHub tarda) termina después de que se descargara la versión.
+        for found in [Err("timeout".to_string()), Ok(release())] {
+            for busy in [
+                Update::Ready(PathBuf::from("/tmp/Forge.app")),
+                Update::Downloading,
+            ] {
+                let mut state = Some(busy.clone());
+                apply_check(&mut state, found.clone(), true);
+                assert_eq!(state, Some(busy));
+            }
+        }
+        let mut state = None;
+        apply_check(&mut state, Err("timeout".into()), true);
+        assert!(matches!(state, Some(Update::CheckFailed(..))));
+    }
 }
