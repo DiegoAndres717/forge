@@ -1087,7 +1087,6 @@ impl Terminal {
                     ..
                 } if modifiers.is_none()
                     && !self.attachments.is_empty()
-                    && !self.at_prompt
                     && self.suggest.is_none() =>
                 {
                     let paths = std::mem::take(&mut self.attachments);
