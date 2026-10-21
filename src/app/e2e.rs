@@ -204,8 +204,9 @@ fn dropped_files_become_cards_in_an_agent_terminal_and_go_with_enter() {
     h.input_mut()
         .dropped_files
         .push(std::sync::Arc::new(Dropped(file)));
-    h.run_steps(3);
-    assert_eq!(ws(h.state()).focus_attachments().len(), 1, "una tarjeta");
+    wait_until(&mut h, "una tarjeta", |a| {
+        ws(a).focus_attachments().len() == 1
+    });
     h.get_by_label_contains("informe.pdf");
     assert!(
         !ws(h.state()).focus_screen().contains("informe"),
@@ -244,8 +245,10 @@ fn dropped_files_paste_their_path_and_folders_open_a_project() {
     let image = dir.join("captura de pantalla.png");
     std::fs::write(&image, b"png").unwrap();
     // PowerShell descarta lo que se escribe antes de su prompt: se espera a que aparezca.
+    // No basta con que haya algo en pantalla: PowerShell escribe antes de tener el prompt
+    // listo. Se espera además a que el shell se calle, como con el agente.
     wait_until(&mut h, "el prompt", |a| {
-        !ws(a).focus_screen().trim().is_empty()
+        !ws(a).focus_screen().trim().is_empty() && ws(a).is_quiet(Duration::from_millis(500))
     });
     h.input_mut()
         .dropped_files
