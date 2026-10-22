@@ -1801,6 +1801,7 @@ mod tests {
             deleted: 0,
             binary: false,
             removed: false,
+            generated: false,
         }
     }
 

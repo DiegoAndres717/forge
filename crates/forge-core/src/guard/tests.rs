@@ -61,7 +61,8 @@ mod unit {
                 added: 10,
                 deleted: 2,
                 binary: false,
-                removed: false
+                removed: false,
+                generated: false
             }
         );
         assert!(files[1].binary);
@@ -192,6 +193,7 @@ mod unit {
             deleted: 0,
             binary: false,
             removed: false,
+            generated: false,
         };
         let diff = Diff {
             files: vec![
@@ -232,6 +234,69 @@ mod unit {
     }
 
     #[test]
+    fn generated_files_do_not_count_toward_the_line_limit() {
+        let file = |path: &str, added, generated| FileChange {
+            path: path.into(),
+            added,
+            deleted: 0,
+            binary: false,
+            removed: false,
+            generated,
+        };
+        let diff = Diff {
+            files: vec![
+                // Lo que genera drizzle al crear una migración (bloqueó un push real).
+                file("packages/db/drizzle/meta/0064_snapshot.json", 6878, false),
+                file("src/__snapshots__/view.test.ts.snap", 3000, false),
+                // Marcado como linguist-generated en .gitattributes.
+                file("api/schema.ts", 5000, true),
+                file("apps/api/auth.ts", 174, false),
+            ],
+            ..Default::default()
+        };
+        let items = evaluate(&rules(""), Stage::Push, &diff);
+        let lines = items.iter().find(|i| i.id == "lines").unwrap();
+        assert_eq!(lines.level, Level::Pass, "{}", lines.label);
+        assert!(lines.label.starts_with("174 "), "{}", lines.label);
+        assert!(
+            lines.details[0].contains("3 archivos"),
+            "{:?}",
+            lines.details
+        );
+    }
+
+    #[test]
+    fn linguist_generated_comes_from_gitattributes() {
+        let dir = std::env::temp_dir().join(format!("forge-generated-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("api")).unwrap();
+        let git = |args: &[&str]| {
+            assert!(
+                Command::new("git")
+                    .args(args)
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success()
+            )
+        };
+        git(&["init", "-q"]);
+        std::fs::write(
+            dir.join(".gitattributes"),
+            "api/schema.ts linguist-generated\nvendor/** linguist-generated=true\nkeep.ts linguist-generated=false\n",
+        )
+        .unwrap();
+        let found = generated_paths(
+            &dir,
+            &["api/schema.ts", "vendor/x/y.js", "keep.ts", "src/a.ts"],
+        );
+        let mut found: Vec<&str> = found.iter().map(String::as_str).collect();
+        found.sort();
+        assert_eq!(found, ["api/schema.ts", "vendor/x/y.js"]);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn untested_code_warns_only_when_asked() {
         let file = |path: &str| FileChange {
             path: path.into(),
@@ -239,6 +304,7 @@ mod unit {
             deleted: 0,
             binary: false,
             removed: false,
+            generated: false,
         };
         let level = |toml_text: &str, files: &[&str], lines: &[&str]| {
             let diff = Diff {

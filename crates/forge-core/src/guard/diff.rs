@@ -57,6 +57,8 @@ pub struct FileChange {
     pub binary: bool,
     /// El archivo ya no existe en el árbol (se está borrando).
     pub removed: bool,
+    /// Generado (`linguist-generated` en .gitattributes): no cuenta para el límite de líneas.
+    pub generated: bool,
 }
 
 #[derive(Debug, Default)]
@@ -221,6 +223,7 @@ pub fn collect_diff(
                 deleted: 0,
                 binary,
                 removed: false,
+                generated: false,
             });
             diff.added_lines.extend(
                 lines
@@ -232,6 +235,11 @@ pub fn collect_diff(
     }
     for f in &mut diff.files {
         f.removed = !repo.join(&f.path).exists();
+    }
+    let paths: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+    let generated = generated_paths(repo, &paths);
+    for f in &mut diff.files {
+        f.generated = generated.contains(&f.path);
     }
     // Binarios: un .sqlite o un build sin comprimir también pueden llevar un secreto. Se
     // lee lo que va a validarse (el índice si hay cambios preparados) y entra en la huella:
@@ -297,6 +305,36 @@ pub(crate) fn read_text(path: &Path) -> (Vec<String>, bool) {
     }
 }
 
+/// Las rutas marcadas `linguist-generated` en .gitattributes (como las oculta GitHub en los
+/// diffs). Sin git o con error: ninguna, y todo cuenta como antes.
+pub fn generated_paths(repo: &Path, paths: &[&str]) -> std::collections::HashSet<String> {
+    use std::io::Write;
+    let child = std::process::Command::new("git")
+        .args(["check-attr", "-z", "--stdin", "linguist-generated"])
+        .current_dir(repo)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    let Ok(mut child) = child else {
+        return Default::default();
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(paths.join("\0").as_bytes());
+    }
+    let Ok(out) = child.wait_with_output() else {
+        return Default::default();
+    };
+    // Salida con -z: «ruta\0atributo\0valor\0» por cada ruta.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let fields: Vec<&str> = text.split('\0').collect();
+    fields
+        .chunks(3)
+        .filter(|c| c.len() == 3 && matches!(c[2], "set" | "true"))
+        .map(|c| c[0].to_string())
+        .collect()
+}
+
 /// `git diff --numstat -z`: "añadidas\tborradas\truta\0" ("-" en binarios).
 pub(crate) fn parse_numstat(text: &str) -> Vec<FileChange> {
     text.split('\0')
@@ -310,6 +348,7 @@ pub(crate) fn parse_numstat(text: &str) -> Vec<FileChange> {
                 deleted: deleted.parse().unwrap_or(0),
                 binary,
                 removed: false,
+                generated: false,
             })
         })
         .collect()

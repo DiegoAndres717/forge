@@ -274,10 +274,10 @@ pub fn evaluate(rules: &Rules, stage: Stage, diff: &Diff) -> Vec<Item> {
     )];
 
     // Tamaño, sin contar archivos excluidos ni binarios.
-    let (excluded, counted): (Vec<&FileChange>, Vec<&FileChange>) = diff
-        .files
-        .iter()
-        .partition(|f| f.binary || q.lines.exclude.iter().any(|p| glob_match(p, &f.path)));
+    let (excluded, counted): (Vec<&FileChange>, Vec<&FileChange>) =
+        diff.files.iter().partition(|f| {
+            f.binary || f.generated || q.lines.exclude.iter().any(|p| glob_match(p, &f.path))
+        });
     let lines: usize = counted.iter().map(|f| f.added + f.deleted).sum();
     let mut details = Vec::new();
     if !excluded.is_empty() {
