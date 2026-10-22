@@ -1074,17 +1074,11 @@ fn forge_jev_is_off_by_default_and_turns_on_from_settings() {
         .click();
     h.run_steps(3);
     assert!(h.state().modes(&dir).jev_chores);
-    let jev_launch = |h: &Harness<'_, App>| ws(h.state()).jev_launch;
-    assert!(jev_launch(&h), "el modelo al abrir viene con Forge Jev");
     // Apagar una parte la quita aunque Forge Jev siga encendido.
     h.get_by_label_contains("Tareas de git a un subagente barato")
         .click();
     h.run_steps(3);
     assert!(!h.state().modes(&dir).jev_chores);
-    h.get_by_label_contains("Modelo según el pedido al abrir Claude")
-        .click();
-    h.run_steps(3);
-    assert!(!jev_launch(&h));
 }
 
 #[test]

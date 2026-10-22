@@ -2687,14 +2687,6 @@ pub const EN: &[(&str, &str)] = &[
         "Tareas de git a un subagente barato (forge-chores)",
         "Git chores to a cheap subagent (forge-chores)",
     ),
-    (
-        "Modelo según el pedido al abrir Claude (Opus, Sonnet o Haiku)",
-        "Model by request when opening Claude (Opus, Sonnet or Haiku)",
-    ),
-    (
-        "Al abrir Claude Code con un pedido desde Forge (Planificar con IA, preguntar al agente): diseño, bugs o planes en Opus; tareas de git en Haiku; lo demás en Sonnet. Si eliges un modelo para Claude en Ajustes, manda ese.",
-        "When Forge opens Claude Code with a request (Plan with AI, asking the agent): design, bugs or plans on Opus; git chores on Haiku; the rest on Sonnet. A model you choose for Claude in Settings wins.",
-    ),
     ("Siempre", "Always"),
     ("Nunca", "Never"),
     ("Última sesión de {name}:", "Last session in {name}:"),

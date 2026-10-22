@@ -35,8 +35,6 @@ declare module 'claude-code' {
       effort: string
       /** Searches and reads by the main loop vs inside subagents (the band's share). */
       delegation: { main: number; sub: number }
-      /** Forge Jev: the cheaper model the band suggests for this request ('' = none). */
-      jevHint: string
     }
   }
 }
