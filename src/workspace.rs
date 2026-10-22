@@ -143,6 +143,9 @@ pub struct AllowForm {
     pub label: String,
     pub reason: String,
     pub scope: forge_core::guard::Scope,
+    /// Una validación del historial (etapa, candidato, rama), p. ej. un push que bloqueó el
+    /// hook en la terminal; None = la ejecución del panel.
+    pub target: Option<(forge_core::guard::Stage, String, String)>,
 }
 
 impl Default for GuardView {

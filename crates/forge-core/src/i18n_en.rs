@@ -209,6 +209,14 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Registrar excepción", "Record exception"),
     ("Analizando el diff…", "Analyzing the diff…"),
+    (
+        "{p0}  {p1} bloqueado desde la terminal · hace {p2}",
+        "{p0}  {p1} blocked in the terminal · {p2} ago",
+    ),
+    (
+        "Omite una regla con motivo y repite el mismo comando en la terminal.",
+        "Skip a rule with a reason and run the same command again in the terminal.",
+    ),
     ("Omitir con motivo…", "Skip with reason…"),
     ("Hooks de Git instalados", "Git hooks installed"),
     ("Hooks de Git no instalados", "Git hooks not installed"),

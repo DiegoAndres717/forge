@@ -448,6 +448,82 @@ fn guard_blocks_a_commit_with_a_secret() {
     assert!(h.query_by_label_contains("Crear commit").is_none());
 }
 
+/// Un push que bloqueó el hook de git (desde la terminal) aparece en la pestaña Push del
+/// panel, y su regla se omite con motivo desde ahí, atada a ese mismo push.
+#[test]
+fn a_push_blocked_in_the_terminal_can_be_approved_from_the_panel() {
+    let _serial = serial();
+    let dir = project("approve-push");
+    let mut h = app(dir.clone());
+    let report = forge_core::evidence::Report {
+        project: dir.to_string_lossy().into_owned(),
+        stage: guard::Stage::Push,
+        candidate: Some(forge_core::candidate::Candidate {
+            id: "approve-push-ead9a7".into(),
+            tree: "t".into(),
+            head: "c6ad7c6".into(),
+            diff_hash: "hash-del-push".into(),
+            isolated: false,
+        }),
+        branch: "staging".into(),
+        started_at: store::now(),
+        finished_at: store::now(),
+        verdict: guard::Verdict::Blocked,
+        progress: (4, 4),
+        items: vec![forge_core::evidence::ReportItem {
+            id: "lines".into(),
+            label: "7.379 líneas modificadas (límite 4.000)".into(),
+            level: guard::Level::Block,
+            details: vec![],
+        }],
+        checks: vec![],
+        error: None,
+    };
+    let store = h.state().store.as_ref().unwrap();
+    store.save_validation(&dir, &report).unwrap();
+    h.key_press_modifiers(CMD, Key::G);
+    h.run_steps(2);
+    h.get_by_label("Push").click();
+    h.run_steps(3);
+    h.get_by_label_contains("7.379 líneas");
+    h.get_by_label_contains("Omitir con motivo").click();
+    h.run_steps(2);
+    h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Motivo")))
+        .click();
+    h.run_steps(2);
+    h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("Motivo")))
+        .type_text("Snapshot de drizzle");
+    h.run_steps(2);
+    let form = |h: &Harness<'_, App>| {
+        ws(h.state())
+            .guard
+            .allow
+            .as_ref()
+            .map(|f| (f.reason.clone(), f.target.clone()))
+    };
+    assert!(
+        form(&h).is_some_and(|(r, t)| r == "Snapshot de drizzle" && t.is_some()),
+        "{:?}",
+        form(&h)
+    );
+    h.get_by_label("Registrar excepción").click();
+    h.run_steps(3);
+    assert!(form(&h).is_none(), "el formulario se cierra");
+    let store = h.state().store.as_ref().unwrap();
+    let exceptions = store.exceptions(&dir).unwrap();
+    assert_eq!(exceptions.len(), 1);
+    let e = &exceptions[0];
+    assert_eq!(
+        (
+            e.rule.as_str(),
+            e.stage,
+            e.candidate.as_str(),
+            e.branch.as_str()
+        ),
+        ("lines", guard::Stage::Push, "hash-del-push", "staging")
+    );
+}
+
 /// Abre la paleta con ⌘K, escribe la consulta y elige el primer resultado con Enter.
 fn palette(h: &mut Harness<'_, App>, query: &str) {
     h.key_press_modifiers(CMD, Key::K);
