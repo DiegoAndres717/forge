@@ -271,7 +271,7 @@ fn tools() -> Value {
         },
         {
             "name": "memory_delete",
-            "description": tr!("Borra una memoria que ya no es cierta (por id)."),
+            "description": tr!("Archiva una memoria que ya no es cierta (por id). No se borra: el dueño puede restaurarla desde el panel."),
             "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}
         },
         {
@@ -612,9 +612,10 @@ impl<'a> Server<'a> {
                 None => Err(tr!("falta `id`").into()),
             },
             "memory_delete" => match args["id"].as_i64() {
-                Some(id) => self.store.delete_memory(self.project, id).map(|ok| {
+                // Un agente nunca borra del todo: archiva, y la persona decide desde el panel.
+                Some(id) => self.store.set_memory_status(self.project, id, "archived", None).map(|ok| {
                     if ok {
-                        tr!("Memoria #{id} borrada.", id = id)
+                        tr!("Memoria #{id} archivada.", id = id)
                     } else {
                         tr!("No existe la memoria #{id}.", id = id)
                     }
@@ -976,6 +977,23 @@ pub fn serve(project: &Path, store: &Store, modes: Modes) -> std::io::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agents_archive_memories_instead_of_deleting_them() {
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/del");
+        let id = store
+            .add_memory(project, "decision", "Pagos", "Stripe", "", "persona")
+            .unwrap();
+        let mut server = Server::new(project, &store);
+        let r = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "memory_delete", "arguments": {"id": id}}}))
+            .unwrap();
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("archiv"), "{text}");
+        let kept = store.get_memory(project, id).unwrap().expect("sigue ahí");
+        assert_eq!(kept.status, "archived");
+    }
 
     #[test]
     fn memory_save_needs_a_body_and_accepts_content() {

@@ -25,6 +25,18 @@ pub fn kind_label(kind: &str) -> &str {
         .map_or(kind, |(_, label)| crate::i18n::t(label))
 }
 
+/// Lo que decía una nota antes de un cambio.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MemoryVersion {
+    pub id: i64,
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    /// Quién había escrito esa versión.
+    pub source: String,
+    pub changed_at: i64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Memory {
     pub id: i64,
@@ -100,6 +112,29 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         END;
         CREATE TRIGGER IF NOT EXISTS memories_vec_ad AFTER DELETE ON memories BEGIN
             DELETE FROM memory_vectors WHERE memory_id = old.id;
+        END;
+        -- Antes de cambiar lo que dice una nota se guarda lo que decía: un agente puede
+        -- reescribirla sin confirmación, pero no perderla. Tope de 20 versiones por nota.
+        CREATE TABLE IF NOT EXISTS memory_versions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            memory_id  INTEGER NOT NULL,
+            kind       TEXT NOT NULL,
+            title      TEXT NOT NULL,
+            body       TEXT NOT NULL,
+            tags       TEXT NOT NULL,
+            source     TEXT NOT NULL,
+            changed_at INTEGER NOT NULL
+        );
+        CREATE TRIGGER IF NOT EXISTS memories_versions_bu BEFORE UPDATE OF kind, title, body, tags ON memories
+        WHEN old.kind IS NOT new.kind OR old.title IS NOT new.title
+          OR old.body IS NOT new.body OR old.tags IS NOT new.tags BEGIN
+            INSERT INTO memory_versions (memory_id, kind, title, body, tags, source, changed_at)
+            VALUES (old.id, old.kind, old.title, old.body, old.tags, old.source, unixepoch());
+            DELETE FROM memory_versions WHERE memory_id = old.id AND id NOT IN (
+                SELECT id FROM memory_versions WHERE memory_id = old.id ORDER BY id DESC LIMIT 20);
+        END;
+        CREATE TRIGGER IF NOT EXISTS memories_versions_ad AFTER DELETE ON memories BEGIN
+            DELETE FROM memory_versions WHERE memory_id = old.id;
         END;
         CREATE TABLE IF NOT EXISTS memory_sent_daily (
             project TEXT NOT NULL,
@@ -703,6 +738,44 @@ impl Store {
             .map_err(|e| e.to_string())
     }
 
+    /// Lo que decía una nota antes de cada cambio, de la más reciente a la más antigua.
+    pub fn memory_versions(&self, project: &Path, id: i64) -> Result<Vec<MemoryVersion>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT v.id, v.kind, v.title, v.body, v.source, v.changed_at FROM memory_versions v
+                 JOIN memories m ON m.id = v.memory_id
+                 WHERE v.memory_id = ?1 AND m.project = ?2 ORDER BY v.id DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        stmt.query_map(params![id, self.project_key(project)], |r| {
+            Ok(MemoryVersion {
+                id: r.get(0)?,
+                kind: r.get(1)?,
+                title: r.get(2)?,
+                body: r.get(3)?,
+                source: r.get(4)?,
+                changed_at: r.get(5)?,
+            })
+        })
+        .and_then(Iterator::collect)
+        .map_err(|e| e.to_string())
+    }
+
+    /// Vuelve a poner una versión anterior (lo que había se guarda como otra versión).
+    pub fn restore_memory_version(&self, project: &Path, version: i64) -> Result<bool, String> {
+        self.conn
+            .execute(
+                "UPDATE memories SET (kind, title, body, tags) = (
+                    SELECT kind, title, body, tags FROM memory_versions WHERE id = ?1)
+                 WHERE project = ?2 AND id = (SELECT memory_id FROM memory_versions WHERE id = ?1)",
+                params![version, self.project_key(project)],
+            )
+            .map(|n| n > 0)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Borra del todo: solo la persona, desde el panel. Los agentes archivan.
     pub fn delete_memory(&self, project: &Path, id: i64) -> Result<bool, String> {
         self.conn
             .execute(
@@ -763,6 +836,45 @@ pub fn render_title(m: &Memory) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editing_a_memory_keeps_the_previous_version_and_can_restore_it() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/versions");
+        let id = store
+            .add_memory(p, "decision", "Pagos", "Stripe", "", "codex")
+            .unwrap();
+        store
+            .update_memory(p, id, None, None, Some("Paddle"), None)
+            .unwrap();
+        // Archivar no cambia lo que dice: no es una versión.
+        store.set_memory_status(p, id, "archived", None).unwrap();
+        let versions = store.memory_versions(p, id).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(
+            (versions[0].body.as_str(), versions[0].source.as_str()),
+            ("Stripe", "codex")
+        );
+        assert!(
+            store
+                .memory_versions(Path::new("/otro"), id)
+                .unwrap()
+                .is_empty()
+        );
+
+        assert!(store.restore_memory_version(p, versions[0].id).unwrap());
+        assert_eq!(store.get_memory(p, id).unwrap().unwrap().body, "Stripe");
+        // Restaurar también guarda lo que había («Paddle»): nada se pierde.
+        assert_eq!(store.memory_versions(p, id).unwrap()[0].body, "Paddle");
+
+        // Un tope por nota: el resumen de sesión se reescribe a menudo.
+        for i in 0..30 {
+            store
+                .update_memory(p, id, None, None, Some(&format!("v{i}")), None)
+                .unwrap();
+        }
+        assert_eq!(store.memory_versions(p, id).unwrap().len(), 20);
+    }
 
     #[test]
     fn suggestions_skip_the_session_note_and_loose_matches() {

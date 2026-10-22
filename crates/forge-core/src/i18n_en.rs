@@ -524,6 +524,9 @@ pub const EN: &[(&str, &str)] = &[
         "usage: forge memory delete <id>",
     ),
     ("Memoria #{id} borrada.", "Memory #{id} deleted."),
+    ("Memoria #{id} archivada.", "Memory #{id} archived."),
+    ("Versiones anteriores ({n})", "Previous versions ({n})"),
+    ("Restaurar esta", "Restore this one"),
     ("no existe la memoria #{id}", "memory #{id} does not exist"),
     (
         "acción desconocida \"{action}\": search, add, list o delete",
@@ -892,8 +895,8 @@ pub const EN: &[(&str, &str)] = &[
         "Lists the most recent project memories, optionally of one kind.",
     ),
     (
-        "Borra una memoria que ya no es cierta (por id).",
-        "Deletes a memory that is no longer true (by id).",
+        "Archiva una memoria que ya no es cierta (por id). No se borra: el dueño puede restaurarla desde el panel.",
+        "Archives a memory that is no longer true (by id). It is not deleted: the owner can restore it from the panel.",
     ),
     (
         "Lista de ideas y pendientes del proyecto (o la lista general con scope=general): en curso, pendientes y, si se pide, las hechas. Consúltala al empezar a trabajar o cuando el usuario pregunte qué falta.",

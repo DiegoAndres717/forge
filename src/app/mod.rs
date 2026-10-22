@@ -253,6 +253,8 @@ enum UiCmd {
     MemoryDelete(i64),
     MemoryStatus(i64, &'static str),
     MemoryForgotten(i64),
+    /// Vuelve a poner una versión anterior de una nota (id de la versión).
+    MemoryRestoreVersion(i64),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
     /// Clic en un agente: (id, sesión nueva). Ver `Workspace::agent_click`.
@@ -981,7 +983,8 @@ impl App {
             | UiCmd::MemorySave
             | UiCmd::MemoryDelete(_)
             | UiCmd::MemoryStatus(..)
-            | UiCmd::MemoryForgotten(_) => {
+            | UiCmd::MemoryForgotten(_)
+            | UiCmd::MemoryRestoreVersion(_) => {
                 let Some(i) = self.active else { return };
                 let path = self.workspaces[i].project.path.clone();
                 match cmd {
@@ -1034,6 +1037,10 @@ impl App {
                     }
                     UiCmd::MemoryForgotten(id) => {
                         self.db(|s| s.note_memory_forgotten(id));
+                        self.workspaces[i].memory.dirty = true;
+                    }
+                    UiCmd::MemoryRestoreVersion(version) => {
+                        self.db(|s| s.restore_memory_version(&path, version));
                         self.workspaces[i].memory.dirty = true;
                     }
                     UiCmd::MemoryStatus(id, status) => {

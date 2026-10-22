@@ -313,6 +313,8 @@ pub struct MemoryView {
     pub reads: std::collections::HashMap<i64, (i64, i64)>,
     /// Envíos a agentes y veces marcada «se ignoró», por memoria.
     pub stats: std::collections::HashMap<i64, forge_core::memory::MemoryStats>,
+    /// Lo que decía cada nota antes de sus cambios (solo las que tienen alguno).
+    pub versions: std::collections::HashMap<i64, Vec<forge_core::memory::MemoryVersion>>,
     /// Caracteres de memoria enviados a agentes en los últimos 7 días.
     pub sent_chars: i64,
     pub count: i64,

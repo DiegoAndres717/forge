@@ -1260,9 +1260,10 @@ fn memory_cli(
                 .first()
                 .and_then(|i| i.trim_start_matches('#').parse().ok())
                 .ok_or(tr!("uso: forge memory delete <id>"))?;
-            return match store.delete_memory(project, id)? {
+            // Los agentes también usan la CLI: archiva; borrar del todo es del panel.
+            return match store.set_memory_status(project, id, "archived", None)? {
                 true => {
-                    out.line(&tr!("Memoria #{id} borrada.", id = id));
+                    out.line(&tr!("Memoria #{id} archivada.", id = id));
                     Ok(0)
                 }
                 false => Err(tr!("no existe la memoria #{id}", id = id)),
