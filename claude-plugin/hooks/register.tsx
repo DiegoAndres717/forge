@@ -550,7 +550,7 @@ export const register: Register = on => {
     const full = ctx !== null && ctx >= warnAt
     if (
       e.props.hasSurvey ||
-      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null && !hint)
+      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null)
     )
       return next(e)
     const { Text } = $.ui.resolve(e)
