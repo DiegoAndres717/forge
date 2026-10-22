@@ -254,7 +254,7 @@ forge hooks install|uninstall|status  pre-commit and pre-push hooks
 forge agent list | open <id>          detected agents / open one here
 forge doctor                          checks git, database, settings, hooks and agents
 forge ai route | usage                change risk / model usage this month
-forge memory search|add|list|delete   Forge Memory (project memory)
+forge memory search|add|list|delete   Forge Memory (project memory; delete archives, the app panel deletes for good)
 forge plans [show|add|start|done|phase|task]   plans and backlog (outside the repository)
 forge context                         project summary agents get at the start
 forge mcp                             MCP server for agents

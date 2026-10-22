@@ -385,6 +385,44 @@ impl App {
                                         cmds.push(UiCmd::MemoryDelete(m.id));
                                     }
                                 });
+                                // Lo que decía antes: un agente pudo reescribirla.
+                                if let Some(versions) = ws.memory.versions.get(&m.id) {
+                                    egui::CollapsingHeader::new(
+                                        RichText::new(tr!(
+                                            "Versiones anteriores ({n})",
+                                            n = versions.len()
+                                        ))
+                                        .small()
+                                        .color(theme::TEXT_3),
+                                    )
+                                    .id_salt(("memory-versions", m.id))
+                                    .show(ui, |ui| {
+                                        for v in versions {
+                                            ui.horizontal_wrapped(|ui| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{} · {}",
+                                                        v.source,
+                                                        store::ago_precise(v.changed_at)
+                                                    ))
+                                                    .small()
+                                                    .color(Color32::from_gray(0x80)),
+                                                );
+                                                if ui.small_button(tr!("Restaurar esta")).clicked() {
+                                                    cmds.push(UiCmd::MemoryRestoreVersion(v.id));
+                                                }
+                                            });
+                                            if v.title != m.title {
+                                                ui.add(
+                                                    egui::Label::new(RichText::new(&v.title).strong())
+                                                        .wrap(),
+                                                );
+                                            }
+                                            ui.add(egui::Label::new(&v.body).wrap());
+                                            ui.separator();
+                                        }
+                                    });
+                                }
                             });
                         if cut {
                             note.header_response.on_hover_text(&m.title);

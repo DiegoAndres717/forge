@@ -315,6 +315,14 @@ impl App {
             }
             tags.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             let reads = self.db(|s| s.memory_reads()).unwrap_or_default();
+            // ponytail: una consulta por nota mostrada (≤ 50); una sola si el panel crece.
+            let versions = results
+                .iter()
+                .filter_map(|m| {
+                    let v = self.db(|s| s.memory_versions(&path, m.id))?;
+                    (!v.is_empty()).then_some((m.id, v))
+                })
+                .collect();
             let stats = self.db(|s| s.memory_stats()).unwrap_or_default();
             let sent_chars = self
                 .db(|s| s.memory_sent_chars(&path, 7))
@@ -326,9 +334,12 @@ impl App {
                 memory.tags,
                 memory.reads,
                 memory.stats,
+                memory.versions,
                 memory.sent_chars,
                 memory.dirty,
-            ) = (results, count, tags, reads, stats, sent_chars, false);
+            ) = (
+                results, count, tags, reads, stats, versions, sent_chars, false,
+            );
         }
         // Historial del panel abierto.
         if let Some(i) = self.active.filter(|i| {
