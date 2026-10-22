@@ -78,6 +78,10 @@ impl Default for LineRules {
                 "Cargo.lock",
                 "*.min.js",
                 "*.generated.*",
+                // Snapshots que generan las herramientas (migraciones de drizzle, pruebas).
+                "**/drizzle/meta/**",
+                "**/__snapshots__/**",
+                "*.snap",
                 "coverage/**",
                 "dist/**",
             ]
@@ -283,7 +287,7 @@ pub(crate) fn template(checks: &[(&str, &str, String)]) -> String {
          block_secrets = true\nblock_env_files = true\n\
          # Avisa si cambia código sin tocar ningún test.\nwarn_untested_code = false\n\n\
          [quality.lines]\n# Archivos que no cuentan para el límite de líneas.\n\
-         exclude = [\"package-lock.json\", \"pnpm-lock.yaml\", \"yarn.lock\", \"Cargo.lock\", \"*.generated.ts\", \"drizzle/meta/**\", \"coverage/**\", \"dist/**\"]\n\n",
+         exclude = [\"package-lock.json\", \"pnpm-lock.yaml\", \"yarn.lock\", \"Cargo.lock\", \"*.generated.ts\", \"**/drizzle/meta/**\", \"coverage/**\", \"dist/**\"]\n\n",
     );
     let stage = |name: &str, build: bool| {
         format!(
