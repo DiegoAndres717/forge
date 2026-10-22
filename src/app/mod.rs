@@ -286,6 +286,8 @@ enum UiCmd {
     CreateRules,
     /// Abre (o cierra con None) el formulario para omitir una regla: (regla, etiqueta).
     GuardAllowForm(Option<(String, String)>),
+    /// Lo mismo para una validación del historial: (regla, etiqueta, etapa, candidato, rama).
+    GuardAllowStored(String, String, Stage, String, String),
     GuardAllow,
     /// Exporta un reporte: el de la ejecución actual (None) o uno del historial.
     GuardExport(Option<i64>),
@@ -1097,6 +1099,7 @@ impl App {
             | UiCmd::GuardCommit
             | UiCmd::CreateRules
             | UiCmd::GuardAllowForm(_)
+            | UiCmd::GuardAllowStored(..)
             | UiCmd::GuardAllow
             | UiCmd::GuardExport(_)
             | UiCmd::HooksInstall
@@ -1112,13 +1115,18 @@ impl App {
                 match cmd {
                     UiCmd::ToggleGuard => {
                         ws.guard.open = !ws.guard.open;
+                        // Al abrir, el historial se relee: trae lo validado desde la terminal.
+                        ws.guard.history = None;
                         if ws.guard.open {
                             ws.memory.open = false;
                             ws.ideas.open = false;
                             ws.git.open = false;
                         }
                     }
-                    UiCmd::GuardStage(stage) => ws.guard.stage = stage,
+                    UiCmd::GuardStage(stage) => {
+                        ws.guard.stage = stage;
+                        ws.guard.history = None;
+                    }
                     UiCmd::GuardCancel => {
                         if let Some(run) = &ws.guard.run {
                             run.cancel();
@@ -1208,6 +1216,16 @@ impl App {
                             label,
                             reason: String::new(),
                             scope: guard::Scope::Commit,
+                            target: None,
+                        });
+                    }
+                    UiCmd::GuardAllowStored(rule, label, stage, candidate, branch) => {
+                        ws.guard.allow = Some(AllowForm {
+                            rule,
+                            label,
+                            reason: String::new(),
+                            scope: guard::Scope::Commit,
+                            target: Some((stage, candidate, branch)),
                         });
                     }
                     UiCmd::PrForm(false) => ws.guard.pr = None,
@@ -1244,11 +1262,18 @@ impl App {
                         }
                     }
                     UiCmd::GuardAllow => {
-                        let (Some(form), Some(run)) = (ws.guard.allow.take(), &ws.guard.run) else {
+                        let Some(form) = ws.guard.allow.take() else {
                             return;
                         };
-                        let (stage, candidate, branch) =
-                            run.snapshot(|r| (r.stage, r.candidate.clone(), r.branch.clone()));
+                        let stored = form.target.is_some();
+                        let target = form.target.clone().or_else(|| {
+                            ws.guard.run.as_ref().map(|run| {
+                                run.snapshot(|r| (r.stage, r.candidate.clone(), r.branch.clone()))
+                            })
+                        });
+                        let Some((stage, candidate, branch)) = target else {
+                            return;
+                        };
                         let repo = guard::repo_root(&path).unwrap_or_else(|_| path.clone());
                         let exception = guard::Exception {
                             id: 0,
@@ -1263,8 +1288,13 @@ impl App {
                             revoked: false,
                         };
                         if self.db(|s| s.add_exception(&path, &exception)).is_some() {
-                            // Se vuelve a evaluar para aplicar la excepción.
-                            self.apply(ctx, UiCmd::GuardRun, area);
+                            if stored {
+                                // De la terminal: vale para repetir ese mismo push o commit.
+                                self.workspaces[i].guard.history = None;
+                            } else {
+                                // Se vuelve a evaluar para aplicar la excepción.
+                                self.apply(ctx, UiCmd::GuardRun, area);
+                            }
                         }
                         return;
                     }

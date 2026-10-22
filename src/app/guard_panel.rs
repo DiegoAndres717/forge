@@ -113,6 +113,15 @@ pub(super) fn segmented(ui: &mut egui::Ui, current: Stage, cmds: &mut Vec<UiCmd>
         .shrink(2.0);
         let response = ui.interact(r, egui::Id::new(("stage", n)), Sense::click());
         let selected = stage == current;
+        // Nombre accesible: el texto se pinta a mano.
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                true,
+                selected,
+                stage.label(),
+            )
+        });
         if selected {
             ui.painter().rect_filled(r, 6.0, theme::SURFACE_HOVER);
         } else if response.hovered() {
@@ -130,6 +139,86 @@ pub(super) fn segmented(ui: &mut egui::Ui, current: Stage, cmds: &mut Vec<UiCmd>
             cmds.push(UiCmd::GuardStage(stage));
         }
     }
+}
+
+/// La última validación de la etapa elegida hecha fuera del panel (el hook de git en la
+/// terminal), si quedó bloqueada: sus reglas, con «Omitir con motivo…» atado a ese mismo
+/// push o commit, para repetirlo sin volver a validar desde aquí.
+fn terminal_validation(ui: &mut egui::Ui, ws: &Workspace, cmds: &mut Vec<UiCmd>) {
+    let stage = ws.guard.stage;
+    if ws
+        .guard
+        .run
+        .as_ref()
+        .is_some_and(|r| r.snapshot(|s| s.stage) == stage)
+    {
+        return;
+    }
+    let Some((_, report)) = ws
+        .guard
+        .history
+        .as_ref()
+        .and_then(|h| h.iter().find(|(_, r)| r.stage == stage))
+    else {
+        return;
+    };
+    let Some(candidate) = report
+        .candidate
+        .as_ref()
+        .filter(|_| report.verdict == guard::Verdict::Blocked)
+    else {
+        return;
+    };
+    let ago = (store::now() - report.finished_at).max(0) as u64;
+    theme::card(ui, |ui| {
+        ui.label(
+            RichText::new(tr!(
+                "{p0}  {p1} bloqueado desde la terminal · hace {p2}",
+                p0 = icon::X_CIRCLE,
+                p1 = stage.label(),
+                p2 = human_secs(ago)
+            ))
+            .color(theme::RED)
+            .strong(),
+        );
+        ui.label(
+            RichText::new(tr!(
+                "Omite una regla con motivo y repite el mismo comando en la terminal."
+            ))
+            .size(12.0)
+            .color(theme::TEXT_3),
+        );
+        let blocked = report
+            .items
+            .iter()
+            .filter(|i| i.level == guard::Level::Block)
+            .map(|i| (i.id.clone(), i.label.clone()))
+            .chain(
+                report
+                    .checks
+                    .iter()
+                    .filter(|c| c.level == guard::Level::Block)
+                    .map(|c| (format!("check:{}", c.id), c.name.clone())),
+            );
+        for (rule, label) in blocked {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new(format!("✕ {label}")).color(theme::TEXT));
+                if ui
+                    .link(RichText::new(tr!("Omitir con motivo…")).size(11.5))
+                    .on_hover_text(format!("Regla: {rule}"))
+                    .clicked()
+                {
+                    cmds.push(UiCmd::GuardAllowStored(
+                        rule.clone(),
+                        label.clone(),
+                        stage,
+                        candidate.diff_hash.clone(),
+                        report.branch.clone(),
+                    ));
+                }
+            });
+        }
+    });
 }
 
 pub(super) fn capitalize(s: &str) -> String {
@@ -583,6 +672,7 @@ impl App {
                 });
             });
         }
+        terminal_validation(&mut ui, ws, cmds);
         if ws.guard.stale {
             egui::Frame::new()
                 .fill(Color32::from_rgb(0x3d, 0x33, 0x12))
