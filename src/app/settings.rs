@@ -402,8 +402,7 @@ impl App {
         };
         let mut on = store.launch_pref("forge", "jev", None) == "on";
         let mut chores = store.launch_pref("forge", "jev_chores", None) != "off";
-        let mut launch = store.launch_pref("forge", "jev_launch", None) != "off";
-        let before = (on, chores, launch);
+        let before = (on, chores);
         row(
             ui,
             "Forge Jev",
@@ -417,26 +416,16 @@ impl App {
                         &mut chores,
                         tr!("Tareas de git a un subagente barato (forge-chores)"),
                     );
-                    ui.checkbox(
-                        &mut launch,
-                        tr!("Modelo según el pedido al abrir Claude (Opus, Sonnet o Haiku)"),
-                    )
-                    .on_hover_text(tr!(
-                        "Al abrir Claude Code con un pedido desde Forge (Planificar con IA, preguntar al agente): diseño, bugs o planes en Opus; tareas de git en Haiku; lo demás en Sonnet. Si eliges un modelo para Claude en Ajustes, manda ese."
-                    ));
                 }
             },
         );
-        if (on, chores, launch) == before {
+        if (on, chores) == before {
             return;
         }
         let saved = store
             .set_launch_pref("forge", "jev", None, if on { "on" } else { "off" })
             .and_then(|()| {
                 store.set_launch_pref("forge", "jev_chores", None, if chores { "" } else { "off" })
-            })
-            .and_then(|()| {
-                store.set_launch_pref("forge", "jev_launch", None, if launch { "" } else { "off" })
             });
         // Los subagentes ya añadidos ganan o pierden forge-chores, con el mismo modelo.
         let chores = store.jev_chores();

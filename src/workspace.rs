@@ -420,8 +420,6 @@ pub struct Workspace {
     sticky: Option<Attention>,
     /// Modos de Ajustes para los agentes nuevos («Primero pregunta», «Primero el test»).
     modes: forge_core::mcp::Modes,
-    /// Forge Jev: elegir el modelo de Claude por el pedido al abrirlo con uno.
-    pub(crate) jev_launch: bool,
 }
 
 /// Franja «mucho contexto»: compactar ahora (escribe `/compact`) o luego.
@@ -528,7 +526,6 @@ impl Workspace {
             notified: Vec::new(),
             sticky: None,
             modes: Default::default(),
-            jev_launch: false,
         }
     }
 
@@ -997,15 +994,6 @@ impl Workspace {
         if self.modes.jev_chores {
             env.insert("FORGE_JEV_CHORES".into(), "1".into());
         }
-        // El mod sugiere en la banda un modelo más barato para un pedido rutinario, salvo que
-        // el usuario eligiera el modelo de Claude en Ajustes.
-        let chosen = self
-            .launch
-            .get("claude")
-            .is_some_and(|(m, _)| !m.is_empty());
-        if self.jev_launch && !chosen {
-            env.insert("FORGE_JEV_MODEL".into(), "1".into());
-        }
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
@@ -1170,7 +1158,6 @@ impl Workspace {
         let Some(command) = spec.with_prompt(&spec.command, prompt) else {
             return;
         };
-        let command = self.jev_model(&spec, command, prompt);
         let state = PanelState {
             name: Some(spec.name.clone()),
             cwd: self.project.root(),
@@ -1193,29 +1180,6 @@ impl Workspace {
     }
 
     /// Modelo y esfuerzo de cada agente en este proyecto (los pone la app).
-    pub fn set_jev_launch(&mut self, on: bool) {
-        self.jev_launch = on;
-    }
-
-    /// Con Forge Jev, Claude abierto con un pedido usa el modelo que pide la regla
-    /// (`jev_claude_model`), salvo que el usuario eligiera uno en Ajustes o el comando ya
-    /// lleve `--model`. Otros agentes: sin cambios.
-    // ponytail: solo Claude Code; Codex no tiene niveles con nombre fijo (fase 6.4).
-    fn jev_model(&self, spec: &AgentSpec, command: String, prompt: &str) -> String {
-        let chosen = self
-            .launch
-            .get(spec.program())
-            .is_some_and(|(model, _)| !model.is_empty());
-        if self.jev_launch
-            && !chosen
-            && spec.mcp_style == Some(forge_core::agents::McpStyle::ClaudeJson)
-        {
-            spec.with_model(&command, forge_core::launch::jev_claude_model(prompt))
-        } else {
-            command
-        }
-    }
-
     pub fn set_launch(&mut self, launch: HashMap<String, (String, String)>) {
         self.launch = launch;
     }
@@ -3293,33 +3257,6 @@ mod agent_tests {
             "la conversación está en la otra cuenta"
         );
         let _ = std::fs::remove_dir_all(base);
-    }
-
-    /// Forge Jev elige el modelo de Claude por el pedido, salvo que el usuario haya elegido
-    /// uno en Ajustes; sin Forge Jev, nada cambia.
-    #[test]
-    fn forge_jev_picks_the_model_when_claude_opens_with_a_prompt() {
-        let dir = std::env::temp_dir().join(format!("forge-jev-launch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut ws = Workspace::new(Project::load(&dir).unwrap());
-        let claude = forge_core::agents::builtins()
-            .into_iter()
-            .find(|a| a.id == "claude")
-            .unwrap();
-        let open =
-            |ws: &Workspace, prompt: &str| ws.jev_model(&claude, "claude 'x'".into(), prompt);
-        assert_eq!(open(&ws, "haz commit y push"), "claude 'x'", "apagado");
-        ws.set_jev_launch(true);
-        let got = open(&ws, "haz commit y push");
-        assert!(got.contains("--model 'haiku'"), "{got}");
-        assert!(open(&ws, "Diseña la arquitectura de pagos").contains("--model 'opus'"));
-        // Un modelo elegido en Ajustes manda.
-        ws.set_launch(HashMap::from([(
-            "claude".into(),
-            ("opus".into(), String::new()),
-        )]));
-        assert_eq!(open(&ws, "haz commit y push"), "claude 'x'");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Los modos llegan al servidor MCP como argumentos: algunos agentes (Codex) no le

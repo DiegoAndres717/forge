@@ -494,36 +494,6 @@ test('the band warns when the context is getting full', async ($, on) => {
   expect(drawn).toContain('/compact')
 })
 
-// Forge Jev in a session: an Opus session gets a routine request, the band suggests a cheaper model once.
-async function jevBand($: Parameters<TestBody>[0], on: Parameters<TestBody>[1], env: Record<string, string>, prompts: string[]) {
-  mock.env(on, env)
-  on('turn.complete', ($, e) => ({ text: e.answer }))
-  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
-  await $.turn.complete(turn({ answer: 'Done.', usage: usage('claude-opus-5-5', 1000, 0) }))
-  const drawn: string[] = []
-  for (const text of prompts) {
-    await $.prompt.submit({ text } as never)
-    drawn.push(JSON.stringify(await (await $.ui.mount({
-      plugin: 'forge', surface: 'terminal', component: 'AbovePrompt',
-      props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
-    })).drawn()))
-  }
-  return drawn
-}
-
-test('Forge Jev suggests a cheaper model once when an Opus session gets a routine request', async ($, on) => {
-  const [hard, chore, again] = await jevBand($, on, { FORGE_JEV_MODEL: '1' },
-    ['Diseña la arquitectura de pagos', 'haz commit y push', 'abre el PR de esta rama'])
-  expect(hard).not.toContain('/model')
-  expect(chore).toContain('/model haiku')
-  expect(again).not.toContain('/model')
-})
-
-test('without Forge Jev the band suggests no model', async ($, on) => {
-  const [chore] = await jevBand($, on, {}, ['haz commit y push'])
-  expect(chore).not.toContain('/model')
-})
-
 test('on Windows a dangerous Bash command asks first; others keep their verdict', async ($, on) => {
   mock.env(on, { FORGE_BIN: '/forge', FORGE_GUARD_COMMANDS: '1' })
   const asked: string[][] = []
