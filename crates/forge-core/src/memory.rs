@@ -1344,6 +1344,15 @@ mod tests {
             })
             .unwrap();
         assert_eq!((status.as_str(), by), ("active", None));
+        // Las notas de antes también guardan su versión al cambiar. (Las bases reales ya
+        // tenían el índice FTS; esta de prueba no, así que se reconstruye antes.)
+        conn.execute_batch("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild');")
+            .unwrap();
+        conn.execute("UPDATE memories SET body = 'y'", []).unwrap();
+        let old: String = conn
+            .query_row("SELECT body FROM memory_versions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(old, "x");
         // A medio migrar (otro proceso se cortó entre las dos columnas): se completa.
         let half = Connection::open_in_memory().unwrap();
         half.execute_batch(

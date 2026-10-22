@@ -523,7 +523,6 @@ pub const EN: &[(&str, &str)] = &[
         "uso: forge memory delete <id>",
         "usage: forge memory delete <id>",
     ),
-    ("Memoria #{id} borrada.", "Memory #{id} deleted."),
     ("Memoria #{id} archivada.", "Memory #{id} archived."),
     ("Versiones anteriores ({n})", "Previous versions ({n})"),
     ("Restaurar esta", "Restore this one"),
