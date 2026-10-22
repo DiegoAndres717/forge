@@ -412,8 +412,8 @@ pub const EN: &[(&str, &str)] = &[
         "To skip a rule, with a recorded reason:",
     ),
     (
-        "  forge guard allow {rule} --stage {p0} --reason \"motivo\"",
-        "  forge guard allow {rule} --stage {p0} --reason \"reason\"",
+        "  {forge} guard allow {rule} --stage {p0} --reason \"motivo\"",
+        "  {forge} guard allow {rule} --stage {p0} --reason \"reason\"",
     ),
     ("evidencia reutilizada ({p0})", "evidence reused ({p0})"),
     ("código {code} · {secs}", "exit {code} · {secs}"),

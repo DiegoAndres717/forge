@@ -176,10 +176,7 @@ fn commit_blocked_outside_forge_and_exception_is_scoped() {
     repo.ok("git", &["add", "a.txt"]);
     let blocked = repo.fails("git", &["commit", "-m", "cambio"]);
     assert!(blocked.contains("BLOQUEADO"), "{blocked}");
-    assert!(
-        blocked.contains("forge guard allow check:tests"),
-        "{blocked}"
-    );
+    assert!(blocked.contains(" guard allow check:tests"), "{blocked}");
     assert!(
         repo.dir.join("../hook-previo").exists(),
         "el hook previo no se ejecutó"
@@ -357,8 +354,7 @@ fn ai_review_in_hook_with_fake_providers() {
     repo.ok("git", &["add", "b.txt"]);
     let blocked = repo.fails("git", &["commit", "-m", "bloqueado"]);
     assert!(
-        blocked.contains("Revisión de IA: bloquea")
-            && blocked.contains("forge guard allow ai-review"),
+        blocked.contains("Revisión de IA: bloquea") && blocked.contains(" guard allow ai-review"),
         "{blocked}"
     );
 
@@ -571,7 +567,7 @@ fn specialist_reviewers_by_path() {
         "{blocked}"
     );
     assert!(
-        blocked.contains("forge guard allow reviewer:database"),
+        blocked.contains(" guard allow reviewer:database"),
         "{blocked}"
     );
 

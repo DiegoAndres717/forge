@@ -213,10 +213,11 @@ fn forge_zsh_puts_shims_first() {
             "-l",
             "-i",
             "-c",
-            "echo FORGE_PATH=$PATH; echo FORGE_HIST=$HISTFILE; command -v git",
+            "echo FORGE_PATH=$PATH; echo FORGE_HIST=$HISTFILE; command -v git; echo FORGE_CMD=$(command -v forge)",
         ])
         .env("ZDOTDIR", &zdotdir)
         .env("FORGE_SHIMS", &shims)
+        .env("FORGE_BIN", FORGE)
         // Dentro de una terminal de Forge vendrían los de la app de verdad (backlog #12).
         .env_remove("FORGE_READ_SHIMS")
         .output()
@@ -228,6 +229,7 @@ fn forge_zsh_puts_shims_first() {
         .find_map(|l| l.split_once("FORGE_PATH=").map(|(_, p)| p))
         .unwrap_or_else(|| panic!("sin PATH en la salida:\n{text}"));
     assert!(path.starts_with(&format!("{shims}:")), "{path}");
+    assert!(text.contains(&format!("FORGE_CMD={FORGE}")), "{text}");
     assert!(
         text.lines().any(|l| l.ends_with(&format!("{shims}/git"))),
         "{text}"
@@ -258,7 +260,7 @@ fn forge_bash_puts_shims_first() {
             rcfile,
             "-i",
             "-c",
-            "echo FORGE_PATH=$PATH; echo PERFIL=$PERFIL_CARGADO",
+            "echo FORGE_PATH=$PATH; echo PERFIL=$PERFIL_CARGADO; echo FORGE_CMD=$(command -v forge)",
         ])
         .env("HOME", &home)
         .envs(&e.vars)
@@ -272,6 +274,8 @@ fn forge_bash_puts_shims_first() {
     let (read, shims) = (&e.vars["FORGE_READ_SHIMS"], &e.vars["FORGE_SHIMS"]);
     assert!(path.starts_with(&format!("{read}:{shims}:")), "{path}");
     assert!(text.contains("PERFIL=1"), "{text}");
+    // `forge` también, para lo que Guard pide escribir (forge guard allow …).
+    assert!(text.contains(&format!("FORGE_CMD={FORGE}")), "{text}");
 }
 
 /// PowerShell en Windows: con el arranque de Forge, `git` es el enlace de Guard aunque algo
@@ -300,6 +304,20 @@ fn forge_powershell_puts_shims_first() {
         text.trim().to_lowercase() == shims.join("git.exe").to_string_lossy().to_lowercase(),
         "git = {text:?}, enlaces en {}",
         shims.display()
+    );
+    // `forge` también, al final del PATH (para lo que Guard pide escribir).
+    let script = format!("{}; (Get-Command forge).Source", danger::PWSH_GUARD);
+    let out = Command::new(forge_core::powershell())
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .envs(&e.vars)
+        .output()
+        .unwrap();
+    let found = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+    assert_eq!(
+        found,
+        FORGE.to_lowercase(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 
@@ -402,4 +420,16 @@ fn git_bash_puts_shims_first() {
     for line in lines {
         assert!(line.starts_with(&shims), "{line} no está en {shims}");
     }
+    // `forge` también, aunque el perfil de Git Bash rehaga el PATH.
+    let out = Command::new(&bash)
+        .args(["-l", "-c", "command -v forge"])
+        .current_dir(&e.repo)
+        .envs(&e.vars)
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "sin forge: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 }

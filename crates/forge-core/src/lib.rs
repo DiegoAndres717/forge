@@ -71,6 +71,22 @@ pub fn powershell() -> &'static std::path::Path {
     })
 }
 
+/// Cómo escribir `forge` en lo que Guard pide ejecutar: `forge` si el shell lo encuentra en
+/// `path`; si no, la ruta completa de `exe` entre comillas (sirve en sh, bash, zsh y cmd).
+// ponytail: en PowerShell una ruta entre comillas necesita `& ` delante.
+pub fn forge_command(path: &std::ffi::OsStr, exe: &std::path::Path) -> String {
+    let exts: &[&str] = if cfg!(windows) { &["", ".exe"] } else { &[""] };
+    if find_in_path("forge", path, exts).is_some() {
+        return "forge".into();
+    }
+    let exe = exe.to_string_lossy();
+    if cfg!(windows) {
+        format!("\"{exe}\"")
+    } else {
+        agents::shell_quote(&exe)
+    }
+}
+
 /// Busca `program` en las carpetas de `path` (formato de $PATH) probando cada extensión de
 /// `exts` (en Windows, las de PATHEXT: `claude` → `claude.exe`, `code` → `code.cmd`).
 pub fn find_in_path(
@@ -315,5 +331,28 @@ mod platform_tests {
             "hola"
         );
         std::fs::remove_dir_all(base).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn guard_hints_use_forge_only_when_the_shell_can_find_it() {
+        let base = std::env::temp_dir().join(format!("forge-on-path-{}", std::process::id()));
+        let (bin, app) = (base.join("bin"), base.join("App Dir"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&app).unwrap();
+        let exe = app.join(if cfg!(windows) { "forge.exe" } else { "forge" });
+        std::fs::write(&exe, "").unwrap();
+        // Sin forge en el PATH: la ruta completa, entre comillas (lleva un espacio).
+        let hint = forge_command(bin.as_os_str(), &exe);
+        assert!(hint.starts_with(['\'', '"']), "{hint}");
+        assert!(hint.contains("App Dir"), "{hint}");
+        // Con forge en el PATH: basta `forge`.
+        std::fs::write(bin.join(exe.file_name().unwrap()), "").unwrap();
+        assert_eq!(forge_command(bin.as_os_str(), &exe), "forge");
+        let _ = std::fs::remove_dir_all(base);
     }
 }
