@@ -513,7 +513,7 @@ pub fn shim_name(argv0: &str) -> Option<String> {
 /// PowerShell: pone los enlaces de Guard primero en el PATH (tras el perfil del usuario, que
 /// puede reordenarlo). Va dentro del arranque de Forge y no en un .ps1: con la política de
 /// scripts «Restricted», la de fábrica en Windows, un archivo no se cargaría.
-pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_SHIMS) + @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\\') -ne $env:FORGE_SHIMS.TrimEnd('\\') })) -join ';' }";
+pub const PWSH_GUARD: &str = "if ($env:FORGE_SHIMS) { $env:Path = (@($env:FORGE_SHIMS) + @($env:Path -split ';' | Where-Object { $_ -and $_.TrimEnd('\\') -ne $env:FORGE_SHIMS.TrimEnd('\\') })) -join ';' }; if ($env:FORGE_BIN) { $forgeDir = Split-Path $env:FORGE_BIN; if (($env:Path -split ';') -notcontains $forgeDir) { $env:Path += ';' + $forgeDir }; Remove-Variable forgeDir }";
 
 /// PowerShell: `rm`, `del`, `rd`, `ri` y `erase` son alias de Remove-Item (ganan a cualquier
 /// programa del PATH). Una función global con los mismos parámetros que el cmdlet pregunta
@@ -869,6 +869,13 @@ fi
 PATH="$FORGE_SHIMS:${PATH//"$FORGE_SHIMS:"/}"
 # Terminales de agente: los lectores que piden permiso antes de leer secretos.
 [ -n "$FORGE_ORIGIN" ] && PATH="$FORGE_READ_SHIMS:${PATH//"$FORGE_READ_SHIMS:"/}"
+# `forge` al final del PATH, para lo que Guard pide escribir (sin tapar nada del usuario).
+if [ -n "$FORGE_BIN" ]; then
+  forge_dir=$(cygpath -u "$FORGE_BIN" 2>/dev/null || printf '%s' "$FORGE_BIN")
+  forge_dir=${forge_dir%/*}
+  case ":$PATH:" in *":$forge_dir:"*) ;; *) PATH="$PATH:$forge_dir" ;; esac
+  unset forge_dir
+fi
 "#;
 
 /// Git Bash en Windows (el shell de Claude Code allí): su /etc/profile pone /mingw64/bin y
@@ -886,6 +893,13 @@ if [ -n "$FORGE_ORIGIN" ] && [ -n "$FORGE_READ_SHIMS" ]; then
   forge_read_shims=$(cygpath -u "$FORGE_READ_SHIMS" 2>/dev/null || printf '%s' "$FORGE_READ_SHIMS")
   PATH="$forge_read_shims:${PATH//"$forge_read_shims:"/}"
   unset forge_read_shims
+fi
+# `forge` al final del PATH, para lo que Guard pide escribir (sin tapar nada del usuario).
+if [ -n "$FORGE_BIN" ]; then
+  forge_dir=$(cygpath -u "$FORGE_BIN" 2>/dev/null || printf '%s' "$FORGE_BIN")
+  forge_dir=${forge_dir%/*}
+  case ":$PATH:" in *":$forge_dir:"*) ;; *) PATH="$PATH:$forge_dir" ;; esac
+  unset forge_dir
 fi
 "#;
 
@@ -932,6 +946,8 @@ fn zsh_file(name: &str, tail: &str) -> String {
         s += "path=($FORGE_SHIMS ${path:#$FORGE_SHIMS})\n";
         // Terminales de agente: los lectores que piden permiso antes de leer secretos.
         s += "[[ -n $FORGE_ORIGIN ]] && path=($FORGE_READ_SHIMS ${path:#$FORGE_READ_SHIMS})\n";
+        // `forge` al final, para lo que Guard pide escribir (sin tapar nada del usuario).
+        s += "[[ -n $FORGE_BIN ]] && (( ! ${path[(Ie)${FORGE_BIN:h}]} )) && path+=(${FORGE_BIN:h})\n";
     }
     if name == ".zshrc" {
         s += ZSH_PROMPT;
@@ -1084,7 +1100,10 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
         // bash los vuelve a poner primero al final de su arranque (FORGE_BASHRC).
         // ponytail: en fish van delante del PATH heredado (su perfil puede reordenarlo).
         let path = std::env::var_os("PATH").unwrap_or_default();
-        let dirs = std::iter::once(shims.clone()).chain(std::env::split_paths(&path));
+        // `forge` al final (cmd, fish…): para lo que Guard pide escribir.
+        let dirs = std::iter::once(shims.clone())
+            .chain(std::env::split_paths(&path))
+            .chain(exe.parent().map(Path::to_path_buf));
         if let Ok(joined) = std::env::join_paths(dirs) {
             env.insert("PATH".into(), joined.to_string_lossy().into_owned());
         }

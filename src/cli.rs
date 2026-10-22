@@ -575,11 +575,19 @@ fn gate(
             let rules = r.blocking_rules();
             if !rules.is_empty() {
                 out.line(&out.paint("2", tr!("Para omitir una regla, con motivo registrado:")));
+                // `forge` solo si este shell lo encuentra; si no, su ruta completa.
+                let forge = std::env::current_exe().map_or("forge".into(), |exe| {
+                    forge_core::forge_command(
+                        &std::env::var_os("PATH").unwrap_or_default(),
+                        &forge_core::canonical(&exe),
+                    )
+                });
                 for rule in rules {
                     out.line(&out.paint(
                         "2",
                         &tr!(
-                            "  forge guard allow {rule} --stage {p0} --reason \"motivo\"",
+                            "  {forge} guard allow {rule} --stage {p0} --reason \"motivo\"",
+                            forge = forge,
                             p0 = stage.as_str(),
                             rule = rule
                         ),
