@@ -76,7 +76,12 @@ pub fn explain(status: u16, body: &str) -> Result<(), String> {
         401 | 403 => Err(tr!("La clave no es válida o no tiene permiso.").to_string()),
         404 => Err(tr!("No se encontró la dirección o el modelo. Revisa los dos.").to_string()),
         other => {
-            let detail: String = body.trim().chars().take(120).collect();
+            // Si es el JSON de error del servicio, se muestra solo su mensaje, entero.
+            let text = serde_json::from_str::<serde_json::Value>(body)
+                .ok()
+                .and_then(|v| v["error"]["message"].as_str().map(str::to_string))
+                .unwrap_or_else(|| body.trim().to_string());
+            let detail: String = text.chars().take(400).collect();
             if detail.is_empty() {
                 Err(tr!("El servicio respondió con el error {s}.", s = other))
             } else {
@@ -201,6 +206,17 @@ mod tests {
         );
         let other = explain(500, "boom").unwrap_err();
         assert!(other.contains("500"), "{other}");
+    }
+
+    #[test]
+    fn a_long_service_message_is_shown_whole_without_the_json_around_it() {
+        let message = "This API key is not scoped to a workspace, so this request must include the anthropic-workspace-id header with the workspace it acts in.";
+        let body = format!(
+            "{{\"type\":\"error\",\"error\":{{\"type\":\"invalid_request_error\",\"message\":\"{message}\"}}}}"
+        );
+        let shown = explain(400, &body).unwrap_err();
+        assert!(shown.contains(message), "{shown}");
+        assert!(!shown.contains("invalid_request_error"), "{shown}");
     }
 
     #[test]
