@@ -317,6 +317,10 @@ fn main() -> eframe::Result {
             forge_core::events::record_usage();
             return Ok(());
         }
+        Some("agent-advisor") => {
+            forge_core::events::record_advisor();
+            return Ok(());
+        }
         Some("agent-limits") => {
             forge_core::events::record_limits();
             return Ok(());

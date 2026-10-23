@@ -201,6 +201,105 @@ pub fn record_usage() {
     }
 }
 
+/// Nombre corto del modelo, como lo guarda el mod (`opus`, `sonnet`, `haiku`).
+fn short_model(id: &str) -> String {
+    ["opus", "sonnet", "haiku"]
+        .into_iter()
+        .find(|m| id.contains(m))
+        .unwrap_or(id)
+        .to_string()
+}
+
+/// Los tokens que el asesor gastó en las líneas completas del registro desde `offset`, y
+/// dónde seguir la próxima vez. Claude Code los apunta aparte, en `usage.iterations`
+/// (`advisor_message`): el total del mensaje es solo del modelo que trabaja.
+fn advisor_usage_after(path: &Path, offset: u64) -> Option<(Vec<TurnUsage>, u64)> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    // Si el archivo es más corto de lo contado, es otro: se lee desde el principio.
+    let start = if offset > len { 0 } else { offset };
+    file.seek(SeekFrom::Start(start)).ok()?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes).ok()?;
+    // Solo líneas completas: la última puede estar a medio escribir.
+    let end = bytes.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+    let mut found = Vec::new();
+    for line in bytes[..end].split(|b| *b == b'\n') {
+        if !line.windows(15).any(|w| w == b"advisor_message") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_slice::<serde_json::Value>(line) else {
+            continue;
+        };
+        let iterations = v["message"]["usage"]["iterations"].as_array();
+        for it in iterations.into_iter().flatten() {
+            if it["type"] != "advisor_message" {
+                continue;
+            }
+            let n = |key: &str| it[key].as_u64().unwrap_or(0);
+            found.push(TurnUsage {
+                model: short_model(it["model"].as_str().unwrap_or("opus")),
+                input_tokens: n("input_tokens"),
+                output_tokens: n("output_tokens"),
+                cache_read_input_tokens: n("cache_read_input_tokens"),
+                cache_creation_input_tokens: n("cache_creation_input_tokens"),
+                subagent: false,
+            });
+        }
+    }
+    Some((found, start + end as u64))
+}
+
+/// `forge agent-advisor`: suma los tokens del asesor del registro de la sesión (JSON con
+/// `transcript_path` por stdin) y responde con lo sumado por modelo, para la banda del
+/// mod. Cada llamada se cuenta una vez. Nunca falla.
+pub fn record_advisor() {
+    let Some(project) = std::env::var_os("FORGE_PROJECT") else {
+        return;
+    };
+    let mut payload = String::new();
+    let _ = std::io::stdin()
+        .take(64 * 1024)
+        .read_to_string(&mut payload);
+    let path = serde_json::from_str::<serde_json::Value>(&payload)
+        .ok()
+        .and_then(|v| v["transcript_path"].as_str().map(PathBuf::from));
+    let (Some(path), Some(store)) = (
+        path,
+        crate::store::Store::default_path().and_then(|p| crate::store::Store::open(&p).ok()),
+    ) else {
+        return;
+    };
+    let key = format!("advisor-offset:{}", path.display());
+    let offset = store
+        .setting(&key)
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let Some((found, next)) = advisor_usage_after(&path, offset) else {
+        return;
+    };
+    let mut added: std::collections::BTreeMap<String, [u64; 2]> = Default::default();
+    for usage in &found {
+        if store
+            .add_agent_usage(Path::new(&project), usage, account_id())
+            .is_ok()
+        {
+            let sum = added.entry(usage.model.clone()).or_default();
+            sum[0] += usage.input_tokens + usage.output_tokens + usage.cache_creation_input_tokens;
+            sum[1] += usage.cache_read_input_tokens;
+        }
+    }
+    let _ = store.set_setting(&key, &next.to_string());
+    let out: serde_json::Map<String, serde_json::Value> = added
+        .into_iter()
+        .map(|(m, [fresh, cache])| (m, serde_json::json!({ "fresh": fresh, "cache": cache })))
+        .collect();
+    println!("{}", serde_json::Value::Object(out));
+}
+
 /// Los avisos de espera de Claude Code llegan en inglés: los conocidos se traducen al idioma
 /// de Forge; el resto pasa tal cual.
 fn waiting_text(name: &str, message: &str) -> String {
