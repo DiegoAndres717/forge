@@ -2689,8 +2689,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Asesor de Claude", "Claude advisor"),
     (
-        "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); es el propio modelo quien decide cuándo consultarlo. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora.",
-        "Claude Code works on Sonnet, which is cheaper, and consults Opus when it needs to. Measured on real sessions: most of the spend was Opus re-reading long conversations. It opens Claude on Sonnet and turns on Claude Code's Opus advisor (still experimental, billed at Opus rates); the model itself decides when to consult it. A /model you pick inside the session wins. Off by default; applies to the sessions you open from now on.",
+        "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); Forge se lo recuerda al crear un plan, cuando un mismo error se repite y antes de dar un cambio por terminado. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora.",
+        "Claude Code works on Sonnet, which is cheaper, and consults Opus when it needs to. Measured on real sessions: most of the spend was Opus re-reading long conversations. It opens Claude on Sonnet and turns on Claude Code's Opus advisor (still experimental, billed at Opus rates); Forge reminds it when a plan is created, when the same error repeats, and before a change is called done. A /model you pick inside the session wins. Off by default; applies to the sessions you open from now on.",
     ),
     ("Sonnet con Opus de asesor", "Sonnet with Opus as advisor"),
     (

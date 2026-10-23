@@ -407,7 +407,7 @@ impl App {
             ui,
             tr!("Asesor de Claude"),
             tr!(
-                "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); es el propio modelo quien decide cuándo consultarlo. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora."
+                "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); Forge se lo recuerda al crear un plan, cuando un mismo error se repite y antes de dar un cambio por terminado. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora."
             ),
             |ui| {
                 ui.checkbox(&mut on, tr!("Sonnet con Opus de asesor"));
