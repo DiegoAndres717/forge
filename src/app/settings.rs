@@ -937,6 +937,7 @@ fn short_tokens(n: u64) -> String {
 impl App {
     /// Cuentas de Claude Code y Codex: varias a la vez, cada una con su login.
     fn accounts_ui(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+        let mut submit = None;
         let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
         let programs: Vec<(&str, &str)> = [("claude", "Claude Code"), ("codex", "Codex")]
             .into_iter()
@@ -986,7 +987,10 @@ impl App {
                     };
                     let tokens = usage.get(&a.id).copied();
                     account_row(ui, cmds, program, a, chosen, ws.is_some());
-                    account_usage(ui, limits.as_ref(), tokens);
+                    // Una cuenta con clave de API no tiene plan ni ventanas de uso.
+                    if !a.is_api() {
+                        account_usage(ui, limits.as_ref(), tokens);
+                    }
                     ui.add_space(4.0);
                 }
                 ui.add_space(4.0);
@@ -996,9 +1000,178 @@ impl App {
                 {
                     cmds.push(UiCmd::AccountAdd(program.into()));
                 }
+                // Con una clave de API en vez de iniciar sesión: Anthropic, DeepSeek u otro.
+                if program == "claude" {
+                    match self.api_form.as_mut() {
+                        None => {
+                            if ui.button(tr!("Añadir modelo por API")).clicked() {
+                                self.api_form = Some(ApiForm::new());
+                            }
+                        }
+                        Some(form) => submit = api_form_ui(ui, form),
+                    }
+                }
             }
         });
+        match submit {
+            Some(true) => self.add_api_account(),
+            Some(false) => self.api_form = None,
+            None => {}
+        }
     }
+
+    /// Guarda la cuenta del formulario (la clave va al llavero). Si algo falla, el
+    /// formulario sigue abierto con el motivo.
+    fn add_api_account(&mut self) {
+        let Some(mut form) = self.api_form.take() else {
+            return;
+        };
+        let name = match form.name.trim() {
+            "" => provider_label(form.provider),
+            name => name.to_string(),
+        };
+        let custom = form.provider == "custom";
+        let result = self.store.as_ref().map(|s| {
+            s.add_api_account(
+                &name,
+                form.provider,
+                custom.then_some(form.url.as_str()),
+                custom.then_some(form.model.as_str()),
+                &form.key,
+                self.secrets.as_ref(),
+            )
+        });
+        match result {
+            Some(Ok(_)) => self.sync_accounts(),
+            Some(Err(e)) => {
+                form.error = Some(e);
+                self.api_form = Some(form);
+            }
+            None => self.api_form = Some(form),
+        }
+    }
+}
+
+/// «Añadir modelo por API»: lo que se escribe mientras el formulario está abierto.
+pub(super) struct ApiForm {
+    provider: &'static str,
+    name: String,
+    key: String,
+    url: String,
+    model: String,
+    error: Option<String>,
+}
+
+impl ApiForm {
+    fn new() -> Self {
+        Self {
+            provider: "anthropic",
+            name: String::new(),
+            key: String::new(),
+            url: String::new(),
+            model: String::new(),
+            error: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn provider(&self) -> &str {
+        self.provider
+    }
+
+    /// Qué falta para poder añadir; la clave nunca se muestra después.
+    fn ready(&self) -> bool {
+        !self.key.trim().is_empty()
+            && (self.provider != "custom"
+                || (!self.url.trim().is_empty() && !self.model.trim().is_empty()))
+    }
+}
+
+fn provider_label(provider: &str) -> String {
+    match provider {
+        "deepseek" => "DeepSeek".into(),
+        "custom" => tr!("Otro").to_string(),
+        _ => "Anthropic".into(),
+    }
+}
+
+/// El formulario en tres pasos cortos. Devuelve `Some(true)` al pulsar «Añadir» y
+/// `Some(false)` al cancelar.
+fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
+    let mut action = None;
+    ui.add_space(8.0);
+    theme::card(ui, |ui| {
+        ui.label(RichText::new(tr!("Añadir modelo por API")).strong());
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            for provider in ["anthropic", "deepseek", "custom"] {
+                if ui
+                    .selectable_label(form.provider == provider, provider_label(provider))
+                    .clicked()
+                {
+                    form.provider = provider;
+                    form.error = None;
+                }
+            }
+        });
+        ui.label(
+            RichText::new(match form.provider {
+                "deepseek" => tr!("Usa los modelos de DeepSeek en Claude Code."),
+                "custom" => {
+                    tr!("Para cualquier servicio compatible con la API de Anthropic.")
+                }
+                _ => tr!("Con tu clave de la consola de Anthropic."),
+            })
+            .size(11.5)
+            .color(theme::TEXT_3),
+        );
+        ui.add_space(4.0);
+        ui.add(
+            theme::field(egui::TextEdit::singleline(&mut form.name))
+                .hint_text(tr!("Nombre (opcional)"))
+                .desired_width(f32::INFINITY),
+        );
+        ui.add(
+            theme::field(egui::TextEdit::singleline(&mut form.key).password(true))
+                .hint_text(tr!("Pega aquí tu clave"))
+                .desired_width(f32::INFINITY),
+        );
+        if form.provider == "custom" {
+            ui.add(
+                theme::field(egui::TextEdit::singleline(&mut form.url))
+                    .hint_text(tr!("Dirección (https://…)"))
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add(
+                theme::field(egui::TextEdit::singleline(&mut form.model))
+                    .hint_text(tr!("Modelo"))
+                    .desired_width(f32::INFINITY),
+            );
+        }
+        ui.label(
+            RichText::new(tr!(
+                "La clave se guarda cifrada en el llavero de tu sistema y no se vuelve a mostrar."
+            ))
+            .size(11.5)
+            .color(theme::TEXT_3),
+        );
+        if let Some(e) = &form.error {
+            ui.label(RichText::new(e).size(12.0).color(theme::RED));
+        }
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(form.ready(), theme::primary_button(tr!("Añadir modelo")))
+                .clicked()
+            {
+                action = Some(true);
+            }
+            if theme::secondary(ui, tr!("Cancelar")).clicked() {
+                action = Some(false);
+            }
+        });
+    });
+    action
 }
 
 /// Uso del plan de una cuenta (5 h y semanal, de la última vez que se usó desde Forge) y
@@ -1161,6 +1334,13 @@ fn account_row(
             }
         });
     }
+    if let Some(provider) = &a.provider {
+        ui.label(
+            RichText::new(tr!("Clave de API · {p0}", p0 = provider_label(provider)))
+                .size(11.5)
+                .color(theme::TEXT_3),
+        );
+    }
     if in_project {
         ui.horizontal_wrapped(|ui| {
             let here = chosen == Some(a.id);
@@ -1178,12 +1358,13 @@ fn account_row(
             {
                 cmds.push(UiCmd::UseAccount(program.into(), a.id));
             }
-            if ui
-                .button(tr!("Iniciar sesión"))
-                .on_hover_text(tr!(
-                    "Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)"
-                ))
-                .clicked()
+            if !a.is_api()
+                && ui
+                    .button(tr!("Iniciar sesión"))
+                    .on_hover_text(tr!(
+                        "Abre el agente con esta cuenta para que inicies sesión (solo la primera vez)"
+                    ))
+                    .clicked()
             {
                 cmds.push(UiCmd::AccountLogin(program.into(), a.id));
             }

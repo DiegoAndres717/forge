@@ -306,6 +306,10 @@ pub struct App {
     settings: Settings,
     sidebar: bool,
     error: Option<String>,
+    /// Dónde se guardan las claves de las cuentas con API (el llavero; las pruebas, memoria).
+    secrets: Arc<dyn forge_core::secrets::SecretStore>,
+    /// Formulario abierto de «Añadir modelo por API» (Ajustes → Cuentas).
+    api_form: Option<settings::ApiForm>,
     title: String,
     last_save: Instant,
     picker: Option<Receiver<Option<PathBuf>>>,
@@ -414,6 +418,8 @@ impl App {
             settings,
             sidebar: true,
             error,
+            secrets: Arc::new(forge_core::secrets::Keychain),
+            api_form: None,
             title: String::new(),
             last_save: Instant::now(),
             picker: None,
@@ -534,6 +540,7 @@ impl App {
             self.workspaces[i].set_modes(modes);
             let advisor = self.store.as_ref().is_some_and(|s| s.advisor());
             self.workspaces[i].set_advisor(advisor);
+            self.workspaces[i].set_secrets(self.secrets.clone());
             let (accounts, chosen) = self.account_state(&path);
             let launch = self.launch_state(&path);
             self.workspaces[i].set_accounts(accounts, chosen);
@@ -907,8 +914,7 @@ impl App {
                     if self.db(|s| s.delete_account(&program, id)).is_some()
                         && let Some(secret) = secret
                     {
-                        use forge_core::secrets::SecretStore;
-                        let _ = forge_core::secrets::Keychain.delete(&secret);
+                        let _ = self.secrets.delete(&secret);
                     }
                     self.sync_accounts();
                 }
