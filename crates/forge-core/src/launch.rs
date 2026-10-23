@@ -108,11 +108,13 @@ impl Store {
 
 /// Con el asesor encendido, Claude Code abre en Sonnet: `ANTHROPIC_MODEL` va por encima del
 /// `model` de los ajustes. Un modelo ya fijado en el entorno del proyecto manda, y un `/model`
-/// o `--model` en la propia sesión también.
+/// o `--model` en la propia sesión también. `FORGE_ADVISOR=1` avisa al mod de Forge para que
+/// le pida a Sonnet las consultas a Opus (él decide poco por su cuenta).
 pub fn advisor_env(on: bool, program: &str, env: &mut std::collections::HashMap<String, String>) {
     if on && program == "claude" {
         env.entry("ANTHROPIC_MODEL".into())
             .or_insert_with(|| "sonnet".into());
+        env.insert("FORGE_ADVISOR".into(), "1".into());
     }
 }
 
@@ -143,6 +145,8 @@ mod tests {
         assert!(env.is_empty(), "apagado, o en otro agente: nada");
         advisor_env(true, "claude", &mut env);
         assert_eq!(env["ANTHROPIC_MODEL"], "sonnet");
+        // El mod de Claude sabe así que debe pedir las consultas al asesor.
+        assert_eq!(env["FORGE_ADVISOR"], "1");
         env.insert("ANTHROPIC_MODEL".into(), "haiku".into());
         advisor_env(true, "claude", &mut env);
         assert_eq!(env["ANTHROPIC_MODEL"], "haiku", "el modelo fijado manda");

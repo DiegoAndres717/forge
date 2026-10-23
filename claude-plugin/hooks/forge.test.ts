@@ -547,3 +547,61 @@ test('reading a file with secrets asks first; other files keep their verdict', a
   expect((await check('Read', { file_path: '/p/src/main.rs' })).decision).toBe('allow')
   expect(asked.length).toBe(before)
 })
+
+// The advisor (Claude Code's own, Opus) is consulted only when the model decides to; Forge
+// reminds the model at three moments, and only when the Settings switch put FORGE_ADVISOR in.
+const advises = (context: readonly string[] | undefined) => (context ?? []).filter(c => c.includes('advisor tool')).length
+
+test('with the advisor on, a plan just created is reviewed by it, once per message', async ($, on) => {
+  mock.env(on, { FORGE_ADVISOR: '1' })
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  const plan = async () =>
+    advises(((await $.tool.call({ tool: 'mcp__plugin_forge_forge__plan_add' } as never)) as { context?: readonly string[] }).context)
+  expect(await plan()).toBe(1)
+  expect(await plan()).toBe(0)
+  await $.prompt.submit({ text: 'next' } as never)
+  expect(await plan()).toBe(1)
+})
+
+test('without the advisor switch nothing is asked of the model', async ($, on) => {
+  mock.env(on, {})
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  const r = (await $.tool.call({ tool: 'mcp__plugin_forge_forge__plan_add' } as never)) as { context?: readonly string[] }
+  expect(advises(r.context)).toBe(0)
+})
+
+test('the same tool failing the same way twice sends the advisor to look, once', async ($, on) => {
+  mock.env(on, { FORGE_ADVISOR: '1' })
+  let text = 'cannot find module x'
+  on('tool.call', () => ({ result: {}, text, isError: true, context: [] }) as never)
+  const bash = async () =>
+    advises(((await $.tool.call({ tool: 'Bash', command: 'npm run build' } as never)) as { context?: readonly string[] }).context)
+  expect(await bash()).toBe(0)
+  expect(await bash()).toBe(1)
+  expect(await bash()).toBe(0)
+  // A different error starts the count again.
+  text = 'permission denied'
+  expect(await bash()).toBe(0)
+  expect(await bash()).toBe(1)
+})
+
+test('before ending a turn that edited code, the advisor reviews it once', async ($, on) => {
+  mock.env(on, { FORGE_ADVISOR: '1' })
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
+  on('classic.Stop', () => ({}))
+  const stop = (active: boolean) => $.classic.Stop({ stop_hook_active: active } as never)
+  // Nothing edited: the turn ends.
+  expect((await stop(false)).block).toBeUndefined()
+  await $.tool.call({ tool: 'Edit' } as never)
+  const first = await stop(false)
+  expect(first.block).toContain('advisor tool')
+  // The re-prompt itself, or asking again in the same message, doesn't loop.
+  expect((await stop(true)).block).toBeUndefined()
+  expect((await stop(false)).block).toBeUndefined()
+  // A new message of yours starts over.
+  await $.prompt.submit({ text: 'next' } as never)
+  await $.tool.call({ tool: 'Write' } as never)
+  expect((await stop(false)).block).toContain('advisor tool')
+})

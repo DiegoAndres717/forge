@@ -85,6 +85,40 @@ let exploring = 0
 const CHECK_SHELL = /(?:^|&&|;)\s*(?:cargo\s+(?:test|build|clippy|check)|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|build|typecheck|lint)|npx\s+(?:-p\s+\S+\s+)?tsc|tsc|pytest|go\s+(?:test|build|vet)|gradle|\.\/gradlew|mvn|xcodebuild|swift\s+(?:test|build))\b/
 let checkNudged = false
 
+/** Claude Code's own advisor (Opus) only gets consulted when the model decides to, and a
+ * Sonnet doing routine work almost never does. With Settings → Agents → Claude advisor
+ * on (`FORGE_ADVISOR=1`), Forge reminds the model at three moments, each at most once per
+ * message of yours: a plan just created, the same tool failing the same way twice, and
+ * before finishing a turn that edited code. */
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const ADVISE_PLAN = 'Forge: you just created a plan. Call the advisor tool now (it takes no parameters) so it reviews the plan before you build on it; if it finds a problem, fix the plan with plan_update.'
+const ADVISE_FAILURE = 'Forge: this tool failed the same way twice. Call the advisor tool (no parameters) before trying again: a stronger model reads the whole conversation and says what is going wrong.'
+const ADVISE_STOP = 'Forge: before you finish, call the advisor tool once (no parameters) to review this change. If it finds a problem, fix it; otherwise finish.'
+let planAdvised = false
+let lastFailure = ''
+let failureAdvised = ''
+let editedCode = false
+let stopAsked = false
+
+/** What to remind the main loop of after this tool call, if anything. */
+function advisorReminder(e: { tool: string }, result: { isError?: boolean; text?: string }) {
+  if (EDIT_TOOLS.has(e.tool)) editedCode = true
+  if (e.tool.endsWith('plan_add') && !planAdvised) {
+    planAdvised = true
+    return ADVISE_PLAN
+  }
+  if (!result.isError) {
+    lastFailure = ''
+    return null
+  }
+  const failure = `${e.tool}:${(result.text ?? '').slice(0, 120)}`
+  const repeated = failure === lastFailure
+  lastFailure = failure
+  if (!repeated || failure === failureAdvised) return null
+  failureAdvised = failure
+  return ADVISE_FAILURE
+}
+
 
 /** Models always listed in the band, in this order (others are added when used). */
 const MODELS = ['opus', 'sonnet', 'haiku']
@@ -363,6 +397,11 @@ export const register: Register = on => {
   on('prompt.submit', async ($, e, next) => {
     exploring = 0
     checkNudged = false
+    planAdvised = false
+    lastFailure = ''
+    failureAdvised = ''
+    editedCode = false
+    stopAsked = false
     const text = e.text.trim()
     if (text.startsWith('/')) return next(e)
     const [found, anchored] = await Promise.all([
@@ -466,6 +505,10 @@ export const register: Register = on => {
       await countRead($, Boolean(e.agentId))
     }
     if (e.agentId || 'deny' in result) return result
+    if (await $.env.get('FORGE_ADVISOR').catch(() => undefined) === '1') {
+      const reminder = advisorReminder(e, result)
+      if (reminder) return { ...result, context: [...(result.context ?? []), reminder] }
+    }
     if (!checkNudged && e.tool === 'Bash' && 'command' in e && typeof e.command === 'string' && CHECK_SHELL.test(e.command)) {
       checkNudged = true
       exploring = 0
@@ -490,6 +533,16 @@ export const register: Register = on => {
         'Forge: you have searched or read several files yourself in a row. Delegate the rest of this exploration to forge:explorer (cheaper, and it keeps your context clean); keep doing the editing yourself.',
       ],
     }
+  })
+
+  // Before ending a turn that edited code, the model is sent once to the advisor. The
+  // re-prompt it causes (`stop_hook_active`) is never blocked again.
+  on('classic.Stop', async ($, e, next) => {
+    const result = await next(e)
+    if (e.stop_hook_active || stopAsked || !editedCode) return result
+    if (await $.env.get('FORGE_ADVISOR').catch(() => undefined) !== '1') return result
+    stopAsked = true
+    return { ...result, block: ADVISE_STOP }
   })
 
   on('turn.complete', async ($, e, next) => {
