@@ -443,6 +443,46 @@ fn edit_json(
     key: &str,
     change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> bool,
 ) -> Result<(), String> {
+    edit_root(file, |root| {
+        let servers = root
+            .entry(key)
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .ok_or_else(|| format!("{}: {key} is not an object", file.display()))?;
+        Ok(change(servers))
+    })
+}
+
+/// Pone u quita `"advisorModel": "opus"` en los ajustes de Claude Code (el asesor propio de
+/// Claude, plan #81). Solo toca lo que Forge puso: un asesor que el usuario eligió se queda.
+pub fn set_claude_advisor(settings: &Path, on: bool) -> Result<(), String> {
+    edit_root(settings, |root| {
+        let current = root.get("advisorModel").and_then(|v| v.as_str());
+        Ok(match (on, current) {
+            (true, None) => {
+                root.insert("advisorModel".into(), "opus".into());
+                true
+            }
+            (false, Some("opus")) => root.remove("advisorModel").is_some(),
+            _ => false,
+        })
+    })
+}
+
+/// Los ajustes de Claude Code: los de `CLAUDE_CONFIG_DIR` si está (cuentas de Forge) o
+/// `~/.claude/settings.json`. Las cuentas de Forge los comparten por enlace.
+pub fn claude_settings(home: &Path) -> std::path::PathBuf {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .map_or_else(|| home.join(".claude"), std::path::PathBuf::from)
+        .join("settings.json")
+}
+
+/// Edita el objeto raíz de un archivo JSON; `change` dice si hay algo que escribir.
+fn edit_root(
+    file: &Path,
+    change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> Result<bool, String>,
+) -> Result<(), String> {
     // Si es un enlace (gestores de dotfiles), se cambia el archivo al que apunta.
     let file = &std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     // Solo un archivo que no existe cuenta como vacío: si no se puede leer, no se toca.
@@ -456,14 +496,10 @@ fn edit_json(
     } else {
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?
     };
-    let servers = root
+    let object = root
         .as_object_mut()
-        .ok_or_else(|| format!("{}: not a JSON object", file.display()))?
-        .entry(key)
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or_else(|| format!("{}: {key} is not an object", file.display()))?;
-    if !change(servers) {
+        .ok_or_else(|| format!("{}: not a JSON object", file.display()))?;
+    if !change(object)? {
         return Ok(());
     }
     // Se escribe aparte y se renombra: agy nunca lee un archivo a medias.
@@ -1006,6 +1042,32 @@ pub fn planner_agent<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// El asesor se escribe en los ajustes de Claude sin tocar lo demás ni lo que el
+    /// usuario haya elegido.
+    #[test]
+    fn the_advisor_is_added_and_removed_without_touching_the_rest() {
+        let dir = std::env::temp_dir().join(format!("forge-advisor-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        std::fs::write(&file, r#"{"model":"opus","env":{"A":"1"}}"#).unwrap();
+        let read = || -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap()
+        };
+        set_claude_advisor(&file, true).unwrap();
+        assert_eq!(read()["advisorModel"], "opus");
+        assert_eq!(read()["model"], "opus");
+        assert_eq!(read()["env"]["A"], "1");
+        set_claude_advisor(&file, false).unwrap();
+        assert!(read().get("advisorModel").is_none());
+        assert_eq!(read()["env"]["A"], "1");
+        // Un asesor que el usuario eligió él mismo ni se pisa ni se quita.
+        std::fs::write(&file, r#"{"advisorModel":"fable"}"#).unwrap();
+        set_claude_advisor(&file, true).unwrap();
+        set_claude_advisor(&file, false).unwrap();
+        assert_eq!(read()["advisorModel"], "fable");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn the_planner_is_the_agent_in_use_when_it_can_plan() {

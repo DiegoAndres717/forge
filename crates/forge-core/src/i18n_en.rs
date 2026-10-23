@@ -2687,6 +2687,12 @@ pub const EN: &[(&str, &str)] = &[
         "Manda cada trabajo al modelo más barato que lo hace bien. Medido en sesiones reales: commits, push, ramas y PR son una cuarta parte del gasto, porque cada paso relee toda la conversación con el modelo caro; un subagente barato empieza con un contexto pequeño. Apagado de serie; se aplica a los agentes que abras a partir de ahora. En Codex, Gemini, OpenCode y Qwen hace falta tener añadidos los subagentes.",
         "Sends each job to the cheapest model that does it well. Measured on real sessions: commits, pushes, branches and PRs are a quarter of the spend, because every step re-reads the whole conversation on the expensive model; a cheap subagent starts with a small context. Off by default; applies to the agents you open from now on. Codex, Gemini, OpenCode and Qwen need the subagents added.",
     ),
+    ("Asesor de Claude", "Claude advisor"),
+    (
+        "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); es el propio modelo quien decide cuándo consultarlo. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora.",
+        "Claude Code works on Sonnet, which is cheaper, and consults Opus when it needs to. Measured on real sessions: most of the spend was Opus re-reading long conversations. It opens Claude on Sonnet and turns on Claude Code's Opus advisor (still experimental, billed at Opus rates); the model itself decides when to consult it. A /model you pick inside the session wins. Off by default; applies to the sessions you open from now on.",
+    ),
+    ("Sonnet con Opus de asesor", "Sonnet with Opus as advisor"),
     (
         "Elegir el modelo más barato que sirva",
         "Pick the cheapest model that works",

@@ -1157,6 +1157,36 @@ fn forge_jev_is_off_by_default_and_turns_on_from_settings() {
     assert!(!h.state().modes(&dir).jev_chores);
 }
 
+/// El asesor se enciende en Ajustes → Agentes, apagado de serie, y escribe `advisorModel` en
+/// los ajustes de Claude (aquí una carpeta aparte, no la del dueño).
+#[test]
+fn the_advisor_is_off_by_default_and_turns_on_from_settings() {
+    let _serial = serial();
+    let dir = project("forge-advisor");
+    let config = dir.join("claude-config");
+    std::fs::create_dir_all(&config).unwrap();
+    // SAFETY: las pruebas e2e van de una en una (`serial`), nadie más toca el entorno.
+    unsafe { std::env::set_var("CLAUDE_CONFIG_DIR", &config) };
+    let mut h = app(dir.clone());
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    let advisor_on = |h: &Harness<'_, App>| h.state().store.as_ref().unwrap().advisor();
+    assert!(!advisor_on(&h));
+    h.get_by_label("Sonnet con Opus de asesor").click();
+    h.run_steps(3);
+    assert!(advisor_on(&h));
+    let text = std::fs::read_to_string(config.join("settings.json")).unwrap();
+    assert!(text.contains("\"advisorModel\": \"opus\""), "{text}");
+    h.get_by_label("Sonnet con Opus de asesor").click();
+    h.run_steps(3);
+    assert!(!advisor_on(&h));
+    let text = std::fs::read_to_string(config.join("settings.json")).unwrap();
+    assert!(!text.contains("advisorModel"), "{text}");
+    unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR") };
+}
+
 #[test]
 fn an_agent_that_only_redraws_does_not_raise_an_alert() {
     let _serial = serial();

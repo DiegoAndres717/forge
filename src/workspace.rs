@@ -423,6 +423,8 @@ pub struct Workspace {
     sticky: Option<Attention>,
     /// Modos de Ajustes para los agentes nuevos («Primero pregunta», «Primero el test»).
     modes: forge_core::mcp::Modes,
+    /// Claude en Sonnet con Opus de asesor para los Claude que se abran (plan #81).
+    advisor: bool,
 }
 
 /// Franja «mucho contexto»: compactar ahora (escribe `/compact`) o luego.
@@ -529,6 +531,7 @@ impl Workspace {
             notified: Vec::new(),
             sticky: None,
             modes: Default::default(),
+            advisor: false,
         }
     }
 
@@ -952,6 +955,11 @@ impl Workspace {
         self.modes = modes;
     }
 
+    /// Claude en Sonnet con Opus de asesor, en las terminales que se abran después.
+    pub fn set_advisor(&mut self, on: bool) {
+        self.advisor = on;
+    }
+
     fn insert(&mut self, id: PanelId, panel: Panel) {
         self.panels.insert(id, panel);
         self.next_id = self.next_id.max(id + 1);
@@ -1000,6 +1008,7 @@ impl Workspace {
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
+            forge_core::launch::advisor_env(self.advisor, spec.program(), &mut env);
         }
         let account = spec
             .as_ref()

@@ -86,6 +86,11 @@ impl Store {
             && self.launch_pref("forge", "jev_chores", None) != "off"
     }
 
+    /// Claude en Sonnet con Opus de asesor (plan #81). Apagado de serie.
+    pub fn advisor(&self) -> bool {
+        self.launch_pref("forge", "advisor", None) == "on"
+    }
+
     /// Lo que se usa al abrir el agente en el proyecto: lo del proyecto si lo hay, si no
     /// lo general. (modelo, esfuerzo).
     pub fn launch_for(&self, program: &str, project: &Path) -> (String, String) {
@@ -98,6 +103,16 @@ impl Store {
             }
         };
         (pick("model"), pick("effort"))
+    }
+}
+
+/// Con el asesor encendido, Claude Code abre en Sonnet: `ANTHROPIC_MODEL` va por encima del
+/// `model` de los ajustes. Un modelo ya fijado en el entorno del proyecto manda, y un `/model`
+/// o `--model` en la propia sesión también.
+pub fn advisor_env(on: bool, program: &str, env: &mut std::collections::HashMap<String, String>) {
+    if on && program == "claude" {
+        env.entry("ANTHROPIC_MODEL".into())
+            .or_insert_with(|| "sonnet".into());
     }
 }
 
@@ -118,6 +133,29 @@ mod tests {
             .unwrap();
         assert!(!store.tests_first(a), "el proyecto manda");
         assert!(store.tests_first(b), "otro proyecto: lo general");
+    }
+
+    #[test]
+    fn the_advisor_puts_claude_on_sonnet_unless_a_model_is_already_set() {
+        let mut env = std::collections::HashMap::new();
+        advisor_env(false, "claude", &mut env);
+        advisor_env(true, "codex", &mut env);
+        assert!(env.is_empty(), "apagado, o en otro agente: nada");
+        advisor_env(true, "claude", &mut env);
+        assert_eq!(env["ANTHROPIC_MODEL"], "sonnet");
+        env.insert("ANTHROPIC_MODEL".into(), "haiku".into());
+        advisor_env(true, "claude", &mut env);
+        assert_eq!(env["ANTHROPIC_MODEL"], "haiku", "el modelo fijado manda");
+    }
+
+    #[test]
+    fn the_advisor_is_off_by_default() {
+        let store = Store::in_memory().unwrap();
+        assert!(!store.advisor());
+        store
+            .set_launch_pref("forge", "advisor", None, "on")
+            .unwrap();
+        assert!(store.advisor());
     }
 
     #[test]
