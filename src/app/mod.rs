@@ -532,6 +532,8 @@ impl App {
             let path = self.workspaces[i].project.path.clone();
             let modes = self.modes(&path);
             self.workspaces[i].set_modes(modes);
+            let advisor = self.store.as_ref().is_some_and(|s| s.advisor());
+            self.workspaces[i].set_advisor(advisor);
             let (accounts, chosen) = self.account_state(&path);
             let launch = self.launch_state(&path);
             self.workspaces[i].set_accounts(accounts, chosen);

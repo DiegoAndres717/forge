@@ -291,6 +291,7 @@ impl App {
             );
             self.tests_first_ui(ui);
             self.jev_ui(ui);
+            self.advisor_ui(ui);
         });
         if ask != self.settings.ask_first {
             self.settings.ask_first = ask;
@@ -392,6 +393,42 @@ impl App {
             }
             self.sync_accounts();
         }
+    }
+
+    /// Claude Code en Sonnet con Opus de asesor (plan #81): Sonnet hace el trabajo y consulta
+    /// a Opus en los momentos difíciles. Apagado de serie.
+    fn advisor_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let mut on = store.advisor();
+        let before = on;
+        row(
+            ui,
+            tr!("Asesor de Claude"),
+            tr!(
+                "Claude Code trabaja con Sonnet, que es más barato, y consulta a Opus cuando lo necesita. Medido en sesiones reales: la mayor parte del gasto era Opus releyendo conversaciones largas. Abre Claude en Sonnet y activa el asesor Opus de Claude Code (todavía experimental, lo cobra al precio de Opus); es el propio modelo quien decide cuándo consultarlo. Un /model que elijas dentro de la sesión manda. Apagado de serie; se aplica a las sesiones que abras a partir de ahora."
+            ),
+            |ui| {
+                ui.checkbox(&mut on, tr!("Sonnet con Opus de asesor"));
+            },
+        );
+        if on == before {
+            return;
+        }
+        let saved = store
+            .set_launch_pref("forge", "advisor", None, if on { "on" } else { "off" })
+            .and_then(|()| {
+                let home = forge_core::home_dir().ok_or("sin carpeta personal")?;
+                forge_core::agents::set_claude_advisor(
+                    &forge_core::agents::claude_settings(&home),
+                    on,
+                )
+            });
+        if let Err(e) = saved {
+            self.error = Some(e);
+        }
+        self.sync_accounts();
     }
 
     /// Forge Jev: el modelo más barato que sirva para cada trabajo. Cada parte aparece con su
