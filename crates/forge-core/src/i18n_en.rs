@@ -2688,6 +2688,13 @@ pub const EN: &[(&str, &str)] = &[
         "Sends each job to the cheapest model that does it well. Measured on real sessions: commits, pushes, branches and PRs are a quarter of the spend, because every step re-reads the whole conversation on the expensive model; a cheap subagent starts with a small context. Off by default; applies to the agents you open from now on. Codex, Gemini, OpenCode and Qwen need the subagents added.",
     ),
     ("Asesor de Claude", "Claude advisor"),
+    ("Falta la clave.", "The key is missing."),
+    (
+        "La dirección debe empezar por https://",
+        "The address must start with https://",
+    ),
+    ("Falta el modelo.", "The model is missing."),
+    ("Proveedor desconocido: {p}", "Unknown provider: {p}"),
     (
         "No hay un llavero del sistema disponible, así que la clave no se guarda.",
         "There is no system keychain available, so the key is not saved.",
