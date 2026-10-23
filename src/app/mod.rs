@@ -510,14 +510,17 @@ impl App {
         (accounts, chosen)
     }
 
-    /// Modelo y esfuerzo de Claude Code y Codex en un proyecto (el suyo o el general).
+    /// Modelo y esfuerzo de la cuenta elegida para cada agente en un proyecto.
     fn launch_state(&self, project: &Path) -> HashMap<String, (String, String)> {
         let Some(store) = self.store.as_ref() else {
             return HashMap::new();
         };
         ["claude", "codex"]
             .into_iter()
-            .map(|p| (p.to_string(), store.launch_for(p, project)))
+            .map(|p| {
+                let account = store.project_account(project, p);
+                (p.to_string(), store.account_launch_for(&account, project))
+            })
             .collect()
     }
 

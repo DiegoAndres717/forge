@@ -2219,8 +2219,26 @@ fn a_chosen_account_reaches_new_terminals_of_the_project() {
     let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
     h.state_mut()
         .apply(&ctx, UiCmd::AccountAdd("claude".into()), area);
+    let work = h.state().store.as_ref().unwrap().accounts("claude")[1].clone();
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .set_account_launch_pref(&work, "model", None, "sonnet")
+        .unwrap();
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .set_account_launch_pref(&work, "effort", None, "high")
+        .unwrap();
     h.state_mut()
         .apply(&ctx, UiCmd::UseAccount("claude".into(), 1), area);
+    assert_eq!(
+        h.state().launch_state(&dir).get("claude"),
+        Some(&("sonnet".into(), "high".into())),
+        "la terminal nueva recibe los ajustes de la cuenta elegida"
+    );
     let w = ws(h.state());
     assert!(w.has_accounts("claude"));
     assert_eq!(w.account_for("claude", None).map(|a| a.id), Some(1));

@@ -3,6 +3,7 @@
 // propia configuración (Forge no lo toca).
 use std::path::Path;
 
+use crate::accounts::Account;
 use crate::store::Store;
 
 /// Niveles de esfuerzo que entiende cada agente (de menos a más).
@@ -39,6 +40,15 @@ fn key(program: &str, what: &str, project: Option<&str>) -> String {
     }
 }
 
+/// La cuenta forma parte de la clave para no confundir el modelo de inicio con el que una
+/// cuenta API entrega al agente en su entorno.
+fn account_key(account: &Account, what: &str, project: Option<&str>) -> String {
+    match project {
+        Some(p) => format!("launch:{}:{}:{what}:{p}", account.program, account.id),
+        None => format!("launch:{}:{}:{what}", account.program, account.id),
+    }
+}
+
 impl Store {
     /// El valor guardado (general si `project` es `None`); vacío si no hay.
     pub fn launch_pref(&self, program: &str, what: &str, project: Option<&Path>) -> String {
@@ -65,6 +75,42 @@ impl Store {
     ) -> Result<(), String> {
         let project = project.map(|p| self.project_key(p));
         self.set_setting(&key(program, what, project.as_deref()), value.trim())
+    }
+
+    /// Preferencia de inicio de una cuenta. La principal conserva como migración implícita
+    /// lo que Forge guardaba antes sin cuenta, de modo que actualizar no cambia sus terminales.
+    pub fn account_launch_pref(
+        &self,
+        account: &Account,
+        what: &str,
+        project: Option<&Path>,
+    ) -> String {
+        let project = project.map(|p| self.project_key(p));
+        match self
+            .setting(&account_key(account, what, project.as_deref()))
+            .ok()
+            .flatten()
+        {
+            Some(value) => value,
+            None if account.is_main() => {
+                self.launch_pref(&account.program, what, project.as_deref().map(Path::new))
+            }
+            None => String::new(),
+        }
+    }
+
+    pub fn set_account_launch_pref(
+        &self,
+        account: &Account,
+        what: &str,
+        project: Option<&Path>,
+        value: &str,
+    ) -> Result<(), String> {
+        let project = project.map(|p| self.project_key(p));
+        self.set_setting(
+            &account_key(account, what, project.as_deref()),
+            value.trim(),
+        )
     }
 
     /// Modo «Primero el test» en el proyecto: el suyo («on»/«off») si lo tiene, si no
@@ -98,6 +144,20 @@ impl Store {
             let own = self.launch_pref(program, what, Some(project));
             if own.is_empty() {
                 self.launch_pref(program, what, None)
+            } else {
+                own
+            }
+        };
+        (pick("model"), pick("effort"))
+    }
+
+    /// Modelo y esfuerzo que recibe esta cuenta al abrir una terminal. El proyecto puede
+    /// especializarlos y, si no, toma los de la cuenta.
+    pub fn account_launch_for(&self, account: &Account, project: &Path) -> (String, String) {
+        let pick = |what: &str| {
+            let own = self.account_launch_pref(account, what, Some(project));
+            if own.is_empty() {
+                self.account_launch_pref(account, what, None)
             } else {
                 own
             }
@@ -236,5 +296,58 @@ mod tests {
             (String::new(), String::new())
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn every_account_has_its_own_launch_preferences() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = (Path::new("/p/a"), Path::new("/p/b"));
+        let main = Account {
+            id: 0,
+            program: "claude".into(),
+            name: "Main".into(),
+            dir: None,
+            provider: None,
+            base_url: None,
+            model: None,
+        };
+        let work = Account {
+            id: 1,
+            name: "Work".into(),
+            ..main.clone()
+        };
+
+        // Lo existente sigue siendo la configuración de la principal tras actualizar.
+        store.set_setting("claude_model", "opus").unwrap();
+        store
+            .set_launch_pref("claude", "effort", None, "medium")
+            .unwrap();
+        store
+            .set_launch_pref("claude", "effort", Some(a), "max")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_for(&main, a),
+            ("opus".into(), "max".into())
+        );
+
+        // Una cuenta nueva no fuerza nada hasta configurarla.
+        assert_eq!(
+            store.account_launch_for(&work, a),
+            (String::new(), String::new())
+        );
+        store
+            .set_account_launch_pref(&work, "model", None, "sonnet")
+            .unwrap();
+        store
+            .set_account_launch_pref(&work, "effort", Some(a), "high")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_for(&work, a),
+            ("sonnet".into(), "high".into())
+        );
+        assert_eq!(
+            store.account_launch_for(&work, b),
+            ("sonnet".into(), String::new())
+        );
     }
 }
