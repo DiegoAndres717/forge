@@ -897,7 +897,19 @@ impl App {
                     self.error =
                         Some(tr!("Cierra antes las terminales que usan esa cuenta.").into());
                 } else {
-                    self.db(|s| s.delete_account(&program, id));
+                    // Una cuenta con clave de API se lleva su clave del llavero.
+                    let secret = self.store.as_ref().and_then(|s| {
+                        s.accounts(&program)
+                            .into_iter()
+                            .find(|a| a.id == id && a.is_api())
+                            .map(|a| a.secret_id())
+                    });
+                    if self.db(|s| s.delete_account(&program, id)).is_some()
+                        && let Some(secret) = secret
+                    {
+                        use forge_core::secrets::SecretStore;
+                        let _ = forge_core::secrets::Keychain.delete(&secret);
+                    }
                     self.sync_accounts();
                 }
             }

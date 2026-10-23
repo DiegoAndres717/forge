@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::secrets::SecretStore;
 use crate::store::Store;
 
 /// Agentes con cuentas: (programa, variable con su carpeta, carpeta principal en $HOME,
@@ -42,7 +43,22 @@ pub struct Account {
     /// Su carpeta (`None` = la principal, sin tocar el entorno). La pone el `Store`.
     #[serde(skip)]
     pub dir: Option<PathBuf>,
+    /// Cuenta con clave de API en vez de login: `anthropic`, `deepseek` o `custom`. La clave
+    /// no se guarda aquí sino en el llavero del sistema (`secret_id`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Dirección de la API (solo `custom`; DeepSeek ya la trae).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Modelo a usar (`custom` lo exige; DeepSeek trae `deepseek-flash` por defecto).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
+
+/// Dirección de la API de DeepSeek compatible con Claude Code, y sus modelos.
+const DEEPSEEK_URL: &str = "https://api.deepseek.com/anthropic";
+const DEEPSEEK_MODEL: &str = "deepseek-flash[1m]";
+const DEEPSEEK_SMALL: &str = "deepseek-flash";
 
 /// Una ventana de uso del plan (5 h, semanal…), como la da Claude Code.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -79,6 +95,67 @@ impl Account {
         ))
     }
 
+    /// Es una cuenta con clave de API (en vez de login).
+    pub fn is_api(&self) -> bool {
+        self.provider.is_some()
+    }
+
+    /// Nombre bajo el que su clave está en el llavero.
+    pub fn secret_id(&self) -> String {
+        format!("{}-{}", self.program, self.id)
+    }
+
+    /// El asesor de Claude Code es de Anthropic: con otro proveedor no se activa.
+    pub fn allows_advisor(&self) -> bool {
+        matches!(self.provider.as_deref(), None | Some("anthropic"))
+    }
+
+    /// Variables que llevan la clave, la dirección y los modelos al agente (vacío si la
+    /// cuenta es de login). La clave llega aquí ya leída del llavero.
+    pub fn api_env(&self, secret: &str) -> Vec<(String, String)> {
+        let var = |k: &str, v: &str| (k.to_string(), v.to_string());
+        let models = |big: &str, small: &str| {
+            vec![
+                var("ANTHROPIC_MODEL", big),
+                var("ANTHROPIC_DEFAULT_OPUS_MODEL", big),
+                var("ANTHROPIC_DEFAULT_SONNET_MODEL", big),
+                var("ANTHROPIC_DEFAULT_HAIKU_MODEL", small),
+                var("CLAUDE_CODE_SUBAGENT_MODEL", small),
+            ]
+        };
+        match self.provider.as_deref() {
+            Some("anthropic") => {
+                let mut env = vec![var("ANTHROPIC_API_KEY", secret)];
+                if let Some(model) = &self.model {
+                    env.push(var("ANTHROPIC_MODEL", model));
+                }
+                env
+            }
+            Some("deepseek") => {
+                let model = self.model.as_deref().unwrap_or(DEEPSEEK_MODEL);
+                let mut env = vec![
+                    var("ANTHROPIC_BASE_URL", DEEPSEEK_URL),
+                    var("ANTHROPIC_AUTH_TOKEN", secret),
+                    // 1M de contexto: que Claude compacte antes de llenarlo.
+                    var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "786432"),
+                ];
+                env.extend(models(model, DEEPSEEK_SMALL));
+                env
+            }
+            Some(_) => {
+                let url = self.base_url.as_deref().unwrap_or_default();
+                let model = self.model.as_deref().unwrap_or_default();
+                let mut env = vec![
+                    var("ANTHROPIC_BASE_URL", url),
+                    var("ANTHROPIC_AUTH_TOKEN", secret),
+                ];
+                env.extend(models(model, model));
+                env
+            }
+            None => Vec::new(),
+        }
+    }
+
     /// Comando para iniciar sesión en la cuenta (Claude lo pide solo al abrirse).
     pub fn login_command(&self) -> &'static str {
         match self.program.as_str() {
@@ -94,6 +171,9 @@ fn main_account(program: &str) -> Account {
         program: program.into(),
         name: tr!("Principal").into(),
         dir: None,
+        provider: None,
+        base_url: None,
+        model: None,
     }
 }
 
@@ -196,10 +276,59 @@ impl Store {
             program: program.into(),
             name: name.trim().into(),
             dir: None,
+            provider: None,
+            base_url: None,
+            model: None,
         };
         account.dir = self.account_dir(&account);
         prepare(&account, self.home.as_deref())?;
         saved.push(account.clone());
+        self.save_accounts(&saved)?;
+        Ok(account)
+    }
+
+    /// Añade una cuenta de Claude Code con clave de API. La clave va al llavero; en los
+    /// ajustes solo queda el proveedor. Si algo no vale, no se guarda nada.
+    pub fn add_api_account(
+        &self,
+        name: &str,
+        provider: &str,
+        base_url: Option<&str>,
+        model: Option<&str>,
+        secret: &str,
+        keys: &dyn SecretStore,
+    ) -> Result<Account, String> {
+        let clean = |v: Option<&str>| v.map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+        let (base_url, model) = (clean(base_url), clean(model));
+        if secret.trim().is_empty() {
+            return Err(tr!("Falta la clave.").to_string());
+        }
+        match provider {
+            "anthropic" | "deepseek" => {}
+            "custom" => {
+                let url = base_url.as_deref().unwrap_or_default();
+                if !(url.starts_with("https://") || url.starts_with("http://")) {
+                    return Err(tr!("La dirección debe empezar por https://").to_string());
+                }
+                if model.is_none() {
+                    return Err(tr!("Falta el modelo.").to_string());
+                }
+            }
+            other => return Err(tr!("Proveedor desconocido: {p}", p = other)),
+        }
+        let mut account = self.add_account("claude", name)?;
+        account.provider = Some(provider.into());
+        account.base_url = base_url;
+        account.model = model;
+        // La clave primero: sin llavero la cuenta no queda a medias.
+        if let Err(e) = keys.set(&account.secret_id(), secret.trim()) {
+            let _ = self.delete_account("claude", account.id);
+            return Err(e);
+        }
+        let mut saved = self.saved_accounts();
+        if let Some(slot) = saved.iter_mut().find(|a| a.id == account.id) {
+            *slot = account.clone();
+        }
         self.save_accounts(&saved)?;
         Ok(account)
     }
@@ -396,6 +525,132 @@ mod tests {
             "Personal",
             "vuelve a la principal"
         );
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+    fn api(provider: &str, base: Option<&str>, model: Option<&str>) -> Account {
+        Account {
+            id: 3,
+            program: "claude".into(),
+            name: "API".into(),
+            dir: None,
+            provider: Some(provider.into()),
+            base_url: base.map(Into::into),
+            model: model.map(Into::into),
+        }
+    }
+
+    fn env_of(account: &Account) -> std::collections::HashMap<String, String> {
+        account.api_env("sk-clave").into_iter().collect()
+    }
+
+    /// Cada proveedor lleva su dirección, su clave y sus modelos al Claude Code que se abre.
+    #[test]
+    fn api_accounts_set_the_environment_of_their_provider() {
+        let a = env_of(&api("anthropic", None, None));
+        assert_eq!(a["ANTHROPIC_API_KEY"], "sk-clave");
+        assert!(!a.contains_key("ANTHROPIC_BASE_URL") && !a.contains_key("ANTHROPIC_MODEL"));
+
+        let d = env_of(&api("deepseek", None, None));
+        assert_eq!(
+            d["ANTHROPIC_BASE_URL"],
+            "https://api.deepseek.com/anthropic"
+        );
+        assert_eq!(d["ANTHROPIC_AUTH_TOKEN"], "sk-clave");
+        assert_eq!(d["ANTHROPIC_MODEL"], "deepseek-flash[1m]");
+        assert_eq!(d["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek-flash");
+        assert!(!d.contains_key("ANTHROPIC_API_KEY"));
+        let pro = env_of(&api("deepseek", None, Some("deepseek-v4-pro")));
+        assert_eq!(pro["ANTHROPIC_MODEL"], "deepseek-v4-pro");
+        assert_eq!(pro["ANTHROPIC_DEFAULT_OPUS_MODEL"], "deepseek-v4-pro");
+
+        let c = env_of(&api(
+            "custom",
+            Some("https://proxy.example/api"),
+            Some("mi-modelo"),
+        ));
+        assert_eq!(c["ANTHROPIC_BASE_URL"], "https://proxy.example/api");
+        assert_eq!(c["ANTHROPIC_AUTH_TOKEN"], "sk-clave");
+        assert_eq!(c["ANTHROPIC_MODEL"], "mi-modelo");
+        assert_eq!(c["ANTHROPIC_DEFAULT_SONNET_MODEL"], "mi-modelo");
+
+        // Una cuenta normal (con login) no pone nada.
+        let mut normal = api("anthropic", None, None);
+        normal.provider = None;
+        assert!(normal.api_env("x").is_empty());
+    }
+
+    /// El asesor de Claude es de Anthropic: con otro proveedor no se activa.
+    #[test]
+    fn the_advisor_only_applies_to_anthropic_accounts() {
+        assert!(api("anthropic", None, None).allows_advisor());
+        assert!(!api("deepseek", None, None).allows_advisor());
+        assert!(!api("custom", Some("https://x.example"), Some("m")).allows_advisor());
+        let mut normal = api("anthropic", None, None);
+        normal.provider = None;
+        assert!(normal.allows_advisor());
+    }
+
+    /// Las cuentas guardadas antes de esto siguen leyéndose igual.
+    #[test]
+    fn old_saved_accounts_have_no_provider() {
+        let old: Account =
+            serde_json::from_str(r#"{"id":1,"program":"claude","name":"Trabajo"}"#).unwrap();
+        assert_eq!((old.provider, old.base_url, old.model), (None, None, None));
+    }
+
+    /// La clave va al llavero; lo que se guarda en los ajustes no la lleva.
+    #[test]
+    fn adding_an_api_account_keeps_the_key_out_of_the_saved_accounts() {
+        use crate::secrets::{MemoryStore, SecretStore};
+        let tmp = std::env::temp_dir().join(format!("forge-apiacc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("home/.claude")).unwrap();
+        let mut store = Store::in_memory().unwrap();
+        store.home = Some(tmp.join("home"));
+        store.accounts_root = Some(tmp.join("forge/accounts"));
+        let keys = MemoryStore::default();
+
+        let added = store
+            .add_api_account("Mi API", "anthropic", None, None, "sk-ant-secreto", &keys)
+            .unwrap();
+        assert_eq!(
+            keys.get(&added.secret_id()).unwrap().as_deref(),
+            Some("sk-ant-secreto")
+        );
+        let saved = store.setting("accounts").unwrap().unwrap();
+        assert!(!saved.contains("sk-ant-secreto"), "{saved}");
+        let listed = store.accounts("claude");
+        assert_eq!(listed[1].provider.as_deref(), Some("anthropic"));
+        // Tiene su carpeta propia: su historial no se mezcla con el de la principal.
+        assert!(listed[1].dir.as_ref().unwrap().is_dir());
+
+        // Lo que falta o no vale se dice antes de guardar nada.
+        assert!(
+            store
+                .add_api_account("X", "anthropic", None, None, "  ", &keys)
+                .is_err()
+        );
+        assert!(
+            store
+                .add_api_account("X", "custom", None, Some("m"), "k", &keys)
+                .is_err()
+        );
+        assert!(
+            store
+                .add_api_account("X", "custom", Some("proxy.example"), Some("m"), "k", &keys)
+                .is_err()
+        );
+        assert!(
+            store
+                .add_api_account("X", "custom", Some("https://p.example"), None, "k", &keys)
+                .is_err()
+        );
+        assert!(
+            store
+                .add_api_account("X", "otro", None, None, "k", &keys)
+                .is_err()
+        );
+        assert_eq!(store.accounts("claude").len(), 2, "nada se guardó a medias");
         let _ = std::fs::remove_dir_all(tmp);
     }
 }

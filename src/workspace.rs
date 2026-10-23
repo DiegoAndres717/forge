@@ -425,6 +425,8 @@ pub struct Workspace {
     modes: forge_core::mcp::Modes,
     /// Claude en Sonnet con Opus de asesor para los Claude que se abran (plan #81).
     advisor: bool,
+    /// Dónde están las claves de las cuentas con API (el llavero del sistema).
+    secrets: std::sync::Arc<dyn forge_core::secrets::SecretStore>,
 }
 
 /// Franja «mucho contexto»: compactar ahora (escribe `/compact`) o luego.
@@ -532,6 +534,7 @@ impl Workspace {
             sticky: None,
             modes: Default::default(),
             advisor: false,
+            secrets: std::sync::Arc::new(forge_core::secrets::Keychain),
         }
     }
 
@@ -955,6 +958,24 @@ impl Workspace {
         self.modes = modes;
     }
 
+    /// Cambia dónde se leen las claves de las cuentas con API (las pruebas usan memoria).
+    #[cfg(test)]
+    pub fn set_secrets(&mut self, secrets: std::sync::Arc<dyn forge_core::secrets::SecretStore>) {
+        self.secrets = secrets;
+    }
+
+    /// Lo que una cuenta con clave de API lleva al entorno, leído del llavero ahora. Sin
+    /// clave guardada (o sin llavero) no pone nada: no se cae a otra cuenta en silencio.
+    fn account_secret_env(&self, account: &Account) -> Vec<(String, String)> {
+        if !account.is_api() {
+            return Vec::new();
+        }
+        match self.secrets.get(&account.secret_id()) {
+            Ok(Some(secret)) => account.api_env(&secret),
+            _ => Vec::new(),
+        }
+    }
+
     /// Claude en Sonnet con Opus de asesor, en las terminales que se abran después.
     pub fn set_advisor(&mut self, on: bool) {
         self.advisor = on;
@@ -1008,7 +1029,6 @@ impl Workspace {
         if let Some(spec) = &spec {
             env.extend(spec.environment.clone());
             env.insert("FORGE_ORIGIN".into(), spec.name.clone());
-            forge_core::launch::advisor_env(self.advisor, spec.program(), &mut env);
         }
         let account = spec
             .as_ref()
@@ -1022,6 +1042,7 @@ impl Workspace {
         }
         if let Some(a) = &account {
             env.extend(a.env());
+            env.extend(self.account_secret_env(a));
             env.insert("FORGE_ACCOUNT_ID".into(), a.id.to_string());
             if self.has_accounts(&a.program) {
                 env.insert("FORGE_ACCOUNT".into(), a.name.clone());
@@ -1032,8 +1053,15 @@ impl Workspace {
             for program in ["claude", "codex"] {
                 if let Some(a) = self.account_for(program, None) {
                     env.extend(a.env());
+                    env.extend(self.account_secret_env(a));
                 }
             }
+        }
+        // El asesor es de Anthropic y va después de la cuenta: el modelo de una cuenta con
+        // API manda, y con otro proveedor no se activa.
+        if let Some(spec) = &spec {
+            let allowed = account.as_ref().is_none_or(|a| a.allows_advisor());
+            forge_core::launch::advisor_env(self.advisor && allowed, spec.program(), &mut env);
         }
         // Agentes que lo permiten: se les conecta la memoria del proyecto por MCP.
         // Con el mod de Forge cargado, Claude ya trae el MCP de Forge (lo declara el mod, y
@@ -3228,6 +3256,9 @@ mod agent_tests {
             program: "claude".into(),
             name: name.into(),
             dir: Some(base.join(format!("claude-{id}"))),
+            provider: None,
+            base_url: None,
+            model: None,
         };
         let accounts = vec![account(1, "Personal"), account(2, "Trabajo")];
         let chosen = |id: i64| HashMap::from([("claude".to_string(), id)]);
@@ -3269,6 +3300,41 @@ mod agent_tests {
             "la conversación está en la otra cuenta"
         );
         let _ = std::fs::remove_dir_all(base);
+    }
+
+    /// Una cuenta con clave de API lee su clave del llavero al abrir la terminal y la lleva
+    /// al entorno; sin clave guardada no pone nada (y no se cae a otra cuenta).
+    #[test]
+    fn an_api_account_gets_its_key_from_the_keychain_when_a_terminal_opens() {
+        use forge_core::secrets::{MemoryStore, SecretStore};
+        let dir = std::env::temp_dir().join(format!("forge-apikey-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut ws = Workspace::new(Project::load(&dir).unwrap());
+        let keys = std::sync::Arc::new(MemoryStore::default());
+        ws.set_secrets(keys.clone());
+        let account = Account {
+            id: 2,
+            program: "claude".into(),
+            name: "DeepSeek".into(),
+            dir: None,
+            provider: Some("deepseek".into()),
+            base_url: None,
+            model: None,
+        };
+        assert!(
+            ws.account_secret_env(&account).is_empty(),
+            "sin clave guardada"
+        );
+        keys.set(&account.secret_id(), "sk-ds").unwrap();
+        let env: HashMap<_, _> = ws.account_secret_env(&account).into_iter().collect();
+        assert_eq!(env["ANTHROPIC_AUTH_TOKEN"], "sk-ds");
+        // Una cuenta de login no lleva nada del llavero.
+        let login = Account {
+            provider: None,
+            ..account
+        };
+        assert!(ws.account_secret_env(&login).is_empty());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Los modos llegan al servidor MCP como argumentos: algunos agentes (Codex) no le
@@ -3313,6 +3379,9 @@ mod agent_tests {
             program: "claude".into(),
             name: "Trabajo".into(),
             dir: Some(base.join("claude-1")),
+            provider: None,
+            base_url: None,
+            model: None,
         };
         ws.set_accounts(vec![account], HashMap::from([("claude".to_string(), 1)]));
         ws.installed = vec!["claude".into(), "sleep".into()];
