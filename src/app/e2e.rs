@@ -2053,6 +2053,76 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
 
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y
 /// guardarlo con Enter tiene que ser instantáneo y no crear nada en disco.
+/// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo
+/// oculto) y la cuenta aparece. La clave va al llavero y no se vuelve a mostrar.
+#[test]
+fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
+    use forge_core::secrets::{MemoryStore, SecretStore};
+    let _serial = serial();
+    let dir = project("api-account");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let mut h = app_with(store, Some(dir.clone()));
+    let keys = std::sync::Arc::new(MemoryStore::default());
+    h.state_mut().secrets = keys.clone();
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.state().agents.lock().unwrap().insert(
+        "claude".into(),
+        agents::Detection {
+            path: Some("/usr/local/bin/claude".into()),
+            version: None,
+        },
+    );
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    let logins = h.query_all_by_label("Iniciar sesión").count();
+    // El botón está más abajo de lo que se ve: se llega con el foco, como con el teclado.
+    h.get_by_label_contains("Añadir modelo por API").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(h.state().api_form.is_some(), "el formulario se abre");
+    h.get_by_label("DeepSeek").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().api_form.as_ref().unwrap().provider(), "deepseek");
+    h.run_steps(3);
+    // Sin clave no se puede añadir.
+    assert!(h.query_by_label("Añadir modelo").is_some());
+    h.query_all_by_role(egui::accesskit::Role::PasswordInput)
+        .next()
+        .expect("el campo de la clave es oculto")
+        .focus();
+    h.run_steps(2);
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("sk-ds-prueba".into()));
+    h.run_steps(3);
+    h.get_by_label("Añadir modelo").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(5);
+    let accounts = h.state().store.as_ref().unwrap().accounts("claude");
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[1].provider.as_deref(), Some("deepseek"));
+    assert_eq!(
+        keys.get(&accounts[1].secret_id()).unwrap().as_deref(),
+        Some("sk-ds-prueba")
+    );
+    assert!(
+        h.query_by_label_contains("sk-ds-prueba").is_none(),
+        "la clave no se muestra"
+    );
+    // La cuenta de clave no tiene login: no aparece otro «Iniciar sesión».
+    assert_eq!(h.query_all_by_label("Iniciar sesión").count(), logins);
+}
+
 #[test]
 fn renaming_a_new_account_is_cheap() {
     let _serial = serial();

@@ -959,7 +959,6 @@ impl Workspace {
     }
 
     /// Cambia dónde se leen las claves de las cuentas con API (las pruebas usan memoria).
-    #[cfg(test)]
     pub fn set_secrets(&mut self, secrets: std::sync::Arc<dyn forge_core::secrets::SecretStore>) {
         self.secrets = secrets;
     }

@@ -2688,6 +2688,30 @@ pub const EN: &[(&str, &str)] = &[
         "Sends each job to the cheapest model that does it well. Measured on real sessions: commits, pushes, branches and PRs are a quarter of the spend, because every step re-reads the whole conversation on the expensive model; a cheap subagent starts with a small context. Off by default; applies to the agents you open from now on. Codex, Gemini, OpenCode and Qwen need the subagents added.",
     ),
     ("Asesor de Claude", "Claude advisor"),
+    ("Añadir modelo por API", "Add a model by API"),
+    ("Otro", "Other"),
+    (
+        "Usa los modelos de DeepSeek en Claude Code.",
+        "Use DeepSeek models in Claude Code.",
+    ),
+    (
+        "Para cualquier servicio compatible con la API de Anthropic.",
+        "For any service compatible with Anthropic's API.",
+    ),
+    (
+        "Con tu clave de la consola de Anthropic.",
+        "With your key from the Anthropic console.",
+    ),
+    ("Nombre (opcional)", "Name (optional)"),
+    ("Pega aquí tu clave", "Paste your key here"),
+    ("Dirección (https://…)", "Address (https://…)"),
+    ("Modelo", "Model"),
+    (
+        "La clave se guarda cifrada en el llavero de tu sistema y no se vuelve a mostrar.",
+        "The key is stored encrypted in your system keychain and is never shown again.",
+    ),
+    ("Añadir modelo", "Add model"),
+    ("Clave de API · {p0}", "API key · {p0}"),
     ("Falta la clave.", "The key is missing."),
     (
         "La dirección debe empezar por https://",
