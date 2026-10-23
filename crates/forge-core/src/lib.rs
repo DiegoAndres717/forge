@@ -20,6 +20,7 @@ pub mod pr;
 pub mod project;
 pub mod reviewers;
 pub mod router;
+pub mod secrets;
 pub mod sessions;
 pub mod store;
 pub mod subagents;
