@@ -35,6 +35,8 @@ declare module 'claude-code' {
       effort: string
       /** Searches and reads by the main loop vs inside subagents (the band's share). */
       delegation: { main: number; sub: number }
+      /** Times the advisor was consulted in this conversation. */
+      advised: number
     }
   }
 }
