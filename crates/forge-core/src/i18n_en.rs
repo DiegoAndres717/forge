@@ -2688,6 +2688,31 @@ pub const EN: &[(&str, &str)] = &[
         "Sends each job to the cheapest model that does it well. Measured on real sessions: commits, pushes, branches and PRs are a quarter of the spend, because every step re-reads the whole conversation on the expensive model; a cheap subagent starts with a small context. Off by default; applies to the agents you open from now on. Codex, Gemini, OpenCode and Qwen need the subagents added.",
     ),
     ("Asesor de Claude", "Claude advisor"),
+    ("Probar clave", "Test key"),
+    ("Probando…", "Testing…"),
+    ("✓ La clave funciona.", "✓ The key works."),
+    ("Cambiar clave", "Change key"),
+    ("Pega aquí tu clave nueva", "Paste your new key here"),
+    ("Guardar clave", "Save key"),
+    ("Falta la dirección.", "The address is missing."),
+    (
+        "La clave no es válida o no tiene permiso.",
+        "The key is not valid or has no permission.",
+    ),
+    (
+        "No se encontró la dirección o el modelo. Revisa los dos.",
+        "The address or the model was not found. Check both.",
+    ),
+    (
+        "El servicio respondió con el error {s}.",
+        "The service answered with error {s}.",
+    ),
+    (
+        "El servicio respondió con el error {s}: {d}",
+        "The service answered with error {s}: {d}",
+    ),
+    ("No se pudo conectar: {e}", "Could not connect: {e}"),
+    ("respuesta inesperada", "unexpected response"),
     ("Añadir modelo por API", "Add a model by API"),
     ("Otro", "Other"),
     (

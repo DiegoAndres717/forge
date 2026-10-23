@@ -2093,8 +2093,9 @@ fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
     h.run_steps(3);
     assert_eq!(h.state().api_form.as_ref().unwrap().provider(), "deepseek");
     h.run_steps(3);
-    // Sin clave no se puede añadir.
+    // Sin clave no se puede añadir, y se puede probar la clave antes.
     assert!(h.query_by_label("Añadir modelo").is_some());
+    assert!(h.query_by_label("Probar clave").is_some());
     h.query_all_by_role(egui::accesskit::Role::PasswordInput)
         .next()
         .expect("el campo de la clave es oculto")
@@ -2121,6 +2122,29 @@ fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
     );
     // La cuenta de clave no tiene login: no aparece otro «Iniciar sesión».
     assert_eq!(h.query_all_by_label("Iniciar sesión").count(), logins);
+    // Cambiar la clave: la nueva reemplaza a la del llavero y tampoco se muestra.
+    h.get_by_label("Cambiar clave").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    h.query_all_by_role(egui::accesskit::Role::PasswordInput)
+        .next()
+        .expect("el campo de la clave nueva es oculto")
+        .focus();
+    h.run_steps(2);
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("sk-ds-nueva".into()));
+    h.run_steps(3);
+    h.get_by_label("Guardar clave").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(5);
+    assert_eq!(
+        keys.get(&accounts[1].secret_id()).unwrap().as_deref(),
+        Some("sk-ds-nueva")
+    );
+    assert!(h.query_by_label_contains("sk-ds-nueva").is_none());
 }
 
 #[test]

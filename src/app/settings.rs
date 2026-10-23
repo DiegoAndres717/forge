@@ -938,6 +938,7 @@ impl App {
     /// Cuentas de Claude Code y Codex: varias a la vez, cada una con su login.
     fn accounts_ui(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
         let mut submit = None;
+        let mut new_key: Option<(String, String)> = None;
         let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
         let programs: Vec<(&str, &str)> = [("claude", "Claude Code"), ("codex", "Codex")]
             .into_iter()
@@ -986,7 +987,7 @@ impl App {
                             .and_then(|s| s.account_limits(program, a.id)),
                     };
                     let tokens = usage.get(&a.id).copied();
-                    account_row(ui, cmds, program, a, chosen, ws.is_some());
+                    account_row(ui, cmds, program, a, chosen, ws.is_some(), &mut new_key);
                     // Una cuenta con clave de API no tiene plan ni ventanas de uso.
                     if !a.is_api() {
                         account_usage(ui, limits.as_ref(), tokens);
@@ -1013,6 +1014,11 @@ impl App {
                 }
             }
         });
+        if let Some((account, key)) = new_key
+            && let Err(e) = self.secrets.set(&account, key.trim())
+        {
+            self.error = Some(e);
+        }
         match submit {
             Some(true) => self.add_api_account(),
             Some(false) => self.api_form = None,
@@ -1060,6 +1066,9 @@ pub(super) struct ApiForm {
     url: String,
     model: String,
     error: Option<String>,
+    /// Prueba de la clave en curso (en otro hilo) y su resultado.
+    check: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    checked: Option<Result<(), String>>,
 }
 
 impl ApiForm {
@@ -1071,6 +1080,8 @@ impl ApiForm {
             url: String::new(),
             model: String::new(),
             error: None,
+            check: None,
+            checked: None,
         }
     }
 
@@ -1111,6 +1122,7 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
                 {
                     form.provider = provider;
                     form.error = None;
+                    form.checked = None;
                 }
             }
         });
@@ -1131,22 +1143,41 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
                 .hint_text(tr!("Nombre (opcional)"))
                 .desired_width(f32::INFINITY),
         );
-        ui.add(
-            theme::field(egui::TextEdit::singleline(&mut form.key).password(true))
-                .hint_text(tr!("Pega aquí tu clave"))
-                .desired_width(f32::INFINITY),
-        );
+        let mut edited = ui
+            .add(
+                theme::field(egui::TextEdit::singleline(&mut form.key).password(true))
+                    .hint_text(tr!("Pega aquí tu clave"))
+                    .desired_width(f32::INFINITY),
+            )
+            .changed();
         if form.provider == "custom" {
-            ui.add(
-                theme::field(egui::TextEdit::singleline(&mut form.url))
-                    .hint_text(tr!("Dirección (https://…)"))
-                    .desired_width(f32::INFINITY),
-            );
-            ui.add(
-                theme::field(egui::TextEdit::singleline(&mut form.model))
-                    .hint_text(tr!("Modelo"))
-                    .desired_width(f32::INFINITY),
-            );
+            edited |= ui
+                .add(
+                    theme::field(egui::TextEdit::singleline(&mut form.url))
+                        .hint_text(tr!("Dirección (https://…)"))
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+            edited |= ui
+                .add(
+                    theme::field(egui::TextEdit::singleline(&mut form.model))
+                        .hint_text(tr!("Modelo"))
+                        .desired_width(f32::INFINITY),
+                )
+                .changed();
+        }
+        if edited {
+            form.checked = None;
+        }
+        // La prueba corre aparte: la ventana no se para esperando al servicio.
+        if let Some(rx) = &form.check {
+            match rx.try_recv() {
+                Ok(result) => {
+                    form.checked = Some(result);
+                    form.check = None;
+                }
+                Err(_) => ui.ctx().request_repaint_after(Duration::from_millis(100)),
+            }
         }
         ui.label(
             RichText::new(tr!(
@@ -1155,6 +1186,26 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
             .size(11.5)
             .color(theme::TEXT_3),
         );
+        if form.check.is_some() {
+            ui.label(
+                RichText::new(tr!("Probando…"))
+                    .size(12.0)
+                    .color(theme::TEXT_3),
+            );
+        }
+        match &form.checked {
+            Some(Ok(())) => {
+                ui.label(
+                    RichText::new(tr!("✓ La clave funciona."))
+                        .size(12.0)
+                        .color(theme::GREEN),
+                );
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(e).size(12.0).color(theme::RED));
+            }
+            None => {}
+        }
         if let Some(e) = &form.error {
             ui.label(RichText::new(e).size(12.0).color(theme::RED));
         }
@@ -1165,6 +1216,26 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
                 .clicked()
             {
                 action = Some(true);
+            }
+            let can_test = form.ready() && form.check.is_none();
+            if ui
+                .add_enabled(can_test, egui::Button::new(tr!("Probar clave")))
+                .clicked()
+            {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let (provider, key) = (form.provider, form.key.clone());
+                let custom = provider == "custom";
+                let (url, model) = (form.url.clone(), form.model.clone());
+                std::thread::spawn(move || {
+                    let _ = tx.send(forge_core::apicheck::check(
+                        provider,
+                        custom.then_some(url.as_str()),
+                        custom.then_some(model.as_str()),
+                        &key,
+                    ));
+                });
+                form.check = Some(rx);
+                form.checked = None;
             }
             if theme::secondary(ui, tr!("Cancelar")).clicked() {
                 action = Some(false);
@@ -1246,6 +1317,7 @@ fn account_row(
     a: &forge_core::accounts::Account,
     chosen: Option<i64>,
     in_project: bool,
+    new_key: &mut Option<(String, String)>,
 ) {
     let id = egui::Id::new(("account-name", program, a.id));
     let saved = egui::Id::new(("account-saved", program, a.id));
@@ -1335,11 +1407,48 @@ fn account_row(
         });
     }
     if let Some(provider) = &a.provider {
-        ui.label(
-            RichText::new(tr!("Clave de API · {p0}", p0 = provider_label(provider)))
-                .size(11.5)
-                .color(theme::TEXT_3),
-        );
+        let open = egui::Id::new(("account-key-open", program, a.id));
+        let typed = egui::Id::new(("account-key-text", program, a.id));
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(tr!("Clave de API · {p0}", p0 = provider_label(provider)))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            if !ui.data(|d| d.get_temp::<bool>(open)).unwrap_or(false)
+                && ui.small_button(tr!("Cambiar clave")).clicked()
+            {
+                ui.data_mut(|d| d.insert_temp(open, true));
+            }
+        });
+        if ui.data(|d| d.get_temp::<bool>(open)).unwrap_or(false) {
+            let mut text = ui.data(|d| d.get_temp::<String>(typed)).unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.add(
+                    theme::field(egui::TextEdit::singleline(&mut text).password(true))
+                        .hint_text(tr!("Pega aquí tu clave nueva"))
+                        .desired_width(240.0),
+                );
+                let save = ui
+                    .add_enabled(
+                        !text.trim().is_empty(),
+                        egui::Button::new(tr!("Guardar clave")),
+                    )
+                    .clicked();
+                let cancel = ui.button(tr!("Cancelar")).clicked();
+                if save {
+                    *new_key = Some((a.secret_id(), std::mem::take(&mut text)));
+                }
+                if save || cancel {
+                    ui.data_mut(|d| {
+                        d.remove::<bool>(open);
+                        d.remove::<String>(typed);
+                    });
+                } else {
+                    ui.data_mut(|d| d.insert_temp(typed, text.clone()));
+                }
+            });
+        }
     }
     if in_project {
         ui.horizontal_wrapped(|ui| {

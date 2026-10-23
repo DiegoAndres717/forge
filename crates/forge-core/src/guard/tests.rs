@@ -109,6 +109,20 @@ mod unit {
         assert!(scan_secrets(&[line(&allowed)]).is_empty());
     }
 
+    /// Las claves de las cuentas con API no deben colarse en un commit ni en un diff
+    /// enviado a un modelo: las de Anthropic y las de DeepSeek (`sk-` y 32 hex).
+    #[test]
+    fn api_keys_of_anthropic_and_deepseek_are_found_and_masked() {
+        let deepseek = format!("sk-{}", "0123456789abcdef".repeat(2));
+        let anthropic = "sk-ant-api03-abcdefghijklmnopqrstuvwxyz"; // forge:allow-secret
+        for key in [deepseek.as_str(), anthropic] {
+            let line = format!("ANTHROPIC_AUTH_TOKEN={key}");
+            let found = scan_secrets(&[("a.env".to_string(), 1, line.clone())]);
+            assert_eq!(found.len(), 1, "{line}");
+            assert!(!mask_secrets(&line).contains(key), "{line}");
+        }
+    }
+
     #[test]
     fn a_session_exception_lasts_two_hours() {
         let at = |hours: i64| {
