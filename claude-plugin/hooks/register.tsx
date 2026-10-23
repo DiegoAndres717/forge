@@ -272,6 +272,29 @@ async function refreshBand($: EngineInterface) {
   }
 }
 
+/**
+ * The advisor's tokens are not in the turn's usage: Claude Code writes them apart in the
+ * transcript. Forge reads them there (once each) and answers what it added, for the band.
+ */
+async function countAdvisor($: EngineInterface, transcript: string | undefined) {
+  if (!transcript) return
+  const out = await forge($, ['agent-advisor'], JSON.stringify({ transcript_path: transcript }))
+  if (!out || out.exitCode !== 0) return
+  try {
+    const added = JSON.parse(out.stdout) as ModelTokens
+    await update($, tokens, all => {
+      const next = { ...all }
+      for (const [model, n] of Object.entries(added)) {
+        const before = next[model] ?? { fresh: 0, cache: 0 }
+        next[model] = { fresh: before.fresh + n.fresh, cache: before.cache + n.cache }
+      }
+      return next
+    })
+  } catch {
+    // Older Forge without `agent-advisor`: the advisor stays uncounted.
+  }
+}
+
 /** A command answered by Forge's CLI output (no model call). */
 async function run($: EngineInterface, args: string[]) {
   const out = await forge($, args)
@@ -539,6 +562,7 @@ export const register: Register = on => {
   // re-prompt it causes (`stop_hook_active`) is never blocked again.
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
+    await countAdvisor($, e.transcript_path)
     if (e.stop_hook_active || stopAsked || !editedCode) return result
     if (await $.env.get('FORGE_ADVISOR').catch(() => undefined) !== '1') return result
     stopAsked = true

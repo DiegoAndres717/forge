@@ -233,6 +233,26 @@ test('the band shows new and cached tokens by model', async ($, on) => {
   expect(text.startsWith('{"type":"Text"')).toBe(true)
 })
 
+test("the advisor's tokens, which Forge reads from the transcript, reach the band", async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    const stdout = e.argv.includes('agent-advisor') ? '{"opus":{"fresh":8000,"cache":0}}' : ''
+    return { value: { exitCode: 0, stdout, stderr: '' } } as never
+  })
+  on('classic.Stop', () => ({}))
+  await $.classic.Stop({ stop_hook_active: false, transcript_path: '/s/session.jsonl' } as never)
+  expect(asked.some(argv => argv.includes('agent-advisor'))).toBe(true)
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  expect(JSON.stringify(await drawn.drawn())).toContain(' 8k')
+})
+
 test('the band shows the plan usage windows as bars', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed })) // the engine's side
   const resetsAt = new Date(Date.now() + 3 * 3_600_000).toISOString()
