@@ -25,6 +25,8 @@ const active = atom({ plugin: 'forge', key: 'active' } as const, {} as Active)
 const tasks = atom({ plugin: 'forge', key: 'tasks' } as const, {} as Record<string, string>)
 const context = atom({ plugin: 'forge', key: 'context' } as const, null as number | null)
 const effort = atom({ plugin: 'forge', key: 'effort' } as const, '')
+/** Times the advisor was consulted in this conversation (the API runs it inside the request, so it cannot be shown live). */
+const advised = atom({ plugin: 'forge', key: 'advised' } as const, 0)
 /** Searches and reads done by the main loop vs inside subagents (the band shows the share). */
 const delegation = atom({ plugin: 'forge', key: 'delegation' } as const, { main: 0, sub: 0 })
 /** Below this many reads the share says nothing yet. */
@@ -306,6 +308,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // A new conversation measures its own delegation.
     await countRead($, null)
+    await update($, advised, () => 0).catch(() => undefined)
 
     const agents = [
       { name: 'explorer', model: 'haiku', effort: 'low', prompt: EXPLORER, tools: ['Read', 'Grep', 'Glob', 'Bash'],
@@ -516,7 +519,10 @@ export const register: Register = on => {
     } catch {
       // Only the band depends on this: never hold up the request.
     }
-    return yield* next(step)
+    const result = yield* next(step)
+    const asked = result.serverToolUses?.filter(use => use.name === 'advisor').length ?? 0
+    if (asked > 0) await update($, advised, n => n + asked).catch(() => undefined)
+    return result
   })
 
   // The main loop searching and reading file after file itself: one reminder (that only
@@ -612,6 +618,7 @@ export const register: Register = on => {
     const main = working.find(([key]) => key === 'main')?.[1]
     const ctx = await read($, context)
     const reads = await read($, delegation)
+    const consulted = await read($, advised)
     const total = reads.main + reads.sub
     const delegated = total >= DELEGATION_FROM ? Math.round((reads.sub / total) * 100) : null
     const now = Date.now()
@@ -627,7 +634,7 @@ export const register: Register = on => {
     const full = ctx !== null && ctx >= warnAt
     if (
       e.props.hasSurvey ||
-      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null)
+      (status === null && used.length === 0 && working.length === 0 && plan.length === 0 && !full && delegated === null && consulted === 0)
     )
       return next(e)
     const { Text } = $.ui.resolve(e)
@@ -668,6 +675,7 @@ export const register: Register = on => {
             </Text>
           )
         })}
+        {consulted > 0 ? <Text dimColor>{` · advisor ×${consulted}`}</Text> : null}
         {plan.map(({ label, percent, reset }) => (
           <Text key={label}>
             <Text dimColor> · {label} </Text>

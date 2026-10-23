@@ -253,6 +253,26 @@ test("the advisor's tokens, which Forge reads from the transcript, reach the ban
   expect(JSON.stringify(await drawn.drawn())).toContain(' 8k')
 })
 
+test('the band counts the times the advisor was consulted, which cannot be shown live', async ($, on) => {
+  // The API runs the advisor inside the request: the step's result lists it afterwards.
+  on('turn.step', async function* ($, e) {
+    const advisor = { id: 'a', name: 'advisor', input: {}, startedAt: 1, endedAt: 2 }
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], serverToolUses: [advisor, advisor] } as never
+  })
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  for await (const _chunk of $.turn.step({ turnId: 't', index: 0, messageCount: 1, model: 'claude-sonnet-5-5' } as TurnStepInput)) {
+    // no chunks from the stub
+  }
+  await $.turn.complete(turn({ answer: 'Done.', usage: usage('claude-sonnet-5-5', 1_000, 0) }))
+  const drawn = await $.ui.mount({
+    plugin: 'forge',
+    surface: 'terminal',
+    component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false } as AbovePromptProps,
+  })
+  expect(JSON.stringify(await drawn.drawn())).toContain('advisor ×2')
+})
+
 test('the band shows the plan usage windows as bars', async ($, on) => {
   on('session.measure', ($, e) => ({ changed: e.changed })) // the engine's side
   const resetsAt = new Date(Date.now() + 3 * 3_600_000).toISOString()
