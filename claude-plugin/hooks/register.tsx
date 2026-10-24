@@ -297,6 +297,24 @@ async function countAdvisor($: EngineInterface, transcript: string | undefined) 
   }
 }
 
+// Experiment: does anything on screen change while the advisor works? Where the API gives
+// no event, the mod writes what is drawn and streamed (with the time) to a file, only with
+// the advisor switch on. Read it after one consultation.
+const TRACE_FILE = '/tmp/forge-advisor-trace.log'
+const traced: string[] = []
+async function trace($: EngineInterface, line: string) {
+  try {
+    if ((await $.env.get('FORGE_ADVISOR')) !== '1') return
+    const stamp = new Date().toISOString().slice(11, 23)
+    if (traced.at(-1)?.slice(13) === line) return
+    traced.push(`${stamp} ${line}`)
+    if (traced.length > 400) traced.shift()
+    await $.fs.write(TRACE_FILE, `${traced.join('\n')}\n`)
+  } catch {
+    // Only a diagnostic: it never holds anything up.
+  }
+}
+
 /** A command answered by Forge's CLI output (no model call). */
 async function run($: EngineInterface, args: string[]) {
   const out = await forge($, args)
@@ -519,7 +537,9 @@ export const register: Register = on => {
     } catch {
       // Only the band depends on this: never hold up the request.
     }
+    await trace($, `step ${key} ${model}`)
     const result = yield* next(step)
+    await trace($, `end ${key} ${result.serverToolUses?.map(use => use.name).join(',') ?? '-'}`)
     const asked = result.serverToolUses?.filter(use => use.name === 'advisor').length ?? 0
     if (asked > 0) await update($, advised, n => n + asked).catch(() => undefined)
     return result
@@ -603,6 +623,23 @@ export const register: Register = on => {
   // Claude needs the user (a permission prompt, waiting for input): tell Forge.
   on('classic.Notification', async ($, e, next) => {
     void forge($, ['agent-event', 'waiting'], JSON.stringify({ message: e.message, origin: 'Claude Code' }))
+    return next(e)
+  })
+
+  on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
+    await trace($, `Spinner ${e.props.mode} ${e.props.message ?? e.props.word}`)
+    return next(e)
+  })
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
+    await trace($, `ToolUse ${e.props.tool} running=${e.props.isRunning}`)
+    return next(e)
+  })
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
+    await trace($, `ToolProgress ${JSON.stringify(e.props).slice(0, 160)}`)
+    return next(e)
+  })
+  on('ui.render', { component: 'InfoNotice' }, async ($, e, next) => {
+    await trace($, `InfoNotice ${JSON.stringify(e.props).slice(0, 160)}`)
     return next(e)
   })
 
