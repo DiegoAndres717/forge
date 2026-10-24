@@ -53,10 +53,12 @@ impl Store {
     /// El valor guardado (general si `project` es `None`); vacío si no hay.
     pub fn launch_pref(&self, program: &str, what: &str, project: Option<&Path>) -> String {
         let project = project.map(|p| self.project_key(p));
-        let saved = self
-            .setting(&key(program, what, project.as_deref()))
-            .ok()
-            .flatten();
+        self.launch_pref_keyed(program, what, project.as_deref())
+    }
+
+    /// Lo mismo con la clave del proyecto ya calculada (`project_key` no se aplica dos veces).
+    fn launch_pref_keyed(&self, program: &str, what: &str, project: Option<&str>) -> String {
+        let saved = self.setting(&key(program, what, project)).ok().flatten();
         // El modelo de Claude se guardaba antes como `claude_model`.
         let legacy = || {
             (program == "claude" && what == "model" && project.is_none())
@@ -77,8 +79,9 @@ impl Store {
         self.set_setting(&key(program, what, project.as_deref()), value.trim())
     }
 
-    /// Preferencia de inicio de una cuenta. La principal conserva como migración implícita
-    /// lo que Forge guardaba antes sin cuenta, de modo que actualizar no cambia sus terminales.
+    /// Preferencia de inicio de una cuenta. Sin valor propio sigue lo que Forge guardaba antes
+    /// sin cuenta (lo que la pantalla de Ajustes escribe): actualizar no cambia las terminales
+    /// de ninguna cuenta.
     pub fn account_launch_pref(
         &self,
         account: &Account,
@@ -92,10 +95,7 @@ impl Store {
             .flatten()
         {
             Some(value) => value,
-            None if account.is_main() => {
-                self.launch_pref(&account.program, what, project.as_deref().map(Path::new))
-            }
-            None => String::new(),
+            None => self.launch_pref_keyed(&account.program, what, project.as_deref()),
         }
     }
 
@@ -162,7 +162,13 @@ impl Store {
                 own
             }
         };
-        (pick("model"), pick("effort"))
+        // Una cuenta que ya fija su modelo en el entorno no recibe `--model`: lo pisaría.
+        let model = if account.fixes_model() {
+            String::new()
+        } else {
+            pick("model")
+        };
+        (model, pick("effort"))
     }
 }
 
@@ -330,10 +336,11 @@ mod tests {
             ("opus".into(), "max".into())
         );
 
-        // Una cuenta nueva no fuerza nada hasta configurarla.
+        // Una cuenta sin valor propio sigue lo general (lo que la pantalla de Ajustes escribe
+        // hasta que cada cuenta se configure sola): actualizar no cambia sus terminales.
         assert_eq!(
             store.account_launch_for(&work, a),
-            (String::new(), String::new())
+            ("opus".into(), "max".into())
         );
         store
             .set_account_launch_pref(&work, "model", None, "sonnet")
@@ -347,7 +354,44 @@ mod tests {
         );
         assert_eq!(
             store.account_launch_for(&work, b),
-            ("sonnet".into(), String::new())
+            ("sonnet".into(), "medium".into())
+        );
+    }
+
+    #[test]
+    fn an_account_that_fixes_its_own_model_gets_no_launch_model() {
+        let store = Store::in_memory().unwrap();
+        store.set_setting("claude_model", "opus").unwrap();
+        store
+            .set_launch_pref("claude", "effort", None, "high")
+            .unwrap();
+        let api = |provider: &str, model: Option<&str>| Account {
+            id: 1,
+            program: "claude".into(),
+            name: "Api".into(),
+            dir: None,
+            provider: Some(provider.into()),
+            base_url: None,
+            model: model.map(Into::into),
+        };
+        let a = Path::new("/p/a");
+        // Los modelos de DeepSeek y de una dirección propia van en el entorno de la cuenta:
+        // `--model opus` los pisaría. El esfuerzo no choca con nada.
+        for fixed in [
+            api("deepseek", None),
+            api("custom", Some("m")),
+            api("anthropic", Some("claude-haiku-5-5")),
+        ] {
+            assert_eq!(
+                store.account_launch_for(&fixed, a),
+                (String::new(), "high".into()),
+                "{fixed:?}"
+            );
+        }
+        // Anthropic sin modelo propio sí recibe el que se eligió.
+        assert_eq!(
+            store.account_launch_for(&api("anthropic", None), a),
+            ("opus".into(), "high".into())
         );
     }
 }
