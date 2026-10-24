@@ -105,6 +105,16 @@ impl Account {
         format!("{}-{}", self.program, self.id)
     }
 
+    /// El modelo de la cuenta ya va en su entorno (DeepSeek y una dirección propia siempre;
+    /// Anthropic si se eligió uno): un `--model` de arranque lo pisaría.
+    pub fn fixes_model(&self) -> bool {
+        match self.provider.as_deref() {
+            Some("deepseek" | "custom") => true,
+            Some(_) => self.model.is_some(),
+            None => false,
+        }
+    }
+
     /// El asesor de Claude Code es de Anthropic: con otro proveedor no se activa.
     pub fn allows_advisor(&self) -> bool {
         matches!(self.provider.as_deref(), None | Some("anthropic"))

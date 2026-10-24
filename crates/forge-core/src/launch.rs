@@ -3,6 +3,7 @@
 // propia configuración (Forge no lo toca).
 use std::path::Path;
 
+use crate::accounts::Account;
 use crate::store::Store;
 
 /// Niveles de esfuerzo que entiende cada agente (de menos a más).
@@ -39,14 +40,25 @@ fn key(program: &str, what: &str, project: Option<&str>) -> String {
     }
 }
 
+/// La cuenta forma parte de la clave para no confundir el modelo de inicio con el que una
+/// cuenta API entrega al agente en su entorno.
+fn account_key(account: &Account, what: &str, project: Option<&str>) -> String {
+    match project {
+        Some(p) => format!("launch:{}:{}:{what}:{p}", account.program, account.id),
+        None => format!("launch:{}:{}:{what}", account.program, account.id),
+    }
+}
+
 impl Store {
     /// El valor guardado (general si `project` es `None`); vacío si no hay.
     pub fn launch_pref(&self, program: &str, what: &str, project: Option<&Path>) -> String {
         let project = project.map(|p| self.project_key(p));
-        let saved = self
-            .setting(&key(program, what, project.as_deref()))
-            .ok()
-            .flatten();
+        self.launch_pref_keyed(program, what, project.as_deref())
+    }
+
+    /// Lo mismo con la clave del proyecto ya calculada (`project_key` no se aplica dos veces).
+    fn launch_pref_keyed(&self, program: &str, what: &str, project: Option<&str>) -> String {
+        let saved = self.setting(&key(program, what, project)).ok().flatten();
         // El modelo de Claude se guardaba antes como `claude_model`.
         let legacy = || {
             (program == "claude" && what == "model" && project.is_none())
@@ -65,6 +77,40 @@ impl Store {
     ) -> Result<(), String> {
         let project = project.map(|p| self.project_key(p));
         self.set_setting(&key(program, what, project.as_deref()), value.trim())
+    }
+
+    /// Preferencia de inicio de una cuenta. Sin valor propio sigue lo que Forge guardaba antes
+    /// sin cuenta (lo que la pantalla de Ajustes escribe): actualizar no cambia las terminales
+    /// de ninguna cuenta.
+    pub fn account_launch_pref(
+        &self,
+        account: &Account,
+        what: &str,
+        project: Option<&Path>,
+    ) -> String {
+        let project = project.map(|p| self.project_key(p));
+        match self
+            .setting(&account_key(account, what, project.as_deref()))
+            .ok()
+            .flatten()
+        {
+            Some(value) => value,
+            None => self.launch_pref_keyed(&account.program, what, project.as_deref()),
+        }
+    }
+
+    pub fn set_account_launch_pref(
+        &self,
+        account: &Account,
+        what: &str,
+        project: Option<&Path>,
+        value: &str,
+    ) -> Result<(), String> {
+        let project = project.map(|p| self.project_key(p));
+        self.set_setting(
+            &account_key(account, what, project.as_deref()),
+            value.trim(),
+        )
     }
 
     /// Modo «Primero el test» en el proyecto: el suyo («on»/«off») si lo tiene, si no
@@ -103,6 +149,26 @@ impl Store {
             }
         };
         (pick("model"), pick("effort"))
+    }
+
+    /// Modelo y esfuerzo que recibe esta cuenta al abrir una terminal. El proyecto puede
+    /// especializarlos y, si no, toma los de la cuenta.
+    pub fn account_launch_for(&self, account: &Account, project: &Path) -> (String, String) {
+        let pick = |what: &str| {
+            let own = self.account_launch_pref(account, what, Some(project));
+            if own.is_empty() {
+                self.account_launch_pref(account, what, None)
+            } else {
+                own
+            }
+        };
+        // Una cuenta que ya fija su modelo en el entorno no recibe `--model`: lo pisaría.
+        let model = if account.fixes_model() {
+            String::new()
+        } else {
+            pick("model")
+        };
+        (model, pick("effort"))
     }
 }
 
@@ -236,5 +302,96 @@ mod tests {
             (String::new(), String::new())
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn every_account_has_its_own_launch_preferences() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = (Path::new("/p/a"), Path::new("/p/b"));
+        let main = Account {
+            id: 0,
+            program: "claude".into(),
+            name: "Main".into(),
+            dir: None,
+            provider: None,
+            base_url: None,
+            model: None,
+        };
+        let work = Account {
+            id: 1,
+            name: "Work".into(),
+            ..main.clone()
+        };
+
+        // Lo existente sigue siendo la configuración de la principal tras actualizar.
+        store.set_setting("claude_model", "opus").unwrap();
+        store
+            .set_launch_pref("claude", "effort", None, "medium")
+            .unwrap();
+        store
+            .set_launch_pref("claude", "effort", Some(a), "max")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_for(&main, a),
+            ("opus".into(), "max".into())
+        );
+
+        // Una cuenta sin valor propio sigue lo general (lo que la pantalla de Ajustes escribe
+        // hasta que cada cuenta se configure sola): actualizar no cambia sus terminales.
+        assert_eq!(
+            store.account_launch_for(&work, a),
+            ("opus".into(), "max".into())
+        );
+        store
+            .set_account_launch_pref(&work, "model", None, "sonnet")
+            .unwrap();
+        store
+            .set_account_launch_pref(&work, "effort", Some(a), "high")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_for(&work, a),
+            ("sonnet".into(), "high".into())
+        );
+        assert_eq!(
+            store.account_launch_for(&work, b),
+            ("sonnet".into(), "medium".into())
+        );
+    }
+
+    #[test]
+    fn an_account_that_fixes_its_own_model_gets_no_launch_model() {
+        let store = Store::in_memory().unwrap();
+        store.set_setting("claude_model", "opus").unwrap();
+        store
+            .set_launch_pref("claude", "effort", None, "high")
+            .unwrap();
+        let api = |provider: &str, model: Option<&str>| Account {
+            id: 1,
+            program: "claude".into(),
+            name: "Api".into(),
+            dir: None,
+            provider: Some(provider.into()),
+            base_url: None,
+            model: model.map(Into::into),
+        };
+        let a = Path::new("/p/a");
+        // Los modelos de DeepSeek y de una dirección propia van en el entorno de la cuenta:
+        // `--model opus` los pisaría. El esfuerzo no choca con nada.
+        for fixed in [
+            api("deepseek", None),
+            api("custom", Some("m")),
+            api("anthropic", Some("claude-haiku-5-5")),
+        ] {
+            assert_eq!(
+                store.account_launch_for(&fixed, a),
+                (String::new(), "high".into()),
+                "{fixed:?}"
+            );
+        }
+        // Anthropic sin modelo propio sí recibe el que se eligió.
+        assert_eq!(
+            store.account_launch_for(&api("anthropic", None), a),
+            ("opus".into(), "high".into())
+        );
     }
 }
