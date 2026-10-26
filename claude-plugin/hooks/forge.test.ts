@@ -645,22 +645,3 @@ test('before ending a turn that edited code, the advisor reviews it once', async
   await $.tool.call({ tool: 'Write' } as never)
   expect((await stop(false)).block).toContain('advisor tool')
 })
-
-test('with the advisor on, the steps of a response are traced to a file', async ($, on) => {
-  mock.env(on, { FORGE_ADVISOR: '1' })
-  const written: string[] = []
-  on('fs.write', (_$, e) => {
-    written.push(`${e.path}\n${e.text}`)
-    return { value: undefined } as never
-  })
-  on('turn.step', async function* (_$, e) {
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], serverToolUses: [{ id: 'a', name: 'advisor', input: {}, startedAt: 1 }] } as never
-  })
-  for await (const _chunk of $.turn.step({ turnId: 't', index: 0, messageCount: 1, model: 'claude-sonnet-5-5' } as TurnStepInput)) {
-    // no chunks from the stub
-  }
-  const trace = written.at(-1) ?? ''
-  expect(trace).toContain('forge-advisor-trace')
-  expect(trace).toContain('step main sonnet')
-  expect(trace).toContain('end main advisor')
-})

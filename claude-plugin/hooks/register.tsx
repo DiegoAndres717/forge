@@ -297,22 +297,32 @@ async function countAdvisor($: EngineInterface, transcript: string | undefined) 
   }
 }
 
-// Experiment: does anything on screen change while the advisor works? Where the API gives
-// no event, the mod writes what is drawn and streamed (with the time) to a file, only with
-// the advisor switch on. Read it after one consultation.
-const TRACE_FILE = '/tmp/forge-advisor-trace.log'
-const traced: string[] = []
-async function trace($: EngineInterface, line: string) {
+// The API runs the advisor inside the model's request, so no event says it started. What
+// does show: while it works the animated line stays in `tool-input` for a long time (a
+// real tool call's arguments take seconds; measured: a consultation, over a minute), with
+// no new tool row. After this long in that mode with the advisor switch on, the band
+// shows Opus at work; it stops when the line changes or the step ends.
+const ADVISOR_AFTER_MS = 12_000
+let advisorTimer: { cancel: () => void } | undefined
+async function watchAdvisor($: EngineInterface, mode: string) {
   try {
-    if ((await $.env.get('FORGE_ADVISOR')) !== '1') return
-    const stamp = new Date().toISOString().slice(11, 23)
-    if (traced.at(-1)?.slice(13) === line) return
-    traced.push(`${stamp} ${line}`)
-    if (traced.length > 400) traced.shift()
-    await $.fs.write(TRACE_FILE, `${traced.join('\n')}\n`)
+    if (mode === 'tool-input') {
+      if (advisorTimer) return
+      if ((await $.env.get('FORGE_ADVISOR')) !== '1') return
+      advisorTimer = $.clock.after(ADVISOR_AFTER_MS, () => {
+        void update($, active, all => ({ ...all, advisor: { model: 'opus', task: 'advising' } })).catch(() => undefined)
+      })
+      return
+    }
+    await stopAdvisor($)
   } catch {
-    // Only a diagnostic: it never holds anything up.
+    // Only the band depends on this.
   }
+}
+async function stopAdvisor($: EngineInterface) {
+  advisorTimer?.cancel()
+  advisorTimer = undefined
+  await update($, active, ({ advisor: _gone, ...rest }) => rest).catch(() => undefined)
 }
 
 /** A command answered by Forge's CLI output (no model call). */
@@ -537,9 +547,8 @@ export const register: Register = on => {
     } catch {
       // Only the band depends on this: never hold up the request.
     }
-    await trace($, `step ${key} ${model}`)
     const result = yield* next(step)
-    await trace($, `end ${key} ${result.serverToolUses?.map(use => use.name).join(',') ?? '-'}`)
+    if (key === 'main') await stopAdvisor($)
     const asked = result.serverToolUses?.filter(use => use.name === 'advisor').length ?? 0
     if (asked > 0) await update($, advised, n => n + asked).catch(() => undefined)
     return result
@@ -627,19 +636,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    await trace($, `Spinner ${e.props.mode} ${e.props.message ?? e.props.word}`)
-    return next(e)
-  })
-  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => {
-    await trace($, `ToolUse ${e.props.tool} running=${e.props.isRunning}`)
-    return next(e)
-  })
-  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
-    await trace($, `ToolProgress ${JSON.stringify(e.props).slice(0, 160)}`)
-    return next(e)
-  })
-  on('ui.render', { component: 'InfoNotice' }, async ($, e, next) => {
-    await trace($, `InfoNotice ${JSON.stringify(e.props).slice(0, 160)}`)
+    await watchAdvisor($, e.props.mode)
     return next(e)
   })
 
