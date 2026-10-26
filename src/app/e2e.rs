@@ -2203,6 +2203,26 @@ fn a_gemini_key_is_added_from_settings_without_its_own_folder() {
         "no se creó ninguna carpeta"
     );
     assert!(h.query_by_label_contains("AIza-prueba").is_none());
+    // Su ficha no trae modelo ni esfuerzo de arranque: Forge no los aplica a Gemini CLI.
+    let efforts = h
+        .query_all_by_label_contains("Esfuerzo · En general")
+        .count();
+    let last = h.query_all_by_label("Configurar").count() - 1;
+    h.query_all_by_label("Configurar")
+        .nth(last)
+        .expect("el botón Configurar de la cuenta de Gemini")
+        .click_accesskit();
+    h.run_steps(3);
+    assert_eq!(
+        h.query_all_by_label_contains("Esfuerzo · En general")
+            .count(),
+        efforts,
+        "sin selectores inútiles"
+    );
+    assert!(
+        h.query_by_label_contains("solo está la clave de la cuenta")
+            .is_some()
+    );
 }
 
 #[test]

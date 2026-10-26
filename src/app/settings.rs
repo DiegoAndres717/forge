@@ -1005,7 +1005,17 @@ impl App {
                         .unwrap_or(false)
                     {
                         ui.add_space(4.0);
-                        self.launch_ui(ui, program, Some(a));
+                        if program == "gemini" {
+                            // Forge no aplica modelo ni esfuerzo de arranque a Gemini CLI.
+                            hint(
+                                ui,
+                                tr!(
+                                    "Gemini CLI se abre con su propia configuración: aquí solo está la clave de la cuenta."
+                                ),
+                            );
+                        } else {
+                            self.launch_ui(ui, program, Some(a));
+                        }
                     }
                     ui.add_space(4.0);
                 }
