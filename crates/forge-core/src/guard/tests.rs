@@ -123,6 +123,32 @@ mod unit {
         }
     }
 
+    /// Las claves de los proveedores a los que Forge deja conectar una cuenta (Gemini, Kimi y
+    /// las nuevas de OpenAI) también se encuentran y se ocultan. Se arman por partes: el código
+    /// de la prueba no lleva ninguna clave escrita.
+    #[test]
+    fn gemini_kimi_and_openai_project_keys_are_found_and_masked() {
+        let gemini = format!(
+            "AIza{}",
+            "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7_-0cF3hJ"
+                .chars()
+                .take(35)
+                .collect::<String>()
+        );
+        let kimi = format!("sk-{}", "Xy9Kq2Lm4Np6Rs8Tu0Vw1Zb3Cd5Ef7Gh9Ij");
+        let openai = format!("sk-proj-{}", "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv1Wx2Yz3");
+        for (name, key) in [
+            ("GEMINI_API_KEY", gemini),
+            ("ANTHROPIC_AUTH_TOKEN", kimi),
+            ("OPENAI_API_KEY", openai),
+        ] {
+            let line = format!("{name}={key}");
+            let found = scan_secrets(&[("a.env".to_string(), 1, line.clone())]);
+            assert_eq!(found.len(), 1, "{name}");
+            assert!(!mask_secrets(&line).contains(&key), "{name}");
+        }
+    }
+
     #[test]
     fn a_session_exception_lasts_two_hours() {
         let at = |hours: i64| {

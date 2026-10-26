@@ -96,6 +96,14 @@ pub fn list_request(
             }
             (url, anthropic.to_vec())
         }
+        "gemini" => {
+            let mut url =
+                "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000".to_string();
+            if let Some(after) = after {
+                url += &format!("&pageToken={after}");
+            }
+            (url, vec![("x-goog-api-key".to_string(), key.to_string())])
+        }
         "deepseek" => ("https://api.deepseek.com/models".to_string(), vec![bearer]),
         "kimi" => (
             "https://api.moonshot.ai/v1/models".to_string(),
@@ -124,6 +132,21 @@ pub fn list_request(
 /// lista de modelos.
 pub fn parse_models(body: &str) -> Option<(Vec<String>, Option<String>)> {
     let v: serde_json::Value = serde_json::from_str(body).ok()?;
+    // Gemini: `models[].name` como `models/<id>`, solo los que generan texto, y la página
+    // siguiente en `nextPageToken`.
+    if let Some(models) = v["models"].as_array() {
+        let ids = models
+            .iter()
+            .filter(|m| {
+                m["supportedGenerationMethods"]
+                    .as_array()
+                    .is_none_or(|methods| methods.iter().any(|x| x == "generateContent"))
+            })
+            .filter_map(|m| m["name"].as_str())
+            .map(|name| name.strip_prefix("models/").unwrap_or(name).to_string())
+            .collect();
+        return Some((ids, v["nextPageToken"].as_str().map(String::from)));
+    }
     let ids = v["data"]
         .as_array()?
         .iter()
@@ -173,6 +196,10 @@ pub fn explain(status: u16, body: &str) -> Result<(), String> {
     match status {
         200..=299 | 429 => Ok(()),
         401 | 403 => Err(tr!("La clave no es válida o no tiene permiso.").to_string()),
+        // Google contesta una clave mala con un 400, no con un 401.
+        400 if body.contains("API_KEY_INVALID") => {
+            Err(tr!("La clave no es válida o no tiene permiso.").to_string())
+        }
         404 => Err(tr!("No se encontró la dirección o el modelo. Revisa los dos.").to_string()),
         other => {
             // Si es el JSON de error del servicio, se muestra solo su mensaje, entero.
@@ -254,6 +281,12 @@ pub fn check(
     model: Option<&str>,
     key: &str,
 ) -> Result<(), String> {
+    // Gemini: pedir la lista ya prueba la clave, sin adivinar un nombre de modelo.
+    if provider == "gemini" {
+        let request = list_request(provider, base_url, key, None)?;
+        let (body, status) = send("GET", &request)?;
+        return explain(status, &body);
+    }
     let request = check_request(provider, base_url, model, key)?;
     let (body, status) = send("POST", &request)?;
     explain(status, &body)
@@ -474,5 +507,40 @@ mod tests {
         let err = list_models("custom", Some(&url), "sk-mala").unwrap_err();
         assert!(err.contains("clave"), "{err}");
         let _ = server.join();
+    }
+
+    /// Gemini: la clave va en `x-goog-api-key`, la lista pagina con `pageToken` y sus nombres
+    /// llevan el prefijo `models/`; una clave mala es un 400, no un 401.
+    #[test]
+    fn gemini_lists_its_models_and_explains_a_bad_key() {
+        let r = list_request("gemini", None, "AIza-x", None).unwrap();
+        assert_eq!(
+            r.url,
+            "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+        );
+        assert_eq!(header(&r, "x-goog-api-key"), Some("AIza-x"));
+        assert!(header(&r, "authorization").is_none());
+        let next = list_request("gemini", None, "k", Some("TOKEN")).unwrap();
+        assert!(next.url.ends_with("&pageToken=TOKEN"), "{}", next.url);
+
+        let page = r#"{"models":[
+            {"name":"models/gemini-2.5-pro","supportedGenerationMethods":["generateContent"]},
+            {"name":"models/text-embedding-004","supportedGenerationMethods":["embedContent"]},
+            {"name":"models/gemini-2.5-flash"}],"nextPageToken":"T2"}"#;
+        assert_eq!(
+            parse_models(page),
+            Some((
+                vec!["gemini-2.5-pro".into(), "gemini-2.5-flash".into()],
+                Some("T2".into())
+            )),
+            "solo los que generan texto, sin el prefijo"
+        );
+
+        let bad = r#"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}"#;
+        let err = explain(400, bad).unwrap_err();
+        assert!(err.contains("clave"), "{err}");
+        // Un 400 cualquiera sigue contando el motivo del servicio.
+        let other = explain(400, r#"{"error":{"message":"otra cosa"}}"#).unwrap_err();
+        assert!(other.contains("otra cosa"), "{other}");
     }
 }

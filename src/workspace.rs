@@ -1048,8 +1048,9 @@ impl Workspace {
             }
         }
         if spec.is_none() {
-            // Un `claude` o `codex` escrito a mano usa la cuenta elegida en el proyecto.
-            for program in ["claude", "codex"] {
+            // Un `claude`, `codex` o `gemini` escrito a mano usa la cuenta elegida en el
+            // proyecto.
+            for program in ["claude", "codex", "gemini"] {
                 if let Some(a) = self.account_for(program, None) {
                     env.extend(a.env());
                     env.extend(self.account_secret_env(a));

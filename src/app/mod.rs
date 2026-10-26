@@ -503,7 +503,7 @@ impl App {
             return Default::default();
         };
         let accounts = store.all_accounts();
-        let chosen = ["claude", "codex"]
+        let chosen = ["claude", "codex", "gemini"]
             .into_iter()
             .map(|p| (p.to_string(), store.project_account(project, p).id))
             .collect();

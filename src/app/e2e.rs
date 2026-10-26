@@ -2056,6 +2056,79 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
 /// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo
 /// oculto) y la cuenta aparece. La clave va al llavero y no se vuelve a mostrar.
 #[test]
+fn a_gemini_key_is_added_from_settings_without_its_own_folder() {
+    use forge_core::secrets::{MemoryStore, SecretStore};
+    let _serial = serial();
+    let dir = project("gemini-account");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let mut h = app_with(store, Some(dir.clone()));
+    let keys = std::sync::Arc::new(MemoryStore::default());
+    h.state_mut().secrets = keys.clone();
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    for program in ["claude", "gemini"] {
+        h.state().agents.lock().unwrap().insert(
+            program.into(),
+            agents::Detection {
+                path: Some(format!("/usr/local/bin/{program}").into()),
+                version: None,
+            },
+        );
+    }
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    // Gemini CLI solo tiene cuentas con clave: no hay «Añadir cuenta» para él, solo para los
+    // agentes con login que haya (Claude, y Codex si está instalado en esta máquina).
+    let with_login = {
+        let found = h.state().agents.lock().unwrap();
+        ["claude", "codex"]
+            .iter()
+            .filter(|p| found.get(**p).is_some_and(|d| d.path.is_some()))
+            .count()
+    };
+    assert_eq!(
+        h.query_all_by_label_contains("Añadir cuenta").count(),
+        with_login
+    );
+    h.get_by_label_contains("Añadir clave de Gemini").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().api_form.as_ref().unwrap().provider(), "gemini");
+    h.state_mut().api_form = Some(settings::ApiForm::filled(
+        "gemini",
+        "gemini",
+        "AIza-prueba",
+        "",
+        "",
+    ));
+    h.run_steps(3);
+    h.get_by_label("Añadir modelo").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(5);
+    let accounts = h.state().store.as_ref().unwrap().accounts("gemini");
+    assert_eq!(accounts.len(), 2, "la principal y la de clave");
+    let added = &accounts[1];
+    assert_eq!(added.provider.as_deref(), Some("gemini"));
+    assert!(added.dir.is_none(), "sin carpeta propia");
+    assert_eq!(
+        keys.get(&added.secret_id()).unwrap().as_deref(),
+        Some("AIza-prueba")
+    );
+    assert!(
+        !dir.join(".accounts").exists(),
+        "no se creó ninguna carpeta"
+    );
+    assert!(h.query_by_label_contains("AIza-prueba").is_none());
+}
+
+#[test]
 fn the_model_is_picked_from_the_list_the_api_offers_after_testing_the_key() {
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -2109,7 +2182,7 @@ fn the_model_is_picked_from_the_list_the_api_offers_after_testing_the_key() {
     h.run_steps(3);
     // Una dirección propia (el servicio local), con su modelo, ya rellenada.
     h.state_mut().api_form = Some(settings::ApiForm::filled(
-        "custom", "sk-local", &url, "m-uno",
+        "claude", "custom", "sk-local", &url, "m-uno",
     ));
     h.run_steps(3);
     h.get_by_label("Probar clave").focus();
