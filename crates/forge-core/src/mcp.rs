@@ -204,7 +204,42 @@ pub fn codex_skills_installed(codex: &Path) -> bool {
         .all(|(name, _)| codex.join("skills").join(name).join("SKILL.md").exists())
 }
 
+/// Indicaciones MCP de una herramienta (`annotations`): si solo lee, si puede destruir algo
+/// y si habla con el mundo de fuera. Los clientes las usan para decidir cuánto revisar:
+/// leer no pide lo mismo que escribir. Todas hablan solo con Forge (`openWorldHint` falso).
+/// Una herramienta nueva debe clasificarse aquí: un test lo exige.
+fn hints(name: &str) -> Value {
+    // (solo lee, destructiva, idempotente)
+    let (read_only, destructive, idempotent) = match name {
+        "memory_search" | "memory_get" | "memory_list" | "plans_list" | "project_context" => {
+            (true, false, true)
+        }
+        "memory_save" | "plan_add" => (false, false, false),
+        // Editar guarda versiones, y borrar una memoria la archiva: nada se pierde.
+        "memory_update" | "memory_delete" | "plan_update" => (false, false, true),
+        // Un plan borrado no vuelve.
+        "plan_delete" => (false, true, true),
+        // Sin clasificar: lo más prudente.
+        _ => (false, true, false),
+    };
+    json!({
+        "readOnlyHint": read_only,
+        "destructiveHint": destructive,
+        "idempotentHint": idempotent,
+        "openWorldHint": false
+    })
+}
+
 fn tools() -> Value {
+    let mut list = raw_tools();
+    for tool in list.as_array_mut().into_iter().flatten() {
+        let name = tool["name"].as_str().unwrap_or_default().to_string();
+        tool["annotations"] = hints(&name);
+    }
+    list
+}
+
+fn raw_tools() -> Value {
     let kinds: Vec<&str> = KINDS.iter().map(|(id, _)| *id).collect();
     json!([
         {
@@ -1463,5 +1498,49 @@ mod tests {
         assert!(!ctx2.contains("ATENCIÓN: otra sesión de agente"));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_tool_says_whether_it_only_reads_or_changes_things() {
+        let tools = tools();
+        let hint = |name: &str, key: &str| {
+            let tool = tools
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|t| t["name"] == name)
+                .unwrap_or_else(|| panic!("no tool {name}"));
+            tool["annotations"][key].as_bool()
+        };
+        // Ninguna herramienta nueva se queda sin clasificar.
+        for tool in tools.as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            for key in ["readOnlyHint", "destructiveHint", "openWorldHint"] {
+                assert!(hint(name, key).is_some(), "{name} sin {key}");
+            }
+        }
+        for name in [
+            "memory_search",
+            "memory_get",
+            "memory_list",
+            "plans_list",
+            "project_context",
+        ] {
+            assert_eq!(hint(name, "readOnlyHint"), Some(true), "{name}");
+        }
+        for name in [
+            "memory_save",
+            "memory_update",
+            "memory_delete",
+            "plan_add",
+            "plan_update",
+            "plan_delete",
+        ] {
+            assert_eq!(hint(name, "readOnlyHint"), Some(false), "{name}");
+        }
+        // Borrar un plan es borrar; una memoria se archiva y el dueño la restaura.
+        assert_eq!(hint("plan_delete", "destructiveHint"), Some(true));
+        assert_eq!(hint("memory_delete", "destructiveHint"), Some(false));
+        assert_eq!(hint("memory_update", "destructiveHint"), Some(false));
     }
 }
