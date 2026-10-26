@@ -99,6 +99,21 @@ impl Store {
         }
     }
 
+    /// Lo que esta cuenta tiene guardado como suyo, sin tomar nada prestado de lo de antes:
+    /// `None` si nunca se configuró, `Some("")` si se dejó a propósito como la configuración
+    /// del agente.
+    pub fn account_launch_own(
+        &self,
+        account: &Account,
+        what: &str,
+        project: Option<&Path>,
+    ) -> Option<String> {
+        let project = project.map(|p| self.project_key(p));
+        self.setting(&account_key(account, what, project.as_deref()))
+            .ok()
+            .flatten()
+    }
+
     pub fn set_account_launch_pref(
         &self,
         account: &Account,
@@ -392,6 +407,44 @@ mod tests {
         assert_eq!(
             store.account_launch_for(&api("anthropic", None), a),
             ("opus".into(), "high".into())
+        );
+    }
+
+    /// La ficha de una cuenta distingue «nunca se configuró» (sigue lo de antes) de «se dejó
+    /// como la configuración del agente» (vacío elegido a propósito).
+    #[test]
+    fn an_account_tells_never_configured_from_set_to_the_agents_own() {
+        let store = Store::in_memory().unwrap();
+        let a = Path::new("/p/a");
+        let work = Account {
+            id: 1,
+            program: "claude".into(),
+            name: "Work".into(),
+            dir: None,
+            provider: None,
+            base_url: None,
+            model: None,
+        };
+        assert_eq!(store.account_launch_own(&work, "model", None), None);
+        store
+            .set_account_launch_pref(&work, "model", None, "")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_own(&work, "model", None),
+            Some(String::new())
+        );
+        store
+            .set_account_launch_pref(&work, "model", Some(a), "sonnet")
+            .unwrap();
+        assert_eq!(
+            store.account_launch_own(&work, "model", Some(a)),
+            Some("sonnet".into())
+        );
+        // El otro ajuste y el otro proyecto no se ven afectados.
+        assert_eq!(store.account_launch_own(&work, "effort", None), None);
+        assert_eq!(
+            store.account_launch_own(&work, "model", Some(Path::new("/p/b"))),
+            None
         );
     }
 }

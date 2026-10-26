@@ -513,6 +513,30 @@ fn ui_preview() {
         settle(&mut harness);
         save(&mut harness, &out, name);
     }
+    // La ficha de una cuenta: «Configurar» la abre y enseña su modelo y esfuerzo. La escena
+    // corre en el idioma de la maqueta, así que los textos salen de `tr!`.
+    show_tab(&ctx, SettingsTab::Agents);
+    settle(&mut harness);
+    harness
+        .query_all_by_label(forge_core::tr!("Configurar"))
+        .next()
+        .expect("el botón Configurar de una cuenta")
+        .scroll_to_me();
+    settle(&mut harness);
+    harness
+        .query_all_by_label(forge_core::tr!("Configurar"))
+        .next()
+        .expect("el botón Configurar de una cuenta")
+        .click_accesskit();
+    settle(&mut harness);
+    save(&mut harness, &out, "11q-ajustes-agentes-ficha");
+    // Se cierra para no afectar a las escenas que siguen.
+    harness
+        .query_all_by_label(forge_core::tr!("Cerrar"))
+        .next()
+        .expect("el botón Cerrar de la ficha")
+        .click_accesskit();
+    settle(&mut harness);
     // Pantallas pequeñas: el modal no se sale, las etiquetas van encima y las pestañas
     // pasan a un desplegable.
     harness.set_size(Vec2::new(1000.0, 620.0));
