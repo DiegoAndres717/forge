@@ -1101,8 +1101,9 @@ impl ApiForm {
 fn provider_label(provider: &str) -> String {
     match provider {
         "deepseek" => "DeepSeek".into(),
+        "kimi" => "Kimi".into(),
         "custom" => tr!("Otro").to_string(),
-        _ => "Anthropic".into(),
+        _ => "Claude (Anthropic)".into(),
     }
 }
 
@@ -1114,21 +1115,25 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
     theme::card(ui, |ui| {
         ui.label(RichText::new(tr!("Añadir modelo por API")).strong());
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            for provider in ["anthropic", "deepseek", "custom"] {
-                if ui
-                    .selectable_label(form.provider == provider, provider_label(provider))
-                    .clicked()
-                {
-                    form.provider = provider;
-                    form.error = None;
-                    form.checked = None;
+        // Un desplegable: la lista de proveedores crecerá y así no se desborda.
+        let mut chosen = form.provider;
+        egui::ComboBox::from_id_salt("api-provider")
+            .selected_text(provider_label(chosen))
+            .width(220.0)
+            .show_ui(ui, |ui| {
+                for provider in ["anthropic", "deepseek", "kimi", "custom"] {
+                    ui.selectable_value(&mut chosen, provider, provider_label(provider));
                 }
-            }
-        });
+            });
+        if chosen != form.provider {
+            form.provider = chosen;
+            form.error = None;
+            form.checked = None;
+        }
         ui.label(
             RichText::new(match form.provider {
                 "deepseek" => tr!("Usa los modelos de DeepSeek en Claude Code."),
+                "kimi" => tr!("Usa los modelos de Kimi (Moonshot) en Claude Code."),
                 "custom" => {
                     tr!("Para cualquier servicio compatible con la API de Anthropic.")
                 }
