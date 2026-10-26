@@ -12,7 +12,7 @@ use crate::store::Store;
 
 /// Agentes con cuentas: (programa, variable con su carpeta, carpeta principal en $HOME,
 /// lo que se comparte con la principal).
-const AGENTS: [(&str, &str, &str, &[&str]); 2] = [
+const AGENTS: [(&str, &str, &str, &[&str]); 3] = [
     (
         "claude",
         "CLAUDE_CONFIG_DIR",
@@ -32,6 +32,9 @@ const AGENTS: [(&str, &str, &str, &[&str]); 2] = [
         ".codex",
         &["config.toml", "AGENTS.md", "skills"],
     ),
+    // Gemini CLI solo tiene cuentas con clave de API y sin carpeta propia (`account_dir`):
+    // el Guard y la memoria de Forge viven en su carpeta de siempre.
+    ("gemini", "GEMINI_CLI_HOME", ".gemini", &[]),
 ];
 
 /// Cuenta de un agente. La `id` 0 es la principal (la carpeta de siempre).
@@ -161,6 +164,13 @@ impl Account {
                 env.extend(models(model, DEEPSEEK_SMALL));
                 env
             }
+            Some("gemini") => {
+                let mut env = vec![var("GEMINI_API_KEY", secret)];
+                if let Some(model) = &self.model {
+                    env.push(var("GEMINI_MODEL", model));
+                }
+                env
+            }
             Some("kimi") => {
                 let model = self.model.as_deref().unwrap_or(KIMI_MODEL);
                 let mut env = vec![
@@ -192,6 +202,7 @@ impl Account {
     pub fn login_command(&self) -> &'static str {
         match self.program.as_str() {
             "codex" => "codex login",
+            "gemini" => "gemini",
             _ => "claude",
         }
     }
@@ -261,7 +272,7 @@ impl Store {
     }
 
     fn account_dir(&self, a: &Account) -> Option<PathBuf> {
-        if a.is_main() {
+        if a.is_main() || a.program == "gemini" {
             return None;
         }
         Some(
@@ -301,6 +312,14 @@ impl Store {
         if !supported(program) {
             return Err(tr!("{program} no admite varias cuentas", program = program));
         }
+        if program == "gemini" {
+            // Con login tendría carpeta propia y sin el Guard ni la memoria de Forge.
+            return Err(tr!("Gemini CLI solo admite cuentas con clave de API.").to_string());
+        }
+        self.new_account(program, name)
+    }
+
+    fn new_account(&self, program: &str, name: &str) -> Result<Account, String> {
         let mut saved = self.saved_accounts();
         let id = saved.iter().map(|a| a.id).max().unwrap_or(0) + 1;
         let mut account = Account {
@@ -319,10 +338,12 @@ impl Store {
         Ok(account)
     }
 
-    /// Añade una cuenta de Claude Code con clave de API. La clave va al llavero; en los
-    /// ajustes solo queda el proveedor. Si algo no vale, no se guarda nada.
+    /// Añade una cuenta con clave de API (Claude Code o Gemini CLI). La clave va al llavero; en
+    /// los ajustes solo queda el proveedor. Si algo no vale, no se guarda nada.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_api_account(
         &self,
+        program: &str,
         name: &str,
         provider: &str,
         base_url: Option<&str>,
@@ -336,7 +357,7 @@ impl Store {
             return Err(tr!("Falta la clave.").to_string());
         }
         match provider {
-            "anthropic" | "deepseek" | "kimi" => {}
+            "anthropic" | "deepseek" | "kimi" | "gemini" => {}
             "custom" => {
                 let url = base_url.as_deref().unwrap_or_default();
                 if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -348,13 +369,22 @@ impl Store {
             }
             other => return Err(tr!("Proveedor desconocido: {p}", p = other)),
         }
-        let mut account = self.add_account("claude", name)?;
+        // Cada agente acepta solo los proveedores que entiende.
+        let accepted: &[&str] = match program {
+            "claude" => &["anthropic", "deepseek", "kimi", "custom"],
+            "gemini" => &["gemini"],
+            _ => &[],
+        };
+        if !accepted.contains(&provider) {
+            return Err(tr!("Proveedor desconocido: {p}", p = provider));
+        }
+        let mut account = self.new_account(program, name)?;
         account.provider = Some(provider.into());
         account.base_url = base_url;
         account.model = model;
         // La clave primero: sin llavero la cuenta no queda a medias.
         if let Err(e) = keys.set(&account.secret_id(), secret.trim()) {
-            let _ = self.delete_account("claude", account.id);
+            let _ = self.delete_account(program, account.id);
             return Err(e);
         }
         let mut saved = self.saved_accounts();
@@ -649,7 +679,7 @@ mod tests {
         let store = Store::in_memory().unwrap();
         let keys = crate::secrets::MemoryStore::default();
         let account = store
-            .add_api_account("K", "kimi", None, None, "sk-kimi", &keys)
+            .add_api_account("claude", "K", "kimi", None, None, "sk-kimi", &keys)
             .unwrap();
         assert_eq!(account.provider.as_deref(), Some("kimi"));
         assert_eq!(
@@ -690,7 +720,15 @@ mod tests {
         let keys = MemoryStore::default();
 
         let added = store
-            .add_api_account("Mi API", "anthropic", None, None, "sk-ant-secreto", &keys)
+            .add_api_account(
+                "claude",
+                "Mi API",
+                "anthropic",
+                None,
+                None,
+                "sk-ant-secreto",
+                &keys,
+            )
             .unwrap();
         assert_eq!(
             keys.get(&added.secret_id()).unwrap().as_deref(),
@@ -706,31 +744,114 @@ mod tests {
         // Lo que falta o no vale se dice antes de guardar nada.
         assert!(
             store
-                .add_api_account("X", "anthropic", None, None, "  ", &keys)
+                .add_api_account("claude", "X", "anthropic", None, None, "  ", &keys)
                 .is_err()
         );
         assert!(
             store
-                .add_api_account("X", "custom", None, Some("m"), "k", &keys)
+                .add_api_account("claude", "X", "custom", None, Some("m"), "k", &keys)
                 .is_err()
         );
         assert!(
             store
-                .add_api_account("X", "custom", Some("proxy.example"), Some("m"), "k", &keys)
+                .add_api_account(
+                    "claude",
+                    "X",
+                    "custom",
+                    Some("proxy.example"),
+                    Some("m"),
+                    "k",
+                    &keys
+                )
                 .is_err()
         );
         assert!(
             store
-                .add_api_account("X", "custom", Some("https://p.example"), None, "k", &keys)
+                .add_api_account(
+                    "claude",
+                    "X",
+                    "custom",
+                    Some("https://p.example"),
+                    None,
+                    "k",
+                    &keys
+                )
                 .is_err()
         );
         assert!(
             store
-                .add_api_account("X", "otro", None, None, "k", &keys)
+                .add_api_account("claude", "X", "otro", None, None, "k", &keys)
                 .is_err()
         );
 
         assert_eq!(store.accounts("claude").len(), 2, "nada se guardó a medias");
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    /// Gemini CLI no tiene cuentas con login ni carpeta propia: Forge deja su Guard y su
+    /// memoria en la carpeta de siempre, y una cuenta es solo la clave (por entorno).
+    #[test]
+    fn a_gemini_account_is_only_a_key_and_keeps_the_main_folder() {
+        let tmp = std::env::temp_dir().join(format!("forge-gemini-acc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let mut store = Store::in_memory().unwrap();
+        store.accounts_root = Some(tmp.join("accounts"));
+        let keys = crate::secrets::MemoryStore::default();
+
+        assert!(supported("gemini"));
+        // Con login no: no tendría el Guard ni la memoria que Forge pone en ~/.gemini.
+        assert!(store.add_account("gemini", "x").is_err());
+
+        let account = store
+            .add_api_account(
+                "gemini",
+                "Mi Gemini",
+                "gemini",
+                None,
+                Some("gemini-2.5-pro"),
+                "AIza-clave",
+                &keys,
+            )
+            .unwrap();
+        assert_eq!(account.program, "gemini");
+        assert!(account.dir.is_none() && account.env().is_none());
+        assert!(!tmp.join("accounts").exists(), "no se crea ninguna carpeta");
+        assert_eq!(
+            keys.get(&account.secret_id()).unwrap().as_deref(),
+            Some("AIza-clave")
+        );
+        let env: std::collections::HashMap<_, _> =
+            account.api_env("AIza-clave").into_iter().collect();
+        assert_eq!(env["GEMINI_API_KEY"], "AIza-clave");
+        assert_eq!(env["GEMINI_MODEL"], "gemini-2.5-pro");
+        assert!(!env.keys().any(|k| k.starts_with("ANTHROPIC")));
+        assert!(!account.allows_advisor());
+        // Sin modelo elegido, el de siempre de Gemini CLI.
+        let plain = Account {
+            model: None,
+            ..account.clone()
+        };
+        assert!(!plain.api_env("k").iter().any(|(k, _)| k == "GEMINI_MODEL"));
+
+        let listed = store.accounts("gemini");
+        assert_eq!(listed.len(), 2, "la principal y la de clave");
+        store.delete_account("gemini", account.id).unwrap();
+        assert_eq!(store.accounts("gemini").len(), 1);
+
+        // Cada agente acepta solo sus proveedores.
+        for (program, provider) in [
+            ("claude", "gemini"),
+            ("gemini", "anthropic"),
+            ("gemini", "custom"),
+            ("codex", "anthropic"),
+        ] {
+            assert!(
+                store
+                    .add_api_account(program, "X", provider, None, Some("m"), "k", &keys)
+                    .is_err(),
+                "{program} con {provider}"
+            );
+        }
         let _ = std::fs::remove_dir_all(tmp);
     }
 }

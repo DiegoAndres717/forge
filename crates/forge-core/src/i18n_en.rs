@@ -2733,6 +2733,16 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Por defecto", "Default"),
     (
+        "Con tu clave de Google AI Studio, para Gemini CLI.",
+        "With your Google AI Studio key, for Gemini CLI.",
+    ),
+    ("Añadir clave de Gemini", "Add a Gemini key"),
+    ("Se borra su clave de API.", "Its API key is deleted."),
+    (
+        "Gemini CLI solo admite cuentas con clave de API.",
+        "Gemini CLI only supports accounts with an API key.",
+    ),
+    (
         "Usa los modelos de Kimi (Moonshot) en Claude Code.",
         "Use Kimi (Moonshot) models in Claude Code.",
     ),

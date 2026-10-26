@@ -940,10 +940,14 @@ impl App {
         let mut submit = None;
         let mut new_key: Option<(String, String)> = None;
         let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
-        let programs: Vec<(&str, &str)> = [("claude", "Claude Code"), ("codex", "Codex")]
-            .into_iter()
-            .filter(|(p, _)| detected.get(*p).is_some_and(|d| d.path.is_some()))
-            .collect();
+        let programs: Vec<(&str, &str)> = [
+            ("claude", "Claude Code"),
+            ("codex", "Codex"),
+            ("gemini", "Gemini CLI"),
+        ]
+        .into_iter()
+        .filter(|(p, _)| detected.get(*p).is_some_and(|d| d.path.is_some()))
+        .collect();
         if programs.is_empty() {
             return;
         }
@@ -995,21 +999,37 @@ impl App {
                     ui.add_space(4.0);
                 }
                 ui.add_space(4.0);
-                if ui
-                    .button(tr!("{p0}  Añadir cuenta", p0 = icon::PLUS))
-                    .clicked()
+                // Gemini CLI solo tiene cuentas con clave de API (sin carpeta propia).
+                if program != "gemini"
+                    && ui
+                        .button(tr!("{p0}  Añadir cuenta", p0 = icon::PLUS))
+                        .clicked()
                 {
                     cmds.push(UiCmd::AccountAdd(program.into()));
                 }
-                // Con una clave de API en vez de iniciar sesión: Anthropic, DeepSeek u otro.
-                if program == "claude" {
+                // Con una clave de API en vez de iniciar sesión: Claude Code (Anthropic,
+                // DeepSeek, Kimi u otro) o Gemini CLI.
+                if program == "claude" || program == "gemini" {
+                    let label = if program == "gemini" {
+                        tr!("Añadir clave de Gemini")
+                    } else {
+                        tr!("Añadir modelo por API")
+                    };
                     match self.api_form.as_mut() {
+                        Some(form) if form.program == program => {
+                            submit = api_form_ui(ui, form);
+                        }
+                        // El formulario abierto es de otro agente.
+                        Some(_) => {}
                         None => {
-                            if ui.button(tr!("Añadir modelo por API")).clicked() {
-                                self.api_form = Some(ApiForm::new());
+                            if ui.button(label).clicked() {
+                                self.api_form = Some(ApiForm::new(if program == "gemini" {
+                                    "gemini"
+                                } else {
+                                    "claude"
+                                }));
                             }
                         }
-                        Some(form) => submit = api_form_ui(ui, form),
                     }
                 }
             }
@@ -1039,6 +1059,7 @@ impl App {
         let custom = form.provider == "custom";
         let result = self.store.as_ref().map(|s| {
             s.add_api_account(
+                form.program,
                 &name,
                 form.provider,
                 custom.then_some(form.url.as_str()),
@@ -1063,6 +1084,8 @@ type KeyCheck = (Result<(), String>, Vec<String>);
 
 /// «Añadir modelo por API»: lo que se escribe mientras el formulario está abierto.
 pub(super) struct ApiForm {
+    /// El agente de la cuenta: `claude` o `gemini`.
+    program: &'static str,
     provider: &'static str,
     name: String,
     key: String,
@@ -1077,9 +1100,14 @@ pub(super) struct ApiForm {
 }
 
 impl ApiForm {
-    fn new() -> Self {
+    fn new(program: &'static str) -> Self {
         Self {
-            provider: "anthropic",
+            program,
+            provider: if program == "gemini" {
+                "gemini"
+            } else {
+                "anthropic"
+            },
             name: String::new(),
             key: String::new(),
             url: String::new(),
@@ -1098,13 +1126,20 @@ impl ApiForm {
 
     /// Un formulario ya rellenado (los campos de texto no se teclean en las pruebas).
     #[cfg(test)]
-    pub(super) fn filled(provider: &'static str, key: &str, url: &str, model: &str) -> Self {
+    pub(super) fn filled(
+        program: &'static str,
+        provider: &'static str,
+        key: &str,
+        url: &str,
+        model: &str,
+    ) -> Self {
         Self {
+            program,
             provider,
             key: key.into(),
             url: url.into(),
             model: model.into(),
-            ..Self::new()
+            ..Self::new(program)
         }
     }
 
@@ -1125,6 +1160,7 @@ fn provider_label(provider: &str) -> String {
     match provider {
         "deepseek" => "DeepSeek".into(),
         "kimi" => "Kimi".into(),
+        "gemini" => "Gemini".into(),
         "custom" => tr!("Otro").to_string(),
         _ => "Claude (Anthropic)".into(),
     }
@@ -1138,16 +1174,21 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
     theme::card(ui, |ui| {
         ui.label(RichText::new(tr!("Añadir modelo por API")).strong());
         ui.add_space(4.0);
-        // Un desplegable: la lista de proveedores crecerá y así no se desborda.
+        // Un desplegable: la lista de proveedores crecerá y así no se desborda. Gemini CLI
+        // solo tiene el suyo.
         let mut chosen = form.provider;
-        egui::ComboBox::from_id_salt("api-provider")
-            .selected_text(provider_label(chosen))
-            .width(220.0)
-            .show_ui(ui, |ui| {
-                for provider in ["anthropic", "deepseek", "kimi", "custom"] {
-                    ui.selectable_value(&mut chosen, provider, provider_label(provider));
-                }
-            });
+        if form.program == "gemini" {
+            ui.label(RichText::new(provider_label("gemini")).strong());
+        } else {
+            egui::ComboBox::from_id_salt("api-provider")
+                .selected_text(provider_label(chosen))
+                .width(220.0)
+                .show_ui(ui, |ui| {
+                    for provider in ["anthropic", "deepseek", "kimi", "custom"] {
+                        ui.selectable_value(&mut chosen, provider, provider_label(provider));
+                    }
+                });
+        }
         if chosen != form.provider {
             form.provider = chosen;
             form.error = None;
@@ -1160,6 +1201,7 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
             RichText::new(match form.provider {
                 "deepseek" => tr!("Usa los modelos de DeepSeek en Claude Code."),
                 "kimi" => tr!("Usa los modelos de Kimi (Moonshot) en Claude Code."),
+                "gemini" => tr!("Con tu clave de Google AI Studio, para Gemini CLI."),
                 "custom" => {
                     tr!("Para cualquier servicio compatible con la API de Anthropic.")
                 }
@@ -1464,8 +1506,12 @@ fn account_row(
     if ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false) {
         ui.horizontal_wrapped(|ui| {
             ui.label(
-                RichText::new(tr!("Se borran su inicio de sesión y su historial."))
-                    .color(theme::TEXT_2),
+                RichText::new(if a.program == "gemini" {
+                    tr!("Se borra su clave de API.")
+                } else {
+                    tr!("Se borran su inicio de sesión y su historial.")
+                })
+                .color(theme::TEXT_2),
             );
             if ui
                 .button(RichText::new(tr!("Borrar")).color(theme::RED))
