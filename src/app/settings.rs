@@ -1042,7 +1042,7 @@ impl App {
                 &name,
                 form.provider,
                 custom.then_some(form.url.as_str()),
-                custom.then_some(form.model.as_str()),
+                (!form.model.trim().is_empty()).then_some(form.model.as_str()),
                 &form.key,
                 self.secrets.as_ref(),
             )
@@ -1058,6 +1058,9 @@ impl App {
     }
 }
 
+/// Lo que devuelve la prueba de la clave: su veredicto y los modelos que la API ofrece.
+type KeyCheck = (Result<(), String>, Vec<String>);
+
 /// «Añadir modelo por API»: lo que se escribe mientras el formulario está abierto.
 pub(super) struct ApiForm {
     provider: &'static str,
@@ -1067,8 +1070,10 @@ pub(super) struct ApiForm {
     model: String,
     error: Option<String>,
     /// Prueba de la clave en curso (en otro hilo) y su resultado.
-    check: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    check: Option<std::sync::mpsc::Receiver<KeyCheck>>,
     checked: Option<Result<(), String>>,
+    /// Los modelos que la API ofreció al probar la clave (vacío si no hay o no se pidieron).
+    models: Vec<String>,
 }
 
 impl ApiForm {
@@ -1082,12 +1087,30 @@ impl ApiForm {
             error: None,
             check: None,
             checked: None,
+            models: Vec::new(),
         }
     }
 
     #[cfg(test)]
     pub(super) fn provider(&self) -> &str {
         self.provider
+    }
+
+    /// Un formulario ya rellenado (los campos de texto no se teclean en las pruebas).
+    #[cfg(test)]
+    pub(super) fn filled(provider: &'static str, key: &str, url: &str, model: &str) -> Self {
+        Self {
+            provider,
+            key: key.into(),
+            url: url.into(),
+            model: model.into(),
+            ..Self::new()
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn models(&self) -> &[String] {
+        &self.models
     }
 
     /// Qué falta para poder añadir; la clave nunca se muestra después.
@@ -1129,6 +1152,9 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
             form.provider = chosen;
             form.error = None;
             form.checked = None;
+            // El modelo y la lista eran de otro proveedor.
+            form.models.clear();
+            form.model.clear();
         }
         ui.label(
             RichText::new(match form.provider {
@@ -1155,14 +1181,18 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
                     .desired_width(f32::INFINITY),
             )
             .changed();
+        // Otra clave o dirección: la lista de modelos ya no vale.
+        let mut connection_changed = edited;
         if form.provider == "custom" {
-            edited |= ui
+            let url_changed = ui
                 .add(
                     theme::field(egui::TextEdit::singleline(&mut form.url))
                         .hint_text(tr!("Dirección (https://…)"))
                         .desired_width(f32::INFINITY),
                 )
                 .changed();
+            edited |= url_changed;
+            connection_changed |= url_changed;
             edited |= ui
                 .add(
                     theme::field(egui::TextEdit::singleline(&mut form.model))
@@ -1174,11 +1204,15 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
         if edited {
             form.checked = None;
         }
+        if connection_changed {
+            form.models.clear();
+        }
         // La prueba corre aparte: la ventana no se para esperando al servicio.
         if let Some(rx) = &form.check {
             match rx.try_recv() {
-                Ok(result) => {
+                Ok((result, models)) => {
                     form.checked = Some(result);
+                    form.models = models;
                     form.check = None;
                 }
                 Err(_) => ui.ctx().request_repaint_after(Duration::from_millis(100)),
@@ -1211,6 +1245,31 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
             }
             None => {}
         }
+        // Los modelos que la propia API ofrece, para elegir sin escribir.
+        if !form.models.is_empty() {
+            ui.label(
+                RichText::new(tr!("Elige el modelo de la lista"))
+                    .size(11.5)
+                    .color(theme::TEXT_3),
+            );
+            let shown = if form.model.is_empty() {
+                tr!("Por defecto").to_string()
+            } else {
+                form.model.clone()
+            };
+            egui::ComboBox::from_id_salt("api-model")
+                .selected_text(shown)
+                .width(320.0)
+                .show_ui(ui, |ui| {
+                    // Una dirección propia no tiene modelo por defecto: lo exige.
+                    if form.provider != "custom" {
+                        ui.selectable_value(&mut form.model, String::new(), tr!("Por defecto"));
+                    }
+                    for id in &form.models {
+                        ui.selectable_value(&mut form.model, id.clone(), id);
+                    }
+                });
+        }
         if let Some(e) = &form.error {
             ui.label(RichText::new(e).size(12.0).color(theme::RED));
         }
@@ -1232,12 +1291,21 @@ fn api_form_ui(ui: &mut egui::Ui, form: &mut ApiForm) -> Option<bool> {
                 let custom = provider == "custom";
                 let (url, model) = (form.url.clone(), form.model.clone());
                 std::thread::spawn(move || {
-                    let _ = tx.send(forge_core::apicheck::check(
+                    let address = custom.then_some(url.as_str());
+                    let result = forge_core::apicheck::check(
                         provider,
-                        custom.then_some(url.as_str()),
-                        custom.then_some(model.as_str()),
+                        address,
+                        (!model.trim().is_empty()).then_some(model.as_str()),
                         &key,
-                    ));
+                    );
+                    // Si la clave vale, se pide la lista; si no hay lista, se escribe a mano.
+                    let models = if result.is_ok() {
+                        forge_core::apicheck::list_models(provider, address, &key)
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.send((result, models));
                 });
                 form.check = Some(rx);
                 form.checked = None;

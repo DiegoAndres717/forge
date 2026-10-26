@@ -2056,6 +2056,91 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
 /// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo
 /// oculto) y la cuenta aparece. La clave va al llavero y no se vuelve a mostrar.
 #[test]
+fn the_model_is_picked_from_the_list_the_api_offers_after_testing_the_key() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    let _serial = serial();
+    // Un servicio local: acepta la prueba (POST) y devuelve la lista de modelos (GET).
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for _ in 0..2 {
+            let Ok((mut socket, _)) = listener.accept() else {
+                return;
+            };
+            let mut buf = [0u8; 4096];
+            let n = socket.read(&mut buf).unwrap_or(0);
+            let request = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = if request.starts_with("GET /v1/models") {
+                r#"{"data":[{"id":"m-uno"},{"id":"m-dos"}]}"#
+            } else {
+                "{}"
+            };
+            let reply = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = socket.write_all(reply.as_bytes());
+        }
+    });
+    let dir = project("api-model-list");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let mut h = app_with(store, Some(dir.clone()));
+    h.state_mut().secrets = std::sync::Arc::new(forge_core::secrets::MemoryStore::default());
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.state().agents.lock().unwrap().insert(
+        "claude".into(),
+        agents::Detection {
+            path: Some("/usr/local/bin/claude".into()),
+            version: None,
+        },
+    );
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Añadir modelo por API").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    // Una dirección propia (el servicio local), con su modelo, ya rellenada.
+    h.state_mut().api_form = Some(settings::ApiForm::filled(
+        "custom", "sk-local", &url, "m-uno",
+    ));
+    h.run_steps(3);
+    h.get_by_label("Probar clave").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "la lista de modelos", |a| {
+        a.api_form
+            .as_ref()
+            .is_some_and(|f| f.models() == ["m-uno", "m-dos"])
+    });
+    h.run_steps(3);
+    // Se abre el desplegable de modelos y se elige el segundo.
+    h.query_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| n.value().as_deref() == Some("m-uno"))
+        .expect("el desplegable de modelos")
+        .click_accesskit();
+    h.run_steps(3);
+    h.get_by_label("m-dos").click_accesskit();
+    h.run_steps(3);
+    h.get_by_label("Añadir modelo").focus();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(5);
+    let accounts = h.state().store.as_ref().unwrap().accounts("claude");
+    let added = accounts.last().expect("la cuenta nueva");
+    assert_eq!(added.provider.as_deref(), Some("custom"));
+    assert_eq!(added.model.as_deref(), Some("m-dos"), "el modelo elegido");
+    assert_eq!(added.base_url.as_deref(), Some(url.as_str()));
+}
+
+#[test]
 fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
     use forge_core::secrets::{MemoryStore, SecretStore};
     let _serial = serial();
