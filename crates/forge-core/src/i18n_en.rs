@@ -2720,6 +2720,10 @@ pub const EN: &[(&str, &str)] = &[
         "Use DeepSeek models in Claude Code.",
     ),
     (
+        "Usa los modelos de Kimi (Moonshot) en Claude Code.",
+        "Use Kimi (Moonshot) models in Claude Code.",
+    ),
+    (
         "Para cualquier servicio compatible con la API de Anthropic.",
         "For any service compatible with Anthropic's API.",
     ),

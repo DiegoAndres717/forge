@@ -37,6 +37,11 @@ pub fn check_request(
             given(model).unwrap_or("deepseek-flash").to_string(),
             true,
         ),
+        "kimi" => (
+            "https://api.moonshot.ai/anthropic".to_string(),
+            given(model).unwrap_or("kimi-k3").to_string(),
+            true,
+        ),
         "custom" => {
             let base = given(base_url).ok_or_else(|| tr!("Falta la dirección.").to_string())?;
             let model = given(model).ok_or_else(|| tr!("Falta el modelo.").to_string())?;
@@ -188,6 +193,13 @@ mod tests {
             assert!(!r.url.contains("sk-") && !r.url.contains("=k"), "{}", r.url);
         }
         assert!(check_request("custom", None, Some("m"), "k").is_err());
+        let k = check_request("kimi", None, None, "sk-kimi").unwrap();
+        assert_eq!(k.url, "https://api.moonshot.ai/anthropic/v1/messages");
+        assert!(
+            k.headers
+                .iter()
+                .any(|(n, v)| n == "authorization" && v == "Bearer sk-kimi")
+        );
         assert!(check_request("otro", None, None, "k").is_err());
     }
 

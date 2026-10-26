@@ -2087,9 +2087,15 @@ fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
     h.key_press(Key::Enter);
     h.run_steps(3);
     assert!(h.state().api_form.is_some(), "el formulario se abre");
-    h.get_by_label("DeepSeek").focus();
-    h.run_steps(2);
-    h.key_press(Key::Enter);
+    // El proveedor se elige en un desplegable: se abre y se elige DeepSeek (y Kimi está).
+    // Está más abajo de lo que se ve: se abre por accesibilidad, sin puntero.
+    h.query_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| n.value().as_deref() == Some("Claude (Anthropic)"))
+        .expect("el desplegable de proveedor")
+        .click_accesskit();
+    h.run_steps(3);
+    assert!(h.query_by_label("Kimi").is_some(), "Kimi está en la lista");
+    h.get_by_label("DeepSeek").click_accesskit();
     h.run_steps(3);
     assert_eq!(h.state().api_form.as_ref().unwrap().provider(), "deepseek");
     h.run_steps(3);

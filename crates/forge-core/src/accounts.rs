@@ -43,14 +43,14 @@ pub struct Account {
     /// Su carpeta (`None` = la principal, sin tocar el entorno). La pone el `Store`.
     #[serde(skip)]
     pub dir: Option<PathBuf>,
-    /// Cuenta con clave de API en vez de login: `anthropic`, `deepseek` o `custom`. La clave
+    /// Cuenta con clave de API en vez de login: `anthropic`, `deepseek`, `kimi` o `custom`. La clave
     /// no se guarda aquí sino en el llavero del sistema (`secret_id`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
-    /// Dirección de la API (solo `custom`; DeepSeek ya la trae).
+    /// Dirección de la API (solo `custom`; DeepSeek y Kimi ya la traen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
-    /// Modelo a usar (`custom` lo exige; DeepSeek trae `deepseek-flash` por defecto).
+    /// Modelo a usar (`custom` lo exige; DeepSeek y Kimi traen el suyo por defecto).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 }
@@ -59,6 +59,12 @@ pub struct Account {
 const DEEPSEEK_URL: &str = "https://api.deepseek.com/anthropic";
 const DEEPSEEK_MODEL: &str = "deepseek-flash[1m]";
 const DEEPSEEK_SMALL: &str = "deepseek-flash";
+
+/// Dirección de Kimi (Moonshot) compatible con Claude Code, y sus modelos (guía de Kimi para
+/// Claude Code: el grande para todo salvo el pequeño, que va en el modelo de código).
+const KIMI_URL: &str = "https://api.moonshot.ai/anthropic";
+const KIMI_MODEL: &str = "kimi-k3[1m]";
+const KIMI_SMALL: &str = "kimi-k2.7-code";
 
 /// Una ventana de uso del plan (5 h, semanal…), como la da Claude Code.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -109,7 +115,7 @@ impl Account {
     /// Anthropic si se eligió uno): un `--model` de arranque lo pisaría.
     pub fn fixes_model(&self) -> bool {
         match self.provider.as_deref() {
-            Some("deepseek" | "custom") => true,
+            Some("deepseek" | "kimi" | "custom") => true,
             Some(_) => self.model.is_some(),
             None => false,
         }
@@ -150,6 +156,19 @@ impl Account {
                     var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "786432"),
                 ];
                 env.extend(models(model, DEEPSEEK_SMALL));
+                env
+            }
+            Some("kimi") => {
+                let model = self.model.as_deref().unwrap_or(KIMI_MODEL);
+                let mut env = vec![
+                    var("ANTHROPIC_BASE_URL", KIMI_URL),
+                    var("ANTHROPIC_AUTH_TOKEN", secret),
+                    // 1M de contexto, como en su guía.
+                    var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "1000000"),
+                ];
+                env.extend(models(model, KIMI_SMALL));
+                // Los subagentes usan el grande: así lo pide su guía.
+                env.push(var("CLAUDE_CODE_SUBAGENT_MODEL", model));
                 env
             }
             Some(_) => {
@@ -314,7 +333,7 @@ impl Store {
             return Err(tr!("Falta la clave.").to_string());
         }
         match provider {
-            "anthropic" | "deepseek" => {}
+            "anthropic" | "deepseek" | "kimi" => {}
             "custom" => {
                 let url = base_url.as_deref().unwrap_or_default();
                 if !(url.starts_with("https://") || url.starts_with("http://")) {
@@ -589,6 +608,46 @@ mod tests {
         assert!(normal.api_env("x").is_empty());
     }
 
+    /// Kimi (Moonshot) habla el protocolo de Anthropic en su propia dirección; los modelos y
+    /// la ventana son los de su guía para Claude Code.
+    #[test]
+    fn a_kimi_account_points_claude_at_moonshot() {
+        let k = env_of(&api("kimi", None, None));
+        assert_eq!(k["ANTHROPIC_BASE_URL"], "https://api.moonshot.ai/anthropic");
+        assert_eq!(k["ANTHROPIC_AUTH_TOKEN"], "sk-clave");
+        assert!(!k.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(k["ANTHROPIC_MODEL"], "kimi-k3[1m]");
+        assert_eq!(k["ANTHROPIC_DEFAULT_OPUS_MODEL"], "kimi-k3[1m]");
+        assert_eq!(k["ANTHROPIC_DEFAULT_SONNET_MODEL"], "kimi-k3[1m]");
+        assert_eq!(k["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "kimi-k2.7-code");
+        // Los subagentes usan el modelo grande, como en la guía de Kimi.
+        assert_eq!(k["CLAUDE_CODE_SUBAGENT_MODEL"], "kimi-k3[1m]");
+        assert_eq!(k["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "1000000");
+        // Uno elegido a mano reemplaza al grande.
+        let chosen = env_of(&api("kimi", None, Some("kimi-k2.6")));
+        assert_eq!(chosen["ANTHROPIC_MODEL"], "kimi-k2.6");
+        assert_eq!(chosen["CLAUDE_CODE_SUBAGENT_MODEL"], "kimi-k2.6");
+        assert_eq!(chosen["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "kimi-k2.7-code");
+        // Fija su modelo (no recibe `--model` de arranque) y no activa el asesor.
+        assert!(api("kimi", None, None).fixes_model());
+        assert!(!api("kimi", None, None).allows_advisor());
+    }
+
+    /// Kimi no pide dirección ni modelo: los trae.
+    #[test]
+    fn a_kimi_account_needs_only_the_key() {
+        let store = Store::in_memory().unwrap();
+        let keys = crate::secrets::MemoryStore::default();
+        let account = store
+            .add_api_account("K", "kimi", None, None, "sk-kimi", &keys)
+            .unwrap();
+        assert_eq!(account.provider.as_deref(), Some("kimi"));
+        assert_eq!(
+            keys.get(&account.secret_id()).unwrap().as_deref(),
+            Some("sk-kimi")
+        );
+    }
+
     /// El asesor de Claude es de Anthropic: con otro proveedor no se activa.
     #[test]
     fn the_advisor_only_applies_to_anthropic_accounts() {
@@ -660,6 +719,7 @@ mod tests {
                 .add_api_account("X", "otro", None, None, "k", &keys)
                 .is_err()
         );
+
         assert_eq!(store.accounts("claude").len(), 2, "nada se guardó a medias");
         let _ = std::fs::remove_dir_all(tmp);
     }
