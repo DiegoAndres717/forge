@@ -152,9 +152,12 @@ impl Account {
                 let mut env = vec![
                     var("ANTHROPIC_BASE_URL", DEEPSEEK_URL),
                     var("ANTHROPIC_AUTH_TOKEN", secret),
-                    // 1M de contexto: que Claude compacte antes de llenarlo.
-                    var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "786432"),
                 ];
+                // 1M de contexto: que Claude compacte antes de llenarlo. Solo del modelo por
+                // defecto: de uno elegido no se sabe la ventana y Claude usa la suya.
+                if self.model.is_none() {
+                    env.push(var("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "786432"));
+                }
                 env.extend(models(model, DEEPSEEK_SMALL));
                 env
             }
@@ -591,6 +594,13 @@ mod tests {
         let pro = env_of(&api("deepseek", None, Some("deepseek-v4-pro")));
         assert_eq!(pro["ANTHROPIC_MODEL"], "deepseek-v4-pro");
         assert_eq!(pro["ANTHROPIC_DEFAULT_OPUS_MODEL"], "deepseek-v4-pro");
+        // Un modelo elegido reemplaza solo al grande; el pequeño y los subagentes siguen.
+        assert_eq!(pro["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "deepseek-flash");
+        assert_eq!(pro["CLAUDE_CODE_SUBAGENT_MODEL"], "deepseek-flash");
+        // La ventana de compactación es la del modelo por defecto: de uno elegido no se
+        // sabe, así que Claude Code usa la suya (compacta antes, nunca tarde).
+        assert!(!pro.contains_key("CLAUDE_CODE_AUTO_COMPACT_WINDOW"));
+        assert_eq!(d["CLAUDE_CODE_AUTO_COMPACT_WINDOW"], "786432");
 
         let c = env_of(&api(
             "custom",

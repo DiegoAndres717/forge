@@ -2720,6 +2720,19 @@ pub const EN: &[(&str, &str)] = &[
         "Use DeepSeek models in Claude Code.",
     ),
     (
+        "El servicio pide esperar un momento: prueba otra vez.",
+        "The service asks to wait a moment: try again.",
+    ),
+    (
+        "El servicio no devolvió una lista de modelos.",
+        "The service did not return a list of models.",
+    ),
+    (
+        "Elige el modelo de la lista",
+        "Pick the model from the list",
+    ),
+    ("Por defecto", "Default"),
+    (
         "Usa los modelos de Kimi (Moonshot) en Claude Code.",
         "Use Kimi (Moonshot) models in Claude Code.",
     ),
