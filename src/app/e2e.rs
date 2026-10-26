@@ -2056,6 +2056,83 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
 /// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo
 /// oculto) y la cuenta aparece. La clave va al llavero y no se vuelve a mostrar.
 #[test]
+fn model_and_effort_live_in_each_accounts_sheet_opened_with_configure() {
+    let _serial = serial();
+    let dir = project("account-sheet");
+    let mut store = Store::in_memory().unwrap();
+    store.accounts_root = Some(dir.join(".accounts"));
+    store.home = None;
+    let work = store.add_account("claude", "Trabajo").unwrap();
+    let mut h = app_with(store, Some(dir.clone()));
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.state().agents.lock().unwrap().insert(
+        "claude".into(),
+        agents::Detection {
+            path: Some("/usr/local/bin/claude".into()),
+            version: None,
+        },
+    );
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    h.get_by_label_contains("Agentes").click();
+    h.run_steps(3);
+    // La lista de cuentas no enseña el modelo ni el esfuerzo hasta pulsar «Configurar». (Lo
+    // que ya haya en pantalla, como la tarjeta de un agente sin cuentas, se cuenta antes.)
+    let efforts_before = h
+        .query_all_by_label_contains("Esfuerzo · En general")
+        .count();
+    let mine = |h: &Harness<'_, App>| {
+        h.query_all_by_role(egui::accesskit::Role::ComboBox)
+            .filter(|n| n.value().as_deref() == Some("Tu configuración"))
+            .count()
+    };
+    let combos_before = mine(&h);
+
+    // «Configurar» de la segunda cuenta (la primera es la principal).
+    h.query_all_by_label("Configurar")
+        .nth(1)
+        .expect("el botón de la cuenta Trabajo")
+        .click_accesskit();
+    h.run_steps(3);
+    assert_eq!(
+        h.query_all_by_label_contains("Esfuerzo · En general")
+            .count(),
+        efforts_before + 1,
+        "solo la ficha abierta"
+    );
+    assert_eq!(mine(&h), combos_before + 2, "modelo y esfuerzo de la ficha");
+    // El esfuerzo general de esta cuenta (el segundo desplegable de la ficha): «Tu
+    // configuración» → «Alto».
+    h.query_all_by_role(egui::accesskit::Role::ComboBox)
+        .filter(|n| n.value().as_deref() == Some("Tu configuración"))
+        .nth(combos_before + 1)
+        .expect("el desplegable de esfuerzo")
+        .click_accesskit();
+    h.run_steps(3);
+    h.get_by_label("Alto").click_accesskit();
+    h.run_steps(3);
+    let store = h.state().store.as_ref().unwrap();
+    let work = store
+        .accounts("claude")
+        .into_iter()
+        .find(|a| a.id == work.id)
+        .unwrap();
+    assert_eq!(
+        store.account_launch_own(&work, "effort", None).as_deref(),
+        Some("high"),
+        "se guardó en la cuenta"
+    );
+    let main = &store.accounts("claude")[0];
+    assert_eq!(
+        store.account_launch_own(main, "effort", None),
+        None,
+        "la principal no cambió"
+    );
+}
+
+#[test]
 fn a_gemini_key_is_added_from_settings_without_its_own_folder() {
     use forge_core::secrets::{MemoryStore, SecretStore};
     let _serial = serial();
@@ -2286,7 +2363,14 @@ fn an_api_model_is_added_from_settings_and_its_key_stays_in_the_keychain() {
     );
     // La cuenta de clave no tiene login: no aparece otro «Iniciar sesión».
     assert_eq!(h.query_all_by_label("Iniciar sesión").count(), logins);
-    // Cambiar la clave: la nueva reemplaza a la del llavero y tampoco se muestra.
+    // Cambiar la clave: está en la ficha de la cuenta (Configurar), no a la vista; la nueva
+    // reemplaza a la del llavero y tampoco se muestra.
+    assert!(h.query_by_label("Cambiar clave").is_none());
+    h.query_all_by_label("Configurar")
+        .nth(1)
+        .expect("el botón de la cuenta de clave (la primera es la principal)")
+        .click_accesskit();
+    h.run_steps(3);
     h.get_by_label("Cambiar clave").focus();
     h.run_steps(2);
     h.key_press(Key::Enter);

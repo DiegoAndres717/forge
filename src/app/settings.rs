@@ -66,6 +66,11 @@ fn row(ui: &mut egui::Ui, label: &str, help: &str, add: impl FnOnce(&mut egui::U
     ui.add_space(10.0);
 }
 
+/// Si la ficha de una cuenta (modelo y esfuerzo) está abierta.
+fn config_id(program: &str, account: i64) -> egui::Id {
+    egui::Id::new(("account-config", program, account))
+}
+
 /// Texto de ayuda en gris, debajo de un control.
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).size(11.5).color(theme::TEXT_3));
@@ -300,13 +305,8 @@ impl App {
                 self.error = Some(e);
             }
         }
-        if installed("claude") {
-            theme::section(ui, "Claude Code");
-            theme::card(ui, |ui| self.launch_ui(ui, "claude"));
-        }
         if installed("codex") {
             theme::section(ui, "Codex");
-            theme::card(ui, |ui| self.launch_ui(ui, "codex"));
             if let Some(home) = forge_core::home_dir() {
                 let codex = home.join(".codex");
                 theme::card(ui, |ui| self.codex_skills_ui(ui, &codex));
@@ -318,7 +318,7 @@ impl App {
         }
         if installed("agy") {
             theme::section(ui, "Antigravity");
-            theme::card(ui, |ui| self.launch_ui(ui, "agy"));
+            theme::card(ui, |ui| self.launch_ui(ui, "agy", None));
         }
         if installed("gemini") {
             theme::section(ui, "Gemini CLI");
@@ -951,7 +951,7 @@ impl App {
         if programs.is_empty() {
             return;
         }
-        let ws = self.active.map(|i| &self.workspaces[i]);
+        let in_project = self.active.is_some();
         ui.add_space(6.0);
         theme::section(ui, tr!("Cuentas"));
         theme::card(ui, |ui| {
@@ -968,7 +968,10 @@ impl App {
                     .as_ref()
                     .map(|s| s.accounts(program))
                     .unwrap_or_default();
-                let chosen = ws.and_then(|w| w.account_for(program, None)).map(|a| a.id);
+                let chosen = self
+                    .active
+                    .and_then(|i| self.workspaces[i].account_for(program, None))
+                    .map(|a| a.id);
                 // Solo Claude Code (con el mod) cuenta tokens y manda el uso del plan.
                 let usage: HashMap<i64, u64> = match (program, self.store.as_ref()) {
                     ("claude", Some(s)) => s
@@ -991,10 +994,18 @@ impl App {
                             .and_then(|s| s.account_limits(program, a.id)),
                     };
                     let tokens = usage.get(&a.id).copied();
-                    account_row(ui, cmds, program, a, chosen, ws.is_some(), &mut new_key);
+                    account_row(ui, cmds, program, a, chosen, in_project, &mut new_key);
                     // Una cuenta con clave de API no tiene plan ni ventanas de uso.
                     if !a.is_api() {
                         account_usage(ui, limits.as_ref(), tokens);
+                    }
+                    // La ficha de la cuenta (modelo y esfuerzo) solo se ve al abrirla.
+                    if ui
+                        .data(|d| d.get_temp::<bool>(config_id(program, a.id)))
+                        .unwrap_or(false)
+                    {
+                        ui.add_space(4.0);
+                        self.launch_ui(ui, program, Some(a));
                     }
                     ui.add_space(4.0);
                 }
@@ -1442,9 +1453,10 @@ fn account_row(
     ui.horizontal(|ui| {
         ui.label(RichText::new(icon::PENCIL_SIMPLE).color(theme::TEXT_3))
             .on_hover_text(tr!("Escribe para cambiar el nombre"));
-        // Deja sitio a la papelera; el campo ocupa el resto (nunca menos de 120).
+        // Deja sitio a «Configurar» y a la papelera; el campo ocupa el resto (nunca menos
+        // de 120).
         let width =
-            (ui.available_width() - if a.is_main() { 90.0 } else { 40.0 }).clamp(120.0, 320.0);
+            (ui.available_width() - if a.is_main() { 180.0 } else { 140.0 }).clamp(120.0, 320.0);
         let edit = ui
             .add(
                 egui::TextEdit::singleline(&mut text)
@@ -1490,16 +1502,30 @@ fn account_row(
                 "La cuenta de siempre (~/.claude o ~/.codex). No se puede borrar."
             ));
         }
-        if !a.is_main() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if !a.is_main() {
                 let confirm = egui::Id::new(("account-delete", program, a.id));
                 if !ui.data(|d| d.get_temp::<bool>(confirm)).unwrap_or(false)
                     && theme::icon_button(ui, icon::TRASH, tr!("Borrar cuenta")).clicked()
                 {
                     ui.data_mut(|d| d.insert_temp(confirm, true));
                 }
-            });
-        }
+            }
+            let open = ui
+                .data(|d| d.get_temp::<bool>(config_id(program, a.id)))
+                .unwrap_or(false);
+            if ui
+                .button(if open {
+                    tr!("Cerrar")
+                } else {
+                    tr!("Configurar")
+                })
+                .on_hover_text(tr!("Modelo, esfuerzo y clave de esta cuenta"))
+                .clicked()
+            {
+                ui.data_mut(|d| d.insert_temp(config_id(program, a.id), !open));
+            }
+        });
     });
     // Confirmación de borrado, en su propia línea.
     let confirm = egui::Id::new(("account-delete", program, a.id));
@@ -1534,7 +1560,11 @@ fn account_row(
                     .size(11.5)
                     .color(theme::TEXT_3),
             );
-            if !ui.data(|d| d.get_temp::<bool>(open)).unwrap_or(false)
+            let sheet = ui
+                .data(|d| d.get_temp::<bool>(config_id(program, a.id)))
+                .unwrap_or(false);
+            if sheet
+                && !ui.data(|d| d.get_temp::<bool>(open)).unwrap_or(false)
                 && ui.small_button(tr!("Cambiar clave")).clicked()
             {
                 ui.data_mut(|d| d.insert_temp(open, true));
@@ -1646,11 +1676,34 @@ fn effort_label(level: &str) -> &'static str {
 impl App {
     /// Modelo y esfuerzo de un agente: en general y, si hay un proyecto abierto, solo para
     /// él. Se aplican a los agentes que se abran después.
-    fn launch_ui(&mut self, ui: &mut egui::Ui, program: &str) {
+    fn launch_ui(
+        &mut self,
+        ui: &mut egui::Ui,
+        program: &str,
+        account: Option<&forge_core::accounts::Account>,
+    ) {
         let project = self.active.map(|i| self.workspaces[i].project.path.clone());
         let Some(store) = self.store.as_ref() else {
             return;
         };
+        // Lo que tiene guardado como suyo: una cuenta, lo de la cuenta; un agente sin cuentas,
+        // lo de siempre.
+        let own = |what: &str, scope: Option<&std::path::Path>| -> Option<String> {
+            match account {
+                Some(a) => store.account_launch_own(a, what, scope),
+                None => Some(store.launch_pref(program, what, scope)),
+            }
+        };
+        // Una cuenta que nunca se configuró sigue usando lo de antes (lo general): se dice.
+        let before = |what: &str, scope: Option<&std::path::Path>| -> String {
+            if account.is_some() && scope.is_none() && own(what, None).is_none() {
+                store.launch_pref(program, what, None)
+            } else {
+                String::new()
+            }
+        };
+        // El modelo de una cuenta con API ya lo fija su proveedor.
+        let model_fixed = account.is_some_and(|a| a.fixes_model());
         // Lo que significa «Tu configuración» en Codex: lo de su config.toml.
         let codex = (program == "codex")
             .then(|| {
@@ -1676,89 +1729,110 @@ impl App {
                 .chain(project.clone().map(|p| (Some(p), tr!("En este proyecto"))))
                 .collect();
         for (scope, scope_label) in &scopes {
-            let model = store.launch_pref(program, "model", scope.as_deref());
-            let effort = store.launch_pref(program, "effort", scope.as_deref());
+            let model = own("model", scope.as_deref()).unwrap_or_default();
+            let effort = own("effort", scope.as_deref()).unwrap_or_default();
+            let (before_model, before_effort) = (
+                before("model", scope.as_deref()),
+                before("effort", scope.as_deref()),
+            );
             let inherit = tr!("Como en general");
             let empty = if scope.is_some() {
                 inherit.to_string()
+            } else if !before_model.is_empty() {
+                tr!("Como antes ({p0})", p0 = before_model)
             } else {
                 mine("model")
             };
             let empty_effort = if scope.is_some() {
                 inherit.to_string()
+            } else if !before_effort.is_empty() {
+                tr!("Como antes ({p0})", p0 = effort_label(&before_effort))
             } else {
                 mine("effort")
             };
-            let salt = (program, scope.is_some());
-            row(
-                ui,
-                &format!("{} · {scope_label}", tr!("Modelo")),
-                if program == "claude" {
-                    tr!(
-                        "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas. «En este proyecto» manda sobre «En general»."
-                    )
-                } else if program == "agy" {
-                    tr!(
-                        "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-3.8-flash-high). «En este proyecto» manda sobre «En general»."
-                    )
-                } else {
-                    tr!(
-                        "Con qué modelo se abre Codex desde Forge. Escribe el nombre tal como lo pide Codex (p. ej. gpt-5). «En este proyecto» manda sobre «En general»."
-                    )
-                },
-                |ui| {
+            let salt = (program, account.map_or(-1, |a| a.id), scope.is_some());
+            if model_fixed {
+                if scope.is_none() {
+                    hint(
+                        ui,
+                        tr!("El modelo de esta cuenta lo fija su proveedor: no se elige aquí."),
+                    );
+                }
+            } else {
+                row(
+                    ui,
+                    &format!("{} · {scope_label}", tr!("Modelo")),
                     if program == "claude" {
-                        let name = |v: &str| {
-                            if v.is_empty() {
-                                empty.clone()
-                            } else {
-                                crate::claude_plugin::MODELS
-                                    .iter()
-                                    .find(|(id, _)| *id == v)
-                                    .map_or(v.to_string(), |(_, l)| {
-                                        forge_core::i18n::t(l).to_string()
-                                    })
-                            }
-                        };
-                        egui::ComboBox::from_id_salt(("model", salt))
-                            .selected_text(name(&model))
-                            .width(ui.available_width().min(320.0))
-                            .show_ui(ui, |ui| {
-                                for (id, _) in crate::claude_plugin::MODELS {
-                                    if ui
-                                        .selectable_label(model == id, name(id))
-                                        .on_hover_text(model_info(id))
-                                        .clicked()
-                                    {
-                                        changes.push(("model", scope.clone(), id.to_string()));
-                                    }
-                                }
-                            });
-                        if !model.is_empty() || scope.is_none() {
-                            hint(ui, model_info(&model));
-                        }
+                        tr!(
+                            "Con qué modelo se abre Claude Code desde Forge (barra lateral, ⌘⇧A, ⌘K). Un claude escrito a mano en la terminal usa lo que escribas. «En este proyecto» manda sobre «En general»."
+                        )
+                    } else if program == "agy" {
+                        tr!(
+                            "Con qué modelo se abre Antigravity desde Forge. Escribe el nombre tal como lo pide agy (p. ej. gemini-3.8-flash-high). «En este proyecto» manda sobre «En general»."
+                        )
                     } else {
-                        let id = egui::Id::new(("codex-model", scope.is_some()));
-                        let mut text = ui
-                            .data(|d| d.get_temp::<String>(id))
-                            .unwrap_or_else(|| model.clone());
-                        let edit = ui.add(
-                            egui::TextEdit::singleline(&mut text)
-                                .hint_text(empty.clone())
-                                .desired_width(ui.available_width().min(320.0)),
-                        );
-                        if edit.changed() {
-                            ui.data_mut(|d| d.insert_temp(id, text.clone()));
-                        }
-                        if edit.lost_focus() {
-                            if text.trim() != model {
-                                changes.push(("model", scope.clone(), text.trim().to_string()));
+                        tr!(
+                            "Con qué modelo se abre Codex desde Forge. Escribe el nombre tal como lo pide Codex (p. ej. gpt-5). «En este proyecto» manda sobre «En general»."
+                        )
+                    },
+                    |ui| {
+                        if program == "claude" {
+                            let name = |v: &str| {
+                                if v.is_empty() {
+                                    empty.clone()
+                                } else {
+                                    crate::claude_plugin::MODELS
+                                        .iter()
+                                        .find(|(id, _)| *id == v)
+                                        .map_or(v.to_string(), |(_, l)| {
+                                            forge_core::i18n::t(l).to_string()
+                                        })
+                                }
+                            };
+                            egui::ComboBox::from_id_salt(("model", salt))
+                                .selected_text(name(&model))
+                                .width(ui.available_width().min(320.0))
+                                .show_ui(ui, |ui| {
+                                    for (id, _) in crate::claude_plugin::MODELS {
+                                        if ui
+                                            .selectable_label(model == id, name(id))
+                                            .on_hover_text(model_info(id))
+                                            .clicked()
+                                        {
+                                            changes.push(("model", scope.clone(), id.to_string()));
+                                        }
+                                    }
+                                });
+                            if !model.is_empty() || scope.is_none() {
+                                hint(ui, model_info(&model));
                             }
-                            ui.data_mut(|d| d.remove::<String>(id));
+                        } else {
+                            let id = egui::Id::new((
+                                "codex-model",
+                                account.map_or(-1, |a| a.id),
+                                scope.is_some(),
+                            ));
+                            let mut text = ui
+                                .data(|d| d.get_temp::<String>(id))
+                                .unwrap_or_else(|| model.clone());
+                            let edit = ui.add(
+                                egui::TextEdit::singleline(&mut text)
+                                    .hint_text(empty.clone())
+                                    .desired_width(ui.available_width().min(320.0)),
+                            );
+                            if edit.changed() {
+                                ui.data_mut(|d| d.insert_temp(id, text.clone()));
+                            }
+                            if edit.lost_focus() {
+                                if text.trim() != model {
+                                    changes.push(("model", scope.clone(), text.trim().to_string()));
+                                }
+                                ui.data_mut(|d| d.remove::<String>(id));
+                            }
                         }
-                    }
-                },
-            );
+                    },
+                );
+            }
             row(
                 ui,
                 &format!("{} · {scope_label}", tr!("Esfuerzo")),
@@ -1801,7 +1875,10 @@ impl App {
         );
         if !changes.is_empty() {
             for (what, scope, value) in changes {
-                self.db(|s| s.set_launch_pref(program, what, scope.as_deref(), &value));
+                self.db(|s| match account {
+                    Some(a) => s.set_account_launch_pref(a, what, scope.as_deref(), &value),
+                    None => s.set_launch_pref(program, what, scope.as_deref(), &value),
+                });
             }
             self.sync_accounts();
         }

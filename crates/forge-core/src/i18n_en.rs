@@ -2738,6 +2738,17 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Añadir clave de Gemini", "Add a Gemini key"),
     ("Se borra su clave de API.", "Its API key is deleted."),
+    ("Configurar", "Configure"),
+    ("Cerrar", "Close"),
+    (
+        "Modelo, esfuerzo y clave de esta cuenta",
+        "Model, effort and key of this account",
+    ),
+    ("Como antes ({p0})", "As before ({p0})"),
+    (
+        "El modelo de esta cuenta lo fija su proveedor: no se elige aquí.",
+        "This account's model is set by its provider: it is not chosen here.",
+    ),
     (
         "Gemini CLI solo admite cuentas con clave de API.",
         "Gemini CLI only supports accounts with an API key.",
