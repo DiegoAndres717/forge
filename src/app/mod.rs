@@ -225,6 +225,12 @@ enum UiCmd {
     FilesTrashAsk(String),
     /// Ruta a la papelera y si se recuerda no volver a preguntar.
     FilesTrash(String, bool),
+    FilesOpen(String),
+    FilesCloseViewer,
+    FilesDiscard,
+    FilesKeepEditing,
+    FilesMode(files_panel::ViewMode),
+    FilesSave,
     GitStage(Vec<String>),
     GitUnstage(Vec<String>),
     GitDiscardAsk(forge_core::git::FileChange),
@@ -975,9 +981,15 @@ impl App {
                     }
                 }
             }
-            UiCmd::FilesToggleDir(_) | UiCmd::FilesTrashAsk(_) | UiCmd::FilesTrash(..) => {
-                self.apply_files(cmd)
-            }
+            UiCmd::FilesToggleDir(_)
+            | UiCmd::FilesTrashAsk(_)
+            | UiCmd::FilesTrash(..)
+            | UiCmd::FilesOpen(_)
+            | UiCmd::FilesCloseViewer
+            | UiCmd::FilesDiscard
+            | UiCmd::FilesKeepEditing
+            | UiCmd::FilesMode(_)
+            | UiCmd::FilesSave => self.apply_files(ctx, cmd),
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.git.open = !ws.git.open;
@@ -1619,7 +1631,7 @@ impl eframe::App for App {
             let planner = self.planner(i).map(|(_, name)| name);
             let ws = &mut self.workspaces[i];
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {
-                let (rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
+                let (mut rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
                 if ws.guard.open {
                     Self::guard_ui(ws, ui, drawer, &mut cmds);
                 } else if ws.memory.open {
@@ -1629,6 +1641,13 @@ impl eframe::App for App {
                     Self::ideas_ui(ws, Some(i), planner, ui, drawer, &mut cmds);
                 } else if ws.files.open {
                     Self::files_ui(ws, ui, drawer, &mut cmds);
+                    // El archivo abierto va a la izquierda del árbol, sobre el espacio del workspace.
+                    if ws.files.viewer.is_some() {
+                        let width = (rest.width() * 0.6).max(420.0).min(rest.width());
+                        let (left, viewer) = rest.split_left_right_at_x(rest.max.x - width);
+                        Self::files_viewer_ui(ws, ui, viewer, &mut cmds);
+                        rest = left;
+                    }
                 } else {
                     Self::git_ui(ws, ui, drawer, &mut cmds);
                 }

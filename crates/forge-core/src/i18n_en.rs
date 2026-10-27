@@ -2846,4 +2846,14 @@ pub const EN: &[(&str, &str)] = &[
     ("No volver a preguntar", "Don't ask again"),
     ("A la papelera", "Move to Trash"),
     ("Mandar «{p0}» a la papelera", "Move “{p0}” to the Trash"),
+    ("Cerrar archivo", "Close file"),
+    ("Guardar (⌘S)", "Save (⌘S)"),
+    ("Cambios", "Changes"),
+    ("Vista previa", "Preview"),
+    ("Hay cambios sin guardar.", "There are unsaved changes."),
+    ("Seguir editando", "Keep editing"),
+    (
+        "Sin cambios desde el último commit.",
+        "No changes since the last commit.",
+    ),
 ];
