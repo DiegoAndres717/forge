@@ -1370,6 +1370,32 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
 }
 
 #[test]
+fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
+    let _serial = serial();
+    let mut h = app(project("settingsnav"));
+    // Guard y Memoria ya no están en la barra lateral (están arriba) ni Planes; Ajustes, abajo.
+    assert_eq!(h.query_all_by_label("Memoria").count(), 0);
+    assert_eq!(h.query_all_by_label("Planes").count(), 0);
+    h.get_by_label("Ajustes").click();
+    h.run_steps(3);
+    assert!(h.state().settings_open);
+    // La barra lateral muestra las secciones y «Volver»; elegir una cambia la página.
+    h.get_by_label("Agentes").click();
+    h.run_steps(3);
+    h.get_by_label("CÓMO TRABAJAN"); // título de la sección dentro de Agentes
+    h.get_by_label("Este proyecto").click();
+    h.run_steps(3);
+    assert!(h.query_all_by_label("CÓMO TRABAJAN").next().is_none());
+    h.get_by_label("Volver").click();
+    h.run_steps(3);
+    assert!(!h.state().settings_open);
+    // Planes sube a la barra superior.
+    h.get_by_label_contains("Planes").click();
+    h.run_steps(3);
+    assert!(ws(h.state()).ideas.open);
+}
+
+#[test]
 fn welcome_tour_runs_once_and_is_remembered() {
     let _serial = serial();
     let mut h = app(project("welcome"));

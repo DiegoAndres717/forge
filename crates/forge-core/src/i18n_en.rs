@@ -2860,4 +2860,7 @@ pub const EN: &[(&str, &str)] = &[
         "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios.",
         "The file changed outside the editor (an agent?). Close it and open it again so those changes aren't overwritten.",
     ),
+    ("Volver", "Back"),
+    ("Planes (⌘⇧I)", "Plans (⌘⇧I)"),
+    ("Planes · {n} sin hacer (⌘⇧I)", "Plans · {n} to do (⌘⇧I)"),
 ];

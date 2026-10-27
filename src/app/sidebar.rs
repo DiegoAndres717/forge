@@ -32,12 +32,32 @@ impl App {
     /// Barra lateral (estilo Finder/Xcode): workspaces arriba y, del proyecto activo,
     /// agentes, procesos, comandos y accesos a Guard, Memoria y configuración.
     pub(super) fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
+        // Con Ajustes abiertos la barra lateral pasa a ser su índice.
+        if self.settings_open {
+            self.settings_nav(ui, rect, cmds);
+            return;
+        }
         let detected = self.agents.lock().unwrap().clone();
         let detecting = self.detecting.load(Ordering::Relaxed);
         let body = Rect::from_min_max(
             rect.min + Vec2::new(10.0, 8.0),
             rect.max - Vec2::new(10.0, 8.0),
         );
+        // Ajustes, fijo abajo.
+        let (body, footer) = body.split_top_bottom_at_y(body.max.y - 34.0);
+        let mut bottom = ui.new_child(egui::UiBuilder::new().max_rect(footer));
+        if theme::row(
+            &mut bottom,
+            icon::GEAR_SIX,
+            theme::TEXT_2,
+            tr!("Ajustes"),
+            &forge_core::i18n::keys("⌘,"),
+            false,
+        )
+        .clicked()
+        {
+            cmds.push(UiCmd::OpenSettings);
+        }
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(body));
         ui.spacing_mut().item_spacing.y = 1.0;
         egui::ScrollArea::vertical()
@@ -210,8 +230,6 @@ impl App {
                 let ws = &mut self.workspaces[i];
                 ui.add_space(12.0);
                 Self::agents_ui(ws, &detected, detecting, ui, cmds);
-                ui.add_space(12.0);
-                Self::processes_ui(ws, ui, cmds);
 
                 if !ws.project.config.commands.is_empty() {
                     ui.add_space(12.0);
@@ -226,82 +244,9 @@ impl App {
                     }
                 }
 
+                // Los procesos se usan menos: al final de la lista.
                 ui.add_space(12.0);
-                theme::section(ui, tr!("Proyecto"));
-                let (guard_text, guard_color) = match &ws.guard.run {
-                    None => (tr!("sin ejecutar").to_string(), theme::TEXT_3),
-                    Some(run) => run.snapshot(|r| verdict_short(r.verdict())),
-                };
-                if theme::row(
-                    ui,
-                    icon::SHIELD_CHECK,
-                    guard_color,
-                    "Guard",
-                    &guard_text,
-                    ws.guard.open,
-                )
-                .on_hover_text(forge_core::i18n::keys("⌘G").into_owned())
-                .clicked()
-                {
-                    cmds.push(UiCmd::ToggleGuard);
-                }
-                let notes = if ws.memory.count > 0 {
-                    ws.memory.count.to_string()
-                } else {
-                    String::new()
-                };
-                let changes =
-                    ws.git
-                        .data
-                        .as_ref()
-                        .map_or(String::new(), |(s, _, _)| match s.files.len() {
-                            0 => String::new(),
-                            n => n.to_string(),
-                        });
-                if theme::row(
-                    ui,
-                    icon::GIT_BRANCH,
-                    theme::ORANGE,
-                    "Git",
-                    &changes,
-                    ws.git.open,
-                )
-                .on_hover_text(forge_core::i18n::keys("⌘⇧G").into_owned())
-                .clicked()
-                {
-                    cmds.push(UiCmd::ToggleGit);
-                }
-                let open = if ws.ideas.open_count > 0 {
-                    ws.ideas.open_count.to_string()
-                } else {
-                    String::new()
-                };
-                if theme::row(
-                    ui,
-                    icon::LIST_CHECKS,
-                    theme::ACCENT,
-                    tr!("Planes"),
-                    &open,
-                    ws.ideas.open,
-                )
-                .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
-                .clicked()
-                {
-                    cmds.push(UiCmd::ToggleIdeas);
-                }
-                if theme::row(
-                    ui,
-                    icon::BRAIN,
-                    theme::PURPLE,
-                    tr!("Memoria"),
-                    &notes,
-                    ws.memory.open,
-                )
-                .on_hover_text(forge_core::i18n::keys("⌘⇧M").into_owned())
-                .clicked()
-                {
-                    cmds.push(UiCmd::ToggleMemory);
-                }
+                Self::processes_ui(ws, ui, cmds);
             });
     }
 
