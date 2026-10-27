@@ -1303,6 +1303,73 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
 }
 
 #[test]
+fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
+    let _serial = serial();
+    let dir = project("editor");
+    std::fs::write(dir.join("notas.md"), "# Titulo\n- uno\n").unwrap();
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    h.run_steps(2);
+    h.query_all_by_label_contains("main.ts")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    let v = ws(h.state()).files.viewer.as_ref().expect("visor abierto");
+    assert_eq!(v.path, "main.ts");
+    assert_eq!(v.content, "export const x = 1;\n");
+    // Editar a mano y guardar con el botón.
+    h.state_mut().workspaces[0]
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .content = "export const x = 2;\n".into();
+    h.run_steps(2);
+    h.get_by_label_contains("Guardar").click();
+    h.run_steps(2);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("main.ts")).unwrap(),
+        "export const x = 2;\n"
+    );
+    // La pestaña de cambios enseña lo editado.
+    h.get_by_label("Cambios").click();
+    h.run_steps(2);
+    let diff = &ws(h.state()).files.viewer.as_ref().unwrap().diff;
+    assert!(diff.contains("+export const x = 2;"), "{diff}");
+    // Con cambios sin guardar, abrir otro archivo pregunta antes.
+    h.state_mut().workspaces[0]
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .content
+        .push_str("// sin guardar\n");
+    h.run_steps(2);
+    h.query_all_by_label_contains("notas.md")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(2);
+    assert_eq!(ws(h.state()).files.viewer.as_ref().unwrap().path, "main.ts");
+    h.get_by_label("Descartar cambios").click();
+    h.run_steps(3);
+    let v = ws(h.state()).files.viewer.as_ref().unwrap();
+    assert_eq!(v.path, "notas.md");
+    assert_eq!(
+        v.mode,
+        crate::app::files_panel::ViewMode::Preview,
+        "un .md se abre en vista previa"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("main.ts")).unwrap(),
+        "export const x = 2;\n"
+    );
+}
+
+#[test]
 fn welcome_tour_runs_once_and_is_remembered() {
     let _serial = serial();
     let mut h = app(project("welcome"));

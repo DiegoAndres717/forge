@@ -27,6 +27,48 @@ pub struct FilesView {
     pub loading: Option<Receiver<FilesData>>,
     pub loaded: Option<Instant>,
     pub dirty: bool,
+    /// Archivo abierto al lado del árbol.
+    pub viewer: Option<Viewer>,
+}
+
+/// Cómo se ve el archivo abierto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewMode {
+    Edit,
+    Preview,
+    Diff,
+}
+
+/// Un archivo abierto: su texto editable, o una imagen, o el motivo de no poder mostrarlo.
+pub struct Viewer {
+    pub path: String,
+    /// Texto en edición y el último guardado (para saber si hay cambios sin guardar).
+    pub content: String,
+    pub saved: String,
+    pub image: Option<egui::TextureHandle>,
+    /// Por qué no se puede mostrar (binario, grande…).
+    pub message: Option<String>,
+    pub mode: ViewMode,
+    pub diff: String,
+    /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
+    pub pending: Option<Option<String>>,
+    /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
+    /// lo ha editado), guardar no lo pisa sin avisar.
+    pub modified: Option<std::time::SystemTime>,
+}
+
+impl Viewer {
+    fn is_text(&self) -> bool {
+        self.image.is_none() && self.message.is_none()
+    }
+
+    fn is_markdown(&self) -> bool {
+        self.path.to_lowercase().ends_with(".md")
+    }
+
+    fn unsaved(&self) -> bool {
+        self.is_text() && self.content != self.saved
+    }
 }
 
 /// Letra y color del estado de un archivo (`git status`).
@@ -172,10 +214,112 @@ impl App {
             });
         }
         egui::ScrollArea::vertical()
+            .id_salt("file-tree")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 Self::file_rows(files, ui, "", 0, cmds);
+            });
+    }
+
+    /// El archivo abierto: editor, vista previa o cambios, a la izquierda del árbol.
+    pub(super) fn files_viewer_ui(
+        ws: &mut Workspace,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        cmds: &mut Vec<UiCmd>,
+    ) {
+        ui.painter().rect_filled(rect, 0.0, theme::BG);
+        ui.painter().vline(
+            rect.min.x + 0.5,
+            rect.y_range(),
+            egui::Stroke::new(1.0, theme::SEPARATOR),
+        );
+        let Some(v) = ws.files.viewer.as_mut() else {
+            return;
+        };
+        let mut ui =
+            ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(16.0, 14.0))));
+        ui.spacing_mut().item_spacing.y = 8.0;
+        let name = v.path.rsplit('/').next().unwrap_or(&v.path).to_string();
+        let unsaved = v.unsaved();
+        ui.horizontal(|ui| {
+            let title = if unsaved {
+                format!("{name}  ●")
+            } else {
+                name
+            };
+            ui.label(RichText::new(title).size(14.0).color(theme::TEXT).strong())
+                .on_hover_text(&v.path);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_button(ui, icon::X, tr!("Cerrar archivo")).clicked() {
+                    cmds.push(UiCmd::FilesCloseViewer);
+                }
+                if v.is_text() {
+                    let save = ui.add_enabled(
+                        unsaved,
+                        egui::Button::new(RichText::new(tr!("Guardar (⌘S)")).size(12.0)),
+                    );
+                    if save.clicked() {
+                        cmds.push(UiCmd::FilesSave);
+                    }
+                    let mut mode = |ui: &mut egui::Ui, m: ViewMode, text: &str| {
+                        if ui.selectable_label(v.mode == m, text).clicked() && v.mode != m {
+                            cmds.push(UiCmd::FilesMode(m));
+                        }
+                    };
+                    mode(ui, ViewMode::Diff, tr!("Cambios"));
+                    if v.is_markdown() {
+                        mode(ui, ViewMode::Preview, tr!("Vista previa"));
+                    }
+                    mode(ui, ViewMode::Edit, tr!("Editar"));
+                }
+            });
+        });
+        if unsaved
+            && ui
+                .ctx()
+                .input(|i| i.modifiers.command && i.key_pressed(Key::S))
+        {
+            cmds.push(UiCmd::FilesSave);
+        }
+        if v.pending.is_some() {
+            ui.group(|ui| {
+                ui.label(RichText::new(tr!("Hay cambios sin guardar.")).size(12.5));
+                ui.horizontal(|ui| {
+                    if theme::secondary(ui, tr!("Seguir editando")).clicked() {
+                        cmds.push(UiCmd::FilesKeepEditing);
+                    }
+                    if theme::primary(ui, tr!("Descartar cambios")).clicked() {
+                        cmds.push(UiCmd::FilesDiscard);
+                    }
+                });
+            });
+        }
+        egui::ScrollArea::both()
+            .id_salt("file-viewer")
+            .auto_shrink([false, false])
+            .show(&mut ui, |ui| {
+                if let Some(why) = &v.message {
+                    ui.label(RichText::new(why).color(theme::TEXT_3));
+                } else if let Some(tex) = &v.image {
+                    let width = ui.available_width().min(tex.size_vec2().x);
+                    let scale = width / tex.size_vec2().x;
+                    ui.image((tex.id(), tex.size_vec2() * scale));
+                } else {
+                    match v.mode {
+                        ViewMode::Edit => {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut v.content)
+                                    .code_editor()
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(30),
+                            );
+                        }
+                        ViewMode::Preview => markdown(ui, &v.content),
+                        ViewMode::Diff => diff_lines(ui, &v.diff),
+                    }
+                }
             });
     }
 
@@ -220,8 +364,8 @@ impl App {
                 if label.clicked() {
                     if entry.is_dir {
                         cmds.push(UiCmd::FilesToggleDir(path.clone()));
-                    } else if code.is_some() {
-                        cmds.push(UiCmd::GitDiff(path.clone(), false));
+                    } else {
+                        cmds.push(UiCmd::FilesOpen(path.clone()));
                     }
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -255,7 +399,7 @@ impl App {
     }
 
     /// Acciones del panel de archivos.
-    pub(super) fn apply_files(&mut self, cmd: UiCmd) {
+    pub(super) fn apply_files(&mut self, ctx: &egui::Context, cmd: UiCmd) {
         let Some(i) = self.active else { return };
         let no_ask = self
             .store
@@ -282,13 +426,191 @@ impl App {
                 }
                 self.trash_path(i, &path);
             }
+            UiCmd::FilesOpen(path) => Self::open_file(ctx, ws, Some(path), false),
+            UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
+            UiCmd::FilesDiscard => {
+                let next = ws.files.viewer.as_mut().and_then(|v| v.pending.take());
+                if let Some(next) = next {
+                    Self::open_file(ctx, ws, next, true);
+                }
+            }
+            UiCmd::FilesKeepEditing => {
+                if let Some(v) = ws.files.viewer.as_mut() {
+                    v.pending = None;
+                }
+            }
+            UiCmd::FilesMode(mode) => {
+                let root = ws.project.path.clone();
+                if let Some(v) = ws.files.viewer.as_mut() {
+                    v.mode = mode;
+                    if mode == ViewMode::Diff {
+                        v.diff = forge_core::files::diff(&root, Path::new(&v.path))
+                            .unwrap_or_else(|e| e);
+                    }
+                }
+            }
+            UiCmd::FilesSave => {
+                let root = ws.project.path.clone();
+                if let Some(v) = ws.files.viewer.as_mut().filter(|v| v.is_text()) {
+                    let rel = Path::new(&v.path);
+                    let on_disk = std::fs::metadata(root.join(rel))
+                        .and_then(|m| m.modified())
+                        .ok();
+                    if on_disk != v.modified {
+                        ws.files.error = Some(tr!(
+                            "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios."
+                        ).to_string());
+                    } else {
+                        match forge_core::files::save(&root, rel, &v.content) {
+                            Ok(()) => {
+                                v.saved = v.content.clone();
+                                v.modified = std::fs::metadata(root.join(rel))
+                                    .and_then(|m| m.modified())
+                                    .ok();
+                                if v.mode == ViewMode::Diff {
+                                    v.diff =
+                                        forge_core::files::diff(&root, rel).unwrap_or_else(|e| e);
+                                }
+                                ws.files.error = None;
+                            }
+                            Err(e) => ws.files.error = Some(e),
+                        }
+                    }
+                }
+            }
             _ => {}
         }
+    }
+
+    /// Abre `next` en el visor (o lo cierra con `None`). Si lo que hay abierto tiene cambios sin
+    /// guardar y no se fuerza, antes pregunta.
+    // ponytail: se lee en el hilo de la interfaz (el texto tiene tope de 2 MB); el PDF tarda
+    // algo más porque lo dibuja la vista rápida de macOS.
+    fn open_file(ctx: &egui::Context, ws: &mut Workspace, next: Option<String>, force: bool) {
+        if !force && let Some(v) = ws.files.viewer.as_mut().filter(|v| v.unsaved()) {
+            v.pending = Some(next);
+            return;
+        }
+        let Some(path) = next else {
+            ws.files.viewer = None;
+            return;
+        };
+        let root = ws.project.path.clone();
+        let rel = Path::new(&path);
+        let mut viewer = Viewer {
+            path: path.clone(),
+            content: String::new(),
+            saved: String::new(),
+            image: None,
+            message: None,
+            mode: ViewMode::Edit,
+            diff: String::new(),
+            pending: None,
+            modified: std::fs::metadata(root.join(rel))
+                .and_then(|m| m.modified())
+                .ok(),
+        };
+        let picture = |file: &Path| {
+            let img = image::open(file).map_err(|e| e.to_string())?.to_rgba8();
+            let size = [img.width() as usize, img.height() as usize];
+            let color = egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw());
+            Ok::<_, String>(ctx.load_texture(&path, color, egui::TextureOptions::LINEAR))
+        };
+        match forge_core::files::load(&root, rel) {
+            Ok(forge_core::files::Loaded::Text(text)) => {
+                viewer.saved = text.clone();
+                viewer.content = text;
+                if viewer.is_markdown() {
+                    viewer.mode = ViewMode::Preview;
+                }
+            }
+            Ok(forge_core::files::Loaded::Image) => match picture(&root.join(rel)) {
+                Ok(t) => viewer.image = Some(t),
+                Err(e) => viewer.message = Some(e),
+            },
+            #[cfg(target_os = "macos")]
+            Ok(forge_core::files::Loaded::Pdf) => {
+                match forge_core::files::pdf_preview(&root, rel).and_then(|png| picture(&png)) {
+                    Ok(t) => viewer.image = Some(t),
+                    Err(e) => viewer.message = Some(e),
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            Ok(forge_core::files::Loaded::Pdf) => {
+                viewer.message = Some("la vista previa de PDF solo está en macOS".into());
+            }
+            Ok(forge_core::files::Loaded::Unsupported(why)) => viewer.message = Some(why),
+            Err(e) => viewer.message = Some(e),
+        }
+        ws.files.viewer = Some(viewer);
     }
 
     fn trash_path(&mut self, i: usize, rel: &str) {
         let ws = &mut self.workspaces[i];
         ws.files.confirm_trash = None;
         ws.files.error = forge_core::files::trash(&ws.project.path, Path::new(rel)).err();
+        if ws.files.error.is_none() && ws.files.viewer.as_ref().is_some_and(|v| v.path == rel) {
+            ws.files.viewer = None;
+        }
+    }
+}
+
+/// Markdown sencillo: títulos, listas, bloques de código y párrafos.
+fn markdown(ui: &mut egui::Ui, text: &str) {
+    let mut code = false;
+    for line in text.lines() {
+        if line.trim_start().starts_with("```") {
+            code = !code;
+            continue;
+        }
+        if code {
+            ui.label(
+                RichText::new(line)
+                    .monospace()
+                    .size(12.0)
+                    .color(theme::TEXT_2),
+            );
+        } else if let Some((level, title)) = heading(line) {
+            let size = [22.0, 18.0, 16.0, 14.5][level.min(4) - 1];
+            ui.label(RichText::new(title).size(size).strong().color(theme::TEXT));
+        } else if let Some(item) = line
+            .trim_start()
+            .strip_prefix("- ")
+            .or_else(|| line.trim_start().strip_prefix("* "))
+        {
+            ui.label(RichText::new(format!("•  {item}")).size(13.0));
+        } else if line.trim().is_empty() {
+            ui.add_space(4.0);
+        } else {
+            ui.label(RichText::new(line).size(13.0));
+        }
+    }
+}
+
+/// «## Título» → (2, «Título»).
+fn heading(line: &str) -> Option<(usize, &str)> {
+    let hashes = line.chars().take_while(|c| *c == '#').count();
+    (1..=6)
+        .contains(&hashes)
+        .then(|| line[hashes..].strip_prefix(' '))
+        .flatten()
+        .map(|t| (hashes, t))
+}
+
+/// Un diff con las líneas añadidas en verde y las quitadas en rojo.
+fn diff_lines(ui: &mut egui::Ui, diff: &str) {
+    if diff.trim().is_empty() {
+        ui.label(RichText::new(tr!("Sin cambios desde el último commit.")).color(theme::TEXT_3));
+        return;
+    }
+    ui.spacing_mut().item_spacing.y = 0.0;
+    for line in diff.lines() {
+        let color = match line.chars().next() {
+            Some('+') if !line.starts_with("+++") => theme::GREEN,
+            Some('-') if !line.starts_with("---") => theme::RED,
+            Some('@') => theme::PURPLE,
+            _ => theme::TEXT_3,
+        };
+        ui.label(RichText::new(line).monospace().size(12.0).color(color));
     }
 }

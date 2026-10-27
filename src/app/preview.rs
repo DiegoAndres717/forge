@@ -475,6 +475,24 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12c-archivos-papelera");
     harness.state_mut().workspaces[0].files.confirm_trash = None;
+    // Un archivo abierto al lado del árbol: vista previa de Markdown y sus cambios.
+    for (cmd, name) in [
+        (UiCmd::FilesOpen("README.md".into()), "12d-archivo-markdown"),
+        (
+            UiCmd::FilesMode(files_panel::ViewMode::Diff),
+            "12e-archivo-cambios",
+        ),
+        (
+            UiCmd::FilesMode(files_panel::ViewMode::Edit),
+            "12f-archivo-editor",
+        ),
+    ] {
+        let ctx = harness.ctx.clone();
+        harness.state_mut().apply_files(&ctx, cmd);
+        settle(&mut harness);
+        save(&mut harness, &out, name);
+    }
+    harness.state_mut().workspaces[0].files.viewer = None;
     harness.state_mut().workspaces[0].files.open = false;
     harness.state_mut().welcome = Some(0);
     settle(&mut harness);
