@@ -72,7 +72,10 @@ pub fn trash(root: &Path, rel: &Path) -> Result<(), String> {
     if !path.exists() {
         return Err(format!("no existe: {}", rel.display()));
     }
-    ::trash::delete(&path).map_err(|e| e.to_string())
+    #[cfg(target_os = "macos")]
+    return ::trash::delete(&path).map_err(|e| e.to_string());
+    #[cfg(not(target_os = "macos"))]
+    Err("la papelera solo está disponible en macOS".into())
 }
 
 #[cfg(test)]
