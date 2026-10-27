@@ -28,6 +28,7 @@ const GUARD_WIDTH: f32 = 440.0;
 mod approvals;
 mod chrome;
 mod editors;
+mod files_panel;
 mod git_panel;
 mod guard_form;
 mod guard_panel;
@@ -43,6 +44,7 @@ mod sidebar;
 mod update;
 mod welcome;
 
+pub use files_panel::FilesView;
 use guard_panel::*;
 use ideas_panel::IdeasTarget;
 
@@ -218,6 +220,11 @@ enum UiCmd {
     ToggleGuard,
     ToggleMemory,
     ToggleGit,
+    ToggleFiles,
+    FilesToggleDir(String),
+    FilesTrashAsk(String),
+    /// Ruta a la papelera y si se recuerda no volver a preguntar.
+    FilesTrash(String, bool),
     GitStage(Vec<String>),
     GitUnstage(Vec<String>),
     GitDiscardAsk(forge_core::git::FileChange),
@@ -956,6 +963,21 @@ impl App {
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
+            UiCmd::ToggleFiles => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    ws.files.open = !ws.files.open;
+                    ws.files.dirty = true;
+                    if ws.files.open {
+                        ws.guard.open = false;
+                        ws.memory.open = false;
+                        ws.ideas.open = false;
+                        ws.git.open = false;
+                    }
+                }
+            }
+            UiCmd::FilesToggleDir(_) | UiCmd::FilesTrashAsk(_) | UiCmd::FilesTrash(..) => {
+                self.apply_files(cmd)
+            }
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.git.open = !ws.git.open;
@@ -964,6 +986,7 @@ impl App {
                         ws.guard.open = false;
                         ws.memory.open = false;
                         ws.ideas.open = false;
+                        ws.files.open = false;
                     }
                 }
             }
@@ -988,6 +1011,7 @@ impl App {
                         ws.guard.open = false;
                         ws.memory.open = false;
                         ws.git.open = false;
+                        ws.files.open = false;
                     }
                 }
                 None => self.general.focus = true,
@@ -1019,6 +1043,7 @@ impl App {
                             ws.guard.open = false;
                             ws.ideas.open = false;
                             ws.git.open = false;
+                            ws.files.open = false;
                         }
                     }
                     UiCmd::NewNote => {
@@ -1028,6 +1053,7 @@ impl App {
                         ws.guard.open = false;
                         ws.ideas.open = false;
                         ws.git.open = false;
+                        ws.files.open = false;
                         ws.memory.form = Some(NoteForm {
                             kind: "decision".into(),
                             ..Default::default()
@@ -1144,6 +1170,7 @@ impl App {
                             ws.memory.open = false;
                             ws.ideas.open = false;
                             ws.git.open = false;
+                            ws.files.open = false;
                         }
                     }
                     UiCmd::GuardStage(stage) => {
@@ -1591,7 +1618,7 @@ impl eframe::App for App {
         if let Some(i) = self.active {
             let planner = self.planner(i).map(|(_, name)| name);
             let ws = &mut self.workspaces[i];
-            if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open {
+            if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {
                 let (rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
                 if ws.guard.open {
                     Self::guard_ui(ws, ui, drawer, &mut cmds);
@@ -1600,6 +1627,8 @@ impl eframe::App for App {
                 } else if ws.ideas.open {
                     let planner = planner.as_deref();
                     Self::ideas_ui(ws, Some(i), planner, ui, drawer, &mut cmds);
+                } else if ws.files.open {
+                    Self::files_ui(ws, ui, drawer, &mut cmds);
                 } else {
                     Self::git_ui(ws, ui, drawer, &mut cmds);
                 }
@@ -1620,6 +1649,7 @@ impl eframe::App for App {
         self.guard_tick(&ctx);
         self.ideas_tick();
         self.git_tick(&ctx);
+        self.files_tick(&ctx);
         for ws in &mut self.workspaces {
             ws.refresh_attention();
         }

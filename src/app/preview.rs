@@ -460,6 +460,22 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12-git");
     harness.state_mut().workspaces[0].git.open = false;
+    // Árbol de archivos con una carpeta abierta y el cambio de arriba marcado.
+    std::fs::create_dir_all(project.join("docs")).unwrap();
+    std::fs::write(project.join("docs/notas.md"), "# Notas\n").unwrap();
+    harness.state_mut().workspaces[0].files.open = true;
+    harness.state_mut().workspaces[0]
+        .files
+        .expanded
+        .insert("docs".into());
+    harness.state_mut().workspaces[0].files.dirty = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "12b-archivos");
+    harness.state_mut().workspaces[0].files.confirm_trash = Some("README.md".into());
+    settle(&mut harness);
+    save(&mut harness, &out, "12c-archivos-papelera");
+    harness.state_mut().workspaces[0].files.confirm_trash = None;
+    harness.state_mut().workspaces[0].files.open = false;
     harness.state_mut().welcome = Some(0);
     settle(&mut harness);
     save(&mut harness, &out, "13-bienvenida");

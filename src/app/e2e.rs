@@ -1263,6 +1263,46 @@ fn git_panel_stages_unstages_and_commits() {
 }
 
 #[test]
+fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
+    let _serial = serial();
+    let dir = project("files");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::write(dir.join("docs/notas.md"), "# notas\n").unwrap();
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    assert!(ws(h.state()).files.open);
+    wait_until(&mut h, "árbol de archivos", |a| {
+        ws(a).files.listing.contains_key("") && !ws(a).files.changes.is_empty()
+    });
+    h.run_steps(2);
+    // main.ts está preparado en project(): sale marcado como añadido.
+    assert_eq!(ws(h.state()).files.changes.get("main.ts"), Some(&'A'));
+    // Cada fila tiene su nombre y su botón de papelera: el nombre va primero.
+    h.query_all_by_label_contains("docs")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(2);
+    wait_until(&mut h, "carpeta abierta", |a| {
+        ws(a).files.listing.contains_key("docs")
+    });
+    h.run_steps(2);
+    assert!(h.query_all_by_label_contains("notas.md").next().is_some());
+    // El borrado pregunta primero y cancelar no toca nada.
+    h.get_by_label("Mandar «main.ts» a la papelera").click();
+    h.run_steps(2);
+    assert_eq!(
+        ws(h.state()).files.confirm_trash.as_deref(),
+        Some("main.ts")
+    );
+    h.get_by_label("Cancelar").click();
+    h.run_steps(2);
+    assert!(ws(h.state()).files.confirm_trash.is_none());
+    assert!(dir.join("main.ts").exists());
+}
+
+#[test]
 fn welcome_tour_runs_once_and_is_remembered() {
     let _serial = serial();
     let mut h = app(project("welcome"));

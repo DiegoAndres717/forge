@@ -30,3 +30,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_Threading",
 ] }
+
+# La papelera solo existe en macOS por ahora (la función es solo para Mac).
+[target.'cfg(target_os = "macos")'.dependencies]
+trash = { version = "5", default-features = false }

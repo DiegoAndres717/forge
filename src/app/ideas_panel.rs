@@ -300,6 +300,7 @@ impl App {
                     ws.guard.open = false;
                     ws.memory.open = false;
                     ws.git.open = false;
+                    ws.files.open = false;
                     ws.agent_event(
                         crate::workspace::Alert::Plan,
                         tr!("La IA creó el plan #{id}: {title}", id = id, title = title),

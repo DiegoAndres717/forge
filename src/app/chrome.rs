@@ -363,6 +363,16 @@ impl App {
             }
             if theme::icon_toggle(
                 ui,
+                icon::FOLDER_OPEN,
+                tr!("Archivos del proyecto"),
+                ws.files.open,
+            )
+            .clicked()
+            {
+                cmds.push(UiCmd::ToggleFiles);
+            }
+            if theme::icon_toggle(
+                ui,
                 icon::BRAIN,
                 tr!("Forge Memory · memoria del proyecto (⌘⇧M)"),
                 ws.memory.open,
