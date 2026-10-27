@@ -140,6 +140,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_link_pointing_outside_the_project_is_not_followed() {
         let root = tmp("link");
         let outside = tmp("link-outside");
