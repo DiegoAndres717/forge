@@ -2836,4 +2836,14 @@ pub const EN: &[(&str, &str)] = &[
         "Otra sesión de {agent} está activa en esta misma rama",
         "Another session of {agent} is active on this same branch",
     ),
+    ("Archivos", "Files"),
+    ("Archivos del proyecto", "Project files"),
+    ("¿Mandar «{p0}» a la papelera?", "Move “{p0}” to the Trash?"),
+    (
+        "Podrás recuperarlo desde la papelera.",
+        "You can get it back from the Trash.",
+    ),
+    ("No volver a preguntar", "Don't ask again"),
+    ("A la papelera", "Move to Trash"),
+    ("Mandar «{p0}» a la papelera", "Move “{p0}” to the Trash"),
 ];

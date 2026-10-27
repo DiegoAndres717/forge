@@ -369,6 +369,7 @@ pub struct Workspace {
     pub memory: MemoryView,
     pub ideas: IdeasView,
     pub git: GitView,
+    pub files: crate::app::FilesView,
     panels: HashMap<PanelId, Panel>,
     layout: Node,
     focus: PanelId,
@@ -501,6 +502,10 @@ impl Workspace {
                 ..Default::default()
             },
             git: GitView {
+                dirty: true,
+                ..Default::default()
+            },
+            files: crate::app::FilesView {
                 dirty: true,
                 ..Default::default()
             },
