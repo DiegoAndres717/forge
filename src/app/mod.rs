@@ -1643,7 +1643,10 @@ impl eframe::App for App {
                     Self::files_ui(ws, ui, drawer, &mut cmds);
                     // El archivo abierto va a la izquierda del árbol, sobre el espacio del workspace.
                     if ws.files.viewer.is_some() {
-                        let width = (rest.width() * 0.6).max(420.0).min(rest.width());
+                        // Al workspace siempre le quedan 240 px, aunque la ventana sea estrecha.
+                        let width = (rest.width() * 0.6)
+                            .max(420.0)
+                            .min((rest.width() - 240.0).max(0.0));
                         let (left, viewer) = rest.split_left_right_at_x(rest.max.x - width);
                         Self::files_viewer_ui(ws, ui, viewer, &mut cmds);
                         rest = left;

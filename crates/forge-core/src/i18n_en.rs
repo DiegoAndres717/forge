@@ -2856,4 +2856,8 @@ pub const EN: &[(&str, &str)] = &[
         "Sin cambios desde el último commit.",
         "No changes since the last commit.",
     ),
+    (
+        "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios.",
+        "The file changed outside the editor (an agent?). Close it and open it again so those changes aren't overwritten.",
+    ),
 ];

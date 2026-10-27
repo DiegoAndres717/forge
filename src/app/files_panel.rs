@@ -52,6 +52,9 @@ pub struct Viewer {
     pub diff: String,
     /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
     pub pending: Option<Option<String>>,
+    /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
+    /// lo ha editado), guardar no lo pisa sin avisar.
+    pub modified: Option<std::time::SystemTime>,
 }
 
 impl Viewer {
@@ -449,12 +452,29 @@ impl App {
             UiCmd::FilesSave => {
                 let root = ws.project.path.clone();
                 if let Some(v) = ws.files.viewer.as_mut().filter(|v| v.is_text()) {
-                    match forge_core::files::save(&root, Path::new(&v.path), &v.content) {
-                        Ok(()) => {
-                            v.saved = v.content.clone();
-                            ws.files.error = None;
+                    let rel = Path::new(&v.path);
+                    let on_disk = std::fs::metadata(root.join(rel))
+                        .and_then(|m| m.modified())
+                        .ok();
+                    if on_disk != v.modified {
+                        ws.files.error = Some(tr!(
+                            "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios."
+                        ).to_string());
+                    } else {
+                        match forge_core::files::save(&root, rel, &v.content) {
+                            Ok(()) => {
+                                v.saved = v.content.clone();
+                                v.modified = std::fs::metadata(root.join(rel))
+                                    .and_then(|m| m.modified())
+                                    .ok();
+                                if v.mode == ViewMode::Diff {
+                                    v.diff =
+                                        forge_core::files::diff(&root, rel).unwrap_or_else(|e| e);
+                                }
+                                ws.files.error = None;
+                            }
+                            Err(e) => ws.files.error = Some(e),
                         }
-                        Err(e) => ws.files.error = Some(e),
                     }
                 }
             }
@@ -486,6 +506,9 @@ impl App {
             mode: ViewMode::Edit,
             diff: String::new(),
             pending: None,
+            modified: std::fs::metadata(root.join(rel))
+                .and_then(|m| m.modified())
+                .ok(),
         };
         let picture = |file: &Path| {
             let img = image::open(file).map_err(|e| e.to_string())?.to_rgba8();

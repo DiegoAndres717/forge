@@ -1328,7 +1328,7 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
         .unwrap()
         .content = "export const x = 2;\n".into();
     h.run_steps(2);
-    h.get_by_label("Guardar (⌘S)").click();
+    h.get_by_label_contains("Guardar").click();
     h.run_steps(2);
     assert_eq!(
         std::fs::read_to_string(dir.join("main.ts")).unwrap(),

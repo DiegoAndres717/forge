@@ -61,14 +61,39 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
 /// Diff de un archivo contra el último commit; uno sin seguimiento sale entero como añadido.
 pub fn file_diff(repo: &Path, rel: &str, abs: &Path) -> Result<String, String> {
     // Sin commits todavía `HEAD` no existe: se compara con el índice.
-    let tracked = git(repo, &["ls-files", "--error-unmatch", "--", rel]).is_ok();
+    let tracked = git(
+        repo,
+        &[
+            "--literal-pathspecs",
+            "ls-files",
+            "--error-unmatch",
+            "--",
+            rel,
+        ],
+    )
+    .is_ok();
     if !tracked {
         let text = std::fs::read_to_string(abs).map_err(|e| e.to_string())?;
         let body: String = text.lines().map(|l| format!("+{l}\n")).collect();
         return Ok(format!("--- /dev/null\n+++ b/{rel}\n{body}"));
     }
-    git(repo, &["diff", "--no-color", "HEAD", "--", rel])
-        .or_else(|_| git(repo, &["diff", "--no-color", "--", rel]))
+    git(
+        repo,
+        &[
+            "--literal-pathspecs",
+            "diff",
+            "--no-color",
+            "HEAD",
+            "--",
+            rel,
+        ],
+    )
+    .or_else(|_| {
+        git(
+            repo,
+            &["--literal-pathspecs", "diff", "--no-color", "--", rel],
+        )
+    })
 }
 
 /// Identidad estable de un repositorio: el remoto (origin o el primero) normalizado, más la
