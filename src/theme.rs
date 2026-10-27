@@ -182,6 +182,111 @@ pub fn row(
     response.on_hover_cursor(CursorIcon::Default)
 }
 
+/// Tarjeta de un proyecto (barra lateral): punto de estado, nombre, rama debajo y un detalle
+/// a la derecha; resaltada al pasar el ratón y cuando está seleccionada.
+pub fn project_card(
+    ui: &mut Ui,
+    dot: Color32,
+    name: &str,
+    subtitle: &str,
+    detail: &str,
+    selected: bool,
+) -> Response {
+    let height = if subtitle.is_empty() { 30.0 } else { 44.0 };
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
+    let painter = ui.painter();
+    if selected {
+        painter.rect_filled(
+            rect,
+            8.0,
+            Color32::from_rgba_premultiplied(0x3a, 0x3a, 0x3e, 0xc0),
+        );
+    } else if response.hovered() {
+        painter.rect_filled(rect, 8.0, SELECTED);
+    }
+    let mid = rect.center().y;
+    painter.circle_filled(egui::pos2(rect.min.x + 14.0, mid), 4.0, dot);
+    let detail_width = if detail.is_empty() {
+        0.0
+    } else {
+        let galley = painter.layout_no_wrap(detail.to_string(), FontId::proportional(11.0), TEXT_3);
+        let w = galley.size().x;
+        let y = if subtitle.is_empty() {
+            mid - galley.size().y / 2.0
+        } else {
+            rect.min.y + 8.0
+        };
+        painter.galley(egui::pos2(rect.max.x - 10.0 - w, y), galley, TEXT_3);
+        w + 14.0
+    };
+    let text_rect = Rect::from_min_max(
+        egui::pos2(rect.min.x + 30.0, rect.min.y),
+        egui::pos2(rect.max.x - 8.0 - detail_width, rect.max.y),
+    );
+    let clip = painter.with_clip_rect(text_rect);
+    let title = painter.layout(
+        name.to_string(),
+        FontId::proportional(13.0),
+        TEXT,
+        f32::INFINITY,
+    );
+    let title_y = if subtitle.is_empty() {
+        mid - title.size().y / 2.0
+    } else {
+        rect.min.y + 6.0
+    };
+    clip.galley(egui::pos2(text_rect.min.x, title_y), title, TEXT);
+    if !subtitle.is_empty() {
+        let sub = painter.layout(
+            subtitle.to_string(),
+            FontId::proportional(11.0),
+            TEXT_3,
+            f32::INFINITY,
+        );
+        clip.galley(egui::pos2(text_rect.min.x, rect.min.y + 24.0), sub, TEXT_3);
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, name));
+    response.on_hover_cursor(CursorIcon::Default)
+}
+
+/// Fila pequeña bajo una tarjeta (un agente abierto): punto de color y nombre, con sangría.
+pub fn sub_row(ui: &mut Ui, dot: Color32, label: &str, detail: &str) -> Response {
+    let (rect, response) =
+        ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, 6.0, SELECTED);
+    }
+    let mid = rect.center().y;
+    painter.circle_filled(egui::pos2(rect.min.x + 30.0, mid), 3.0, dot);
+    let galley = painter.layout(
+        label.to_string(),
+        FontId::proportional(12.0),
+        TEXT_2,
+        f32::INFINITY,
+    );
+    painter.galley(
+        egui::pos2(rect.min.x + 42.0, mid - galley.size().y / 2.0),
+        galley,
+        TEXT_2,
+    );
+    if !detail.is_empty() {
+        let galley = painter.layout_no_wrap(detail.to_string(), FontId::proportional(11.0), TEXT_3);
+        painter.galley(
+            egui::pos2(
+                rect.max.x - 10.0 - galley.size().x,
+                mid - galley.size().y / 2.0,
+            ),
+            galley,
+            TEXT_3,
+        );
+    }
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    response.on_hover_cursor(CursorIcon::Default)
+}
+
 /// Botón de icono plano (barra de herramientas y cabeceras), con fondo al pasar el ratón.
 pub fn icon_button(ui: &mut Ui, glyph: &str, tooltip: &str) -> Response {
     icon_button_sized(ui, glyph, tooltip, 26.0, TEXT_2)

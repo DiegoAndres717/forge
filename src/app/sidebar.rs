@@ -78,6 +78,13 @@ impl App {
                     cmds.push(UiCmd::Home);
                 }
                 let attention: Vec<_> = self.workspaces.iter().map(|w| w.attention()).collect();
+                // La rama de cada proyecto (se relee cada 2 s) y los agentes abiertos del activo.
+                let branches: Vec<Option<String>> =
+                    self.workspaces.iter_mut().map(|w| w.branch()).collect();
+                let open_agents: Vec<_> = self
+                    .active
+                    .map(|a| self.workspaces[a].active_agent_panels())
+                    .unwrap_or_default();
                 let visible = self.visible_workspaces(&attention);
                 let ram = self.ram.lock().map(|r| r.clone()).unwrap_or_default();
                 // Filas dibujadas y el arrastre en curso (desde, ¿soltado?).
@@ -99,11 +106,6 @@ impl App {
                         }
                         _ => String::new(),
                     };
-                    let (glyph, color) = match (selected, dormant) {
-                        (true, _) => (icon::FOLDER, theme::ACCENT),
-                        (_, true) => (icon::MOON, theme::TEXT_4),
-                        _ => (icon::FOLDER, theme::TEXT_2),
-                    };
                     let mut tip = tilde(&ws.project.path);
                     if let Some(bytes) = ram.get(&ws.project.path) {
                         tip += &format!("\nMemoria: {}", human_bytes(*bytes));
@@ -111,8 +113,20 @@ impl App {
                     if dormant {
                         tip += tr!("\nDormido: sus terminales y procesos arrancan al entrar.");
                     }
-                    let row = theme::row(ui, glyph, color, &ws.project.name(), &detail, selected);
-                    // Aviso: punto de color a la derecha.
+                    // El punto de estado: aviso, en marcha, dormido o en calma.
+                    let mut dot = match (dormant, running > 0) {
+                        (true, _) => theme::TEXT_4,
+                        (_, true) => theme::GREEN,
+                        _ => theme::TEXT_3,
+                    };
+                    let row = theme::project_card(
+                        ui,
+                        dot,
+                        &ws.project.name(),
+                        branches[i].as_deref().unwrap_or(""),
+                        &detail,
+                        selected,
+                    );
                     if let Some(a) = &attention[i] {
                         use crate::workspace::Attention;
                         let (color, text) = match a {
@@ -128,10 +142,11 @@ impl App {
                             }
                             Attention::Event(_, text) => (theme::ORANGE, text.clone()),
                         };
+                        dot = color;
                         ui.painter().circle_filled(
-                            egui::pos2(row.rect.max.x - 14.0, row.rect.center().y),
+                            egui::pos2(row.rect.min.x + 14.0, row.rect.center().y),
                             4.0,
-                            color,
+                            dot,
                         );
                         tip = format!("{text}\n{tip}");
                     }
@@ -171,6 +186,14 @@ impl App {
                             cmds.push(UiCmd::Close(i));
                         }
                     });
+                    // Los agentes abiertos del proyecto elegido, debajo de su tarjeta.
+                    if selected {
+                        for (panel, name, _) in &open_agents {
+                            if theme::sub_row(ui, theme::GREEN, name, "").clicked() {
+                                cmds.push(UiCmd::GoToPanel(*panel));
+                            }
+                        }
+                    }
                 }
                 if let Some((from, dropped)) = drag
                     && let Some(p) = ui.ctx().pointer_interact_pos()
