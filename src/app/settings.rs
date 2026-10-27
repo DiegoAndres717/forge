@@ -15,15 +15,23 @@ pub(super) enum SettingsTab {
 }
 
 impl SettingsTab {
-    fn label(self) -> String {
-        let (glyph, name) = match self {
+    fn parts(self) -> (&'static str, &'static str) {
+        match self {
             Self::General => (icon::GEAR, tr!("General")),
             Self::Agents => (icon::ROBOT, tr!("Agentes")),
             Self::Alerts => (icon::BELL, tr!("Avisos")),
             Self::Usage => (icon::CHART_BAR, tr!("Uso")),
             Self::Project => (icon::FOLDER, tr!("Este proyecto")),
-        };
-        format!("{glyph}  {name}")
+        }
+    }
+
+    /// Las pestañas que hay: «Este proyecto» solo con un proyecto abierto.
+    fn all(has_project: bool) -> Vec<Self> {
+        let mut tabs = vec![Self::General, Self::Agents, Self::Alerts, Self::Usage];
+        if has_project {
+            tabs.push(Self::Project);
+        }
+        tabs
     }
 }
 
@@ -94,7 +102,61 @@ fn model_info(id: &str) -> &'static str {
 }
 
 impl App {
-    pub(super) fn settings_ui(&mut self, ctx: &egui::Context, cmds: &mut Vec<UiCmd>) {
+    /// La pestaña elegida (Este proyecto solo existe con un proyecto abierto).
+    fn current_tab(&self, ctx: &egui::Context) -> SettingsTab {
+        let tab: SettingsTab = ctx.data(|d| d.get_temp(tab_id())).unwrap_or_default();
+        if tab == SettingsTab::Project && self.active.is_none() {
+            SettingsTab::General
+        } else {
+            tab
+        }
+    }
+
+    /// La barra lateral mientras Ajustes está abierto: volver y las secciones.
+    pub(super) fn settings_nav(&mut self, ui: &mut egui::Ui, rect: Rect, cmds: &mut Vec<UiCmd>) {
+        let ctx = ui.ctx().clone();
+        let tab = self.current_tab(&ctx);
+        let body = Rect::from_min_max(
+            rect.min + Vec2::new(10.0, 8.0),
+            rect.max - Vec2::new(10.0, 8.0),
+        );
+        let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(body));
+        ui.spacing_mut().item_spacing.y = 1.0;
+        if theme::row(
+            &mut ui,
+            icon::ARROW_LEFT,
+            theme::TEXT_2,
+            tr!("Volver"),
+            "Esc",
+            false,
+        )
+        .clicked()
+        {
+            cmds.push(UiCmd::CloseSettings);
+        }
+        theme::section(&mut ui, tr!("Ajustes"));
+        for t in SettingsTab::all(self.active.is_some()) {
+            let (glyph, name) = t.parts();
+            if theme::row(&mut ui, glyph, theme::TEXT_2, name, "", t == tab).clicked() {
+                show_tab(&ctx, t);
+            }
+        }
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(format!("Forge {}", env!("CARGO_PKG_VERSION")))
+                .size(11.5)
+                .color(theme::TEXT_3),
+        );
+        if ui
+            .link(RichText::new(tr!("Buscar actualizaciones")).size(11.5))
+            .clicked()
+        {
+            cmds.push(UiCmd::CheckUpdates);
+        }
+    }
+
+    /// Ajustes como página que cubre el espacio de trabajo (las secciones están en la barra lateral).
+    pub(super) fn settings_ui(&mut self, ctx: &egui::Context, area: Rect, cmds: &mut Vec<UiCmd>) {
         if !self.settings_open {
             // Al volver a abrir se releen los archivos.
             self.guard_form = None;
@@ -104,70 +166,35 @@ impl App {
             return;
         }
         let mut changed = false;
-        // A la medida de la ventana: más ancho si cabe, y nunca más alto que ella (el
-        // contenido se desplaza y la cabecera y las pestañas quedan fijas).
-        let screen = ctx.content_rect();
-        let width = (screen.width() - 64.0).clamp(300.0, 760.0);
-        // Mismo alto en todas las pestañas: la ventana no salta al cambiar.
-        let body_height = (screen.height() - 190.0).clamp(200.0, 560.0);
-        let mut tab: SettingsTab = ctx.data(|d| d.get_temp(tab_id())).unwrap_or_default();
-        if tab == SettingsTab::Project && self.active.is_none() {
-            tab = SettingsTab::General;
+        // Esc cierra, salvo que haya un desplegable abierto (Esc lo cierra a él).
+        if ctx.input(|i| i.key_pressed(Key::Escape)) && !egui::Popup::is_any_open(ctx) {
+            self.settings_open = false;
         }
-        let modal = egui::Modal::new(egui::Id::new("settings"))
-            .frame(
-                egui::Frame::new()
-                    .fill(theme::SURFACE)
-                    .stroke(egui::Stroke::new(1.0, theme::SEPARATOR))
-                    .corner_radius(12.0)
-                    .inner_margin(20.0),
-            )
+        let width = (area.width() - 64.0).clamp(300.0, 760.0);
+        let tab = self.current_tab(ctx);
+        egui::Area::new(egui::Id::new("settings-page"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(area.min)
             .show(ctx, |ui| {
-                ui.set_width(width);
+                // Tapa el espacio de trabajo y se come los clics que irían debajo.
+                ui.allocate_rect(area, Sense::click_and_drag());
+                ui.painter().rect_filled(area, 0.0, theme::BG);
+                let page = Rect::from_min_size(
+                    egui::pos2(area.center().x - width / 2.0, area.min.y + 20.0),
+                    Vec2::new(width, (area.height() - 40.0).max(100.0)),
+                );
+                let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(page));
+                let (glyph, name) = tab.parts();
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(icon::GEAR).size(18.0).color(theme::TEXT_2));
-                    ui.label(RichText::new(tr!("Ajustes")).size(16.0).strong());
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if theme::icon_button(ui, icon::X, tr!("Cerrar (Esc)")).clicked() {
-                            self.settings_open = false;
-                        }
-                    });
+                    ui.label(RichText::new(glyph).size(18.0).color(theme::TEXT_2));
+                    ui.label(RichText::new(name).size(16.0).strong());
                 });
-                ui.add_space(10.0);
-                // Pestañas; en un ancho pequeño, un desplegable.
-                let mut tabs = vec![
-                    SettingsTab::General,
-                    SettingsTab::Agents,
-                    SettingsTab::Alerts,
-                    SettingsTab::Usage,
-                ];
-                if self.active.is_some() {
-                    tabs.push(SettingsTab::Project);
-                }
-                if width < 520.0 {
-                    egui::ComboBox::from_id_salt("settings-tabs")
-                        .selected_text(tab.label())
-                        .width(width)
-                        .show_ui(ui, |ui| {
-                            for t in &tabs {
-                                ui.selectable_value(&mut tab, *t, t.label());
-                            }
-                        });
-                } else {
-                    ui.horizontal(|ui| {
-                        for t in &tabs {
-                            ui.selectable_value(&mut tab, *t, RichText::new(t.label()).size(13.5));
-                        }
-                    });
-                }
                 ui.separator();
                 ui.add_space(4.0);
                 egui::ScrollArea::vertical()
                     .id_salt(("settings-scroll", tab as u8))
-                    .max_height(body_height)
-                    .min_scrolled_height(body_height)
                     .auto_shrink([false, false])
-                    .show(ui, |ui| {
+                    .show(&mut ui, |ui| {
                         // Casillas cuadradas (con el redondeo general parecen radios).
                         let w = &mut ui.visuals_mut().widgets;
                         for state in [&mut w.inactive, &mut w.hovered, &mut w.active] {
@@ -180,27 +207,8 @@ impl App {
                             SettingsTab::Usage => self.usage_tab(ui),
                             SettingsTab::Project => self.project_tab(ui, cmds),
                         }
-                        // Versión instalada, al pie (como "Acerca de").
-                        ui.add_space(12.0);
-                        ui.vertical_centered(|ui| {
-                            ui.label(
-                                RichText::new(format!("Forge {}", env!("CARGO_PKG_VERSION")))
-                                    .size(11.5)
-                                    .color(theme::TEXT_3),
-                            );
-                            if ui
-                                .link(RichText::new(tr!("Buscar actualizaciones")).size(11.5))
-                                .clicked()
-                            {
-                                cmds.push(UiCmd::CheckUpdates);
-                            }
-                        });
                     });
             });
-        ctx.data_mut(|d| d.insert_temp(tab_id(), tab));
-        if modal.should_close() {
-            self.settings_open = false;
-        }
         if changed {
             self.settings.font_size = self.settings.font_size.round();
             if let Err(e) = crate::save_settings(&self.settings) {

@@ -371,6 +371,14 @@ impl App {
             {
                 cmds.push(UiCmd::ToggleFiles);
             }
+            let plans = if ws.ideas.open_count > 0 {
+                tr!("Planes · {n} sin hacer (⌘⇧I)", n = ws.ideas.open_count).to_string()
+            } else {
+                tr!("Planes (⌘⇧I)").to_string()
+            };
+            if theme::icon_toggle(ui, icon::LIST_CHECKS, &plans, ws.ideas.open).clicked() {
+                cmds.push(UiCmd::ToggleIdeas);
+            }
             if theme::icon_toggle(
                 ui,
                 icon::BRAIN,

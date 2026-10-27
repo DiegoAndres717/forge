@@ -191,6 +191,7 @@ enum UiCmd {
     EditFile(&'static str),
     /// Abre la ventana de Ajustes.
     OpenSettings,
+    CloseSettings,
     /// Abre Ajustes en una pestaña.
     OpenSettingsTab(settings::SettingsTab),
     /// Abre la paleta de comandos (⌘K).
@@ -829,6 +830,7 @@ impl App {
                 }
             }
             UiCmd::OpenSettings => self.settings_open = true,
+            UiCmd::CloseSettings => self.settings_open = false,
             UiCmd::OpenSettingsTab(tab) => {
                 settings::show_tab(ctx, tab);
                 self.settings_open = true;
@@ -1776,7 +1778,7 @@ impl eframe::App for App {
         }
         self.approvals_ui(&ctx);
         let mut from_settings = Vec::new();
-        self.settings_ui(&ctx, &mut from_settings);
+        self.settings_ui(&ctx, area, &mut from_settings);
         self.welcome_ui(&ctx, &mut from_settings);
         for cmd in from_settings {
             self.apply(&ctx, cmd, area);
