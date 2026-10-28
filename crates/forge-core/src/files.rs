@@ -68,6 +68,20 @@ pub fn project_files(root: &Path) -> Vec<String> {
     out
 }
 
+/// Muestra un archivo o carpeta del proyecto en el Finder (solo macOS).
+pub fn reveal(root: &Path, rel: &Path) -> Result<(), String> {
+    let path = strict_path(root, rel)?;
+    if !cfg!(target_os = "macos") {
+        return Err("mostrar en el Finder solo existe en macOS".into());
+    }
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
 /// El mensaje para el agente con los comentarios hechos sobre el diff de un archivo.
 /// Una sola línea: así se escribe en la terminal del agente y se envía con Enter.
 /// Cada comentario lleva la línea del diff a la que se refiere.
