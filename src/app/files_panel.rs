@@ -63,6 +63,8 @@ pub struct Viewer {
     pub comments: Vec<(usize, String, String)>,
     /// Comentario que se está escribiendo: (índice de línea del diff, texto).
     pub draft: Option<(usize, String)>,
+    /// Texto coloreado la última vez (huella del texto, secciones): no se recalcula cada fotograma.
+    pub highlight: Option<(u64, egui::text::LayoutJob)>,
     /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
     pub pending: Option<Option<String>>,
     /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
@@ -288,25 +290,18 @@ impl App {
         let name = v.path.rsplit('/').next().unwrap_or(&v.path).to_string();
         let unsaved = v.unsaved();
         ui.horizontal(|ui| {
-            let title = if unsaved {
-                format!("{name}  ●")
-            } else {
-                name
-            };
-            ui.label(RichText::new(title).size(14.0).color(theme::TEXT).strong())
+            ui.label(RichText::new(name).size(14.0).color(theme::TEXT).strong())
                 .on_hover_text(&v.path);
+            if unsaved {
+                // Como VS Code: un punto junto al nombre mientras hay cambios sin guardar.
+                ui.label(RichText::new("●").size(12.0).color(theme::YELLOW))
+                    .on_hover_text(tr!("Cambios sin guardar (⌘S)"));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::icon_button(ui, icon::X, tr!("Cerrar archivo")).clicked() {
                     cmds.push(UiCmd::FilesCloseViewer);
                 }
                 if v.is_text() {
-                    let save = ui.add_enabled(
-                        unsaved,
-                        egui::Button::new(RichText::new(tr!("Guardar (⌘S)")).size(12.0)),
-                    );
-                    if save.clicked() {
-                        cmds.push(UiCmd::FilesSave);
-                    }
                     let mut mode = |ui: &mut egui::Ui, m: ViewMode, text: &str| {
                         if ui.selectable_label(v.mode == m, text).clicked() && v.mode != m {
                             cmds.push(UiCmd::FilesMode(m));
@@ -353,12 +348,13 @@ impl App {
                 } else {
                     match v.mode {
                         ViewMode::Edit => {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut v.content)
-                                    .code_editor()
-                                    .desired_width(f32::INFINITY)
-                                    .desired_rows(30),
-                            );
+                            let Viewer {
+                                content,
+                                path,
+                                highlight,
+                                ..
+                            } = v;
+                            code_editor(ui, content, path, highlight);
                         }
                         ViewMode::Preview => markdown(ui, &v.content),
                         ViewMode::Diff => {
@@ -664,6 +660,7 @@ impl App {
             diff: String::new(),
             comments: Vec::new(),
             draft: None,
+            highlight: None,
             pending: None,
             modified: std::fs::metadata(root.join(rel))
                 .and_then(|m| m.modified())
@@ -857,6 +854,76 @@ fn diff_lines(
             }
         }
     }
+}
+
+/// El editor: texto con color de sintaxis, números de línea y la línea del cursor resaltada.
+fn code_editor(
+    ui: &mut egui::Ui,
+    content: &mut String,
+    path: &str,
+    cache: &mut Option<(u64, egui::text::LayoutJob)>,
+) {
+    use std::hash::{Hash, Hasher};
+    let file_name = path.rsplit('/').next().unwrap_or(path).to_string();
+    let font = FontId::monospace(13.0);
+    let digits = (content.lines().count().max(1) + 1)
+        .to_string()
+        .len()
+        .max(2);
+    let gutter = digits as f32 * 8.0 + 22.0;
+    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, _wrap: f32| {
+        let text = text.as_str();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        text.hash(&mut hasher);
+        let key = hasher.finish();
+        if cache.as_ref().is_none_or(|(k, _)| *k != key) {
+            *cache = Some((
+                key,
+                crate::highlight::layout(text, &file_name, font.clone(), theme::TEXT_2),
+            ));
+        }
+        let mut job = cache.as_ref().map(|(_, j)| j.clone()).unwrap_or_default();
+        job.wrap.max_width = f32::INFINITY; // el código no se parte: se desplaza de lado
+        ui.ctx().fonts_mut(|f| f.layout_job(job))
+    };
+    ui.horizontal_top(|ui| {
+        let left = ui.cursor().min.x;
+        ui.add_space(gutter);
+        let out = egui::TextEdit::multiline(content)
+            .font(FontId::monospace(13.0))
+            .frame(egui::Frame::NONE)
+            .desired_width(f32::INFINITY)
+            .desired_rows(30)
+            .layouter(&mut layouter)
+            .show(ui);
+        let painter = ui.painter();
+        let origin = out.galley_pos;
+        // La línea del cursor, resaltada detrás del texto.
+        if let Some(range) = out.cursor_range {
+            let at = out.galley.pos_from_cursor(range.primary);
+            let line = Rect::from_min_max(
+                egui::pos2(left + gutter - 6.0, origin.y + at.min.y),
+                egui::pos2(out.response.rect.max.x, origin.y + at.max.y),
+            );
+            painter.rect_filled(line, 0.0, theme::SELECTED);
+        }
+        // Un número por línea de verdad (no por fila: el código no se parte).
+        let mut n = 1;
+        let mut new_line = true;
+        for placed in &out.galley.rows {
+            if new_line {
+                painter.text(
+                    egui::pos2(left + gutter - 12.0, origin.y + placed.pos.y),
+                    egui::Align2::RIGHT_TOP,
+                    n,
+                    FontId::monospace(12.0),
+                    theme::TEXT_4,
+                );
+                n += 1;
+            }
+            new_line = placed.ends_with_newline;
+        }
+    });
 }
 
 /// Icono y color de un archivo según su extensión.

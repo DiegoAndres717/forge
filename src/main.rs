@@ -3,6 +3,7 @@ mod claude_plugin;
 mod cli;
 #[cfg(any(target_os = "linux", test))]
 mod desktop_entry;
+mod highlight;
 mod layout;
 mod paste;
 mod processes;
