@@ -291,9 +291,25 @@ impl App {
                     }
                 }
 
-                // Los procesos se usan menos: al final de la lista.
+                // Planes, donde siempre estuvo; los procesos se abren desde ⌘K.
                 ui.add_space(12.0);
-                Self::processes_ui(ws, ui, cmds);
+                let open = match ws.ideas.open_count {
+                    0 => String::new(),
+                    n => n.to_string(),
+                };
+                if theme::row(
+                    ui,
+                    icon::LIST_CHECKS,
+                    theme::ACCENT,
+                    tr!("Planes"),
+                    &open,
+                    ws.ideas.open,
+                )
+                .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
+                .clicked()
+                {
+                    cmds.push(UiCmd::ToggleIdeas);
+                }
             });
     }
 
@@ -585,163 +601,6 @@ impl App {
                     .color(theme::TEXT_4),
             )
             .on_hover_text(hints.join("\n"));
-        }
-    }
-
-    /// Sección PROCESOS: estado, puerto y controles (aparecen al pasar el ratón).
-    pub(super) fn processes_ui(ws: &Workspace, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
-        let add = || UiCmd::OpenSettingsTab(super::settings::SettingsTab::Project);
-        ui.horizontal(|ui| {
-            theme::section(ui, tr!("Procesos"));
-            if !ws.processes.list.is_empty() {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::icon_button_sized(
-                        ui,
-                        icon::PLUS,
-                        tr!("Añadir o cambiar procesos (Ajustes)"),
-                        20.0,
-                        theme::TEXT_4,
-                    )
-                    .clicked()
-                    {
-                        cmds.push(add());
-                    }
-                    if theme::icon_button_sized(
-                        ui,
-                        icon::STOP,
-                        tr!("Detener todos"),
-                        20.0,
-                        theme::TEXT_4,
-                    )
-                    .clicked()
-                    {
-                        cmds.push(UiCmd::StopAll);
-                    }
-                    if theme::icon_button_sized(
-                        ui,
-                        icon::PLAY,
-                        tr!("Iniciar todos"),
-                        20.0,
-                        theme::TEXT_4,
-                    )
-                    .clicked()
-                    {
-                        cmds.push(UiCmd::StartAll);
-                    }
-                });
-            }
-        });
-        if ws.processes.list.is_empty()
-            && theme::row(ui, icon::PLUS, theme::TEXT_3, tr!("Añadir proceso"), "", false)
-                .on_hover_text(tr!("Servidores como dev o api que Forge arranca, vigila y reinicia. Se configuran en Ajustes → Este proyecto."))
-                .clicked()
-        {
-            cmds.push(add());
-        }
-        for m in &ws.processes.list {
-            let id = m.def.id.clone();
-            let (status, tone) = m.describe();
-            let detail = match m.ports.first() {
-                Some(port) => format!(":{port}"),
-                None => status.clone(),
-            };
-            let row = theme::row(ui, "●", tone_color(tone), m.def.label(), &detail, false)
-                .on_hover_text(tr!(
-                    "{p0}\n{status}\nClic: ver logs · clic derecho: más opciones",
-                    p0 = m.def.command,
-                    status = status
-                ));
-            if row.clicked() {
-                cmds.push(UiCmd::ShowProcess(id.clone()));
-            }
-            // Controles al pasar el ratón, sobre el lado derecho de la fila.
-            if ui.rect_contains_pointer(row.rect) {
-                let size = 22.0;
-                let mut x = row.rect.max.x - 2.0;
-                let mut button = |glyph: &str, tip: &str, cmd: UiCmd, ui: &mut egui::Ui| {
-                    x -= size;
-                    let r = Rect::from_min_size(
-                        egui::pos2(x, row.rect.center().y - size / 2.0),
-                        Vec2::splat(size),
-                    );
-                    ui.painter().rect_filled(r, 6.0, theme::SURFACE);
-                    let resp = ui
-                        .interact(r, egui::Id::new(("proc-btn", &id, glyph)), Sense::click())
-                        .on_hover_text(tip);
-                    theme::paint_icon_button(ui, r, glyph, &resp, theme::TEXT_2);
-                    if resp.clicked() {
-                        cmds.push(cmd);
-                    }
-                };
-                button(
-                    icon::ARROW_CLOCKWISE,
-                    tr!("Reiniciar"),
-                    UiCmd::Restart(id.clone()),
-                    ui,
-                );
-                if m.is_active() {
-                    button(
-                        icon::STOP,
-                        tr!("Detener (Ctrl+C)"),
-                        UiCmd::Stop(id.clone()),
-                        ui,
-                    );
-                } else {
-                    button(icon::PLAY, tr!("Iniciar"), UiCmd::Start(id.clone()), ui);
-                }
-            }
-            row.context_menu(|ui| {
-                ui.set_min_width(240.0);
-                if ui
-                    .button(tr!("{p0}  Ver logs", p0 = icon::TERMINAL_WINDOW))
-                    .clicked()
-                {
-                    cmds.push(UiCmd::ShowProcess(id.clone()));
-                }
-                if ui
-                    .button(tr!("{p0}  Copiar comando", p0 = icon::COPY))
-                    .clicked()
-                {
-                    ui.ctx().copy_text(m.def.command.clone());
-                }
-                ui.menu_button(
-                    tr!("{p0}  Variables de entorno", p0 = icon::LIST_CHECKS),
-                    |ui| {
-                        let env = ws.processes.environment(&m.def);
-                        if env.is_empty() {
-                            ui.label(tr!("Sin variables propias"));
-                        }
-                        let mut keys: Vec<_> = env.keys().collect();
-                        keys.sort();
-                        for key in keys {
-                            ui.label(
-                                RichText::new(format!("{key}={}", processes::mask(key, &env[key])))
-                                    .monospace(),
-                            );
-                        }
-                    },
-                );
-                ui.separator();
-                let restart = match m.def.auto_restart {
-                    AutoRestart::Never => tr!("no"),
-                    AutoRestart::OnFailure => tr!("si falla"),
-                    AutoRestart::Always => tr!("siempre"),
-                };
-                ui.label(
-                    RichText::new(tr!("Estado: {status}", status = status))
-                        .small()
-                        .color(theme::TEXT_3),
-                );
-                ui.label(
-                    RichText::new(tr!("Reinicio automático: {restart}", restart = restart))
-                        .small()
-                        .color(theme::TEXT_3),
-                );
-                // Puerto/URL solo como texto (sin abrir navegador).
-                if let Some(url) = m.urls().first() {
-                    ui.label(RichText::new(url).small().monospace().color(theme::TEXT_3));
-                }
-            });
         }
     }
 }

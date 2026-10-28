@@ -2,9 +2,9 @@
 use super::*;
 use forge_core::tr;
 
-/// Ancho de los botones junto a los semáforos (barra lateral y Ajustes).
-/// Barra lateral y Ajustes (y el botón ☰ fuera de macOS).
-const WINDOW_BUTTONS_WIDTH: f32 = 58.0;
+/// Ancho de los botones junto a los semáforos: la barra lateral (y el botón ☰ fuera de macOS).
+/// Ajustes ya no está aquí: va abajo en la barra lateral y con ⌘,.
+const WINDOW_BUTTONS_WIDTH: f32 = 30.0;
 const MENU_BUTTON_WIDTH: f32 = 28.0;
 /// «Forge» junto a los botones de la ventana, sin barra de menús nativa.
 const APP_NAME_WIDTH: f32 = 50.0;
@@ -252,7 +252,7 @@ impl App {
             }
     }
 
-    /// Junto a los semáforos de la ventana (como Warp): barra lateral y Ajustes; sin barra de
+    /// Junto a los semáforos de la ventana (como Warp): la barra lateral; sin barra de
     /// menús nativa (Linux, Windows), antes el botón ☰ con los menús.
     pub(super) fn window_buttons(&mut self, ui: &mut egui::Ui) {
         let start = self.traffic_end + 12.0;
@@ -280,17 +280,6 @@ impl App {
         // Seleccionado mientras la barra lateral está abierta (como Warp).
         if theme::icon_toggle(&mut ui, icon::SIDEBAR_SIMPLE, tip, self.sidebar).clicked() {
             self.sidebar = !self.sidebar;
-        }
-        // Seleccionado mientras Ajustes está abierto; otro clic lo cierra.
-        if theme::icon_toggle(
-            &mut ui,
-            icon::GEAR_SIX,
-            tr!("Ajustes (⌘,)"),
-            self.settings_open,
-        )
-        .clicked()
-        {
-            self.settings_open = !self.settings_open;
         }
         // Sin barra de menús nativa (Windows, Linux) nada dice qué app es: su nombre aquí.
         if self.menu_button {
