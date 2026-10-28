@@ -2257,6 +2257,11 @@ fn a_thread_marked_unread_stays_so_until_you_go_back_to_it() {
         ws(h.state()).unread.is_empty(),
         "al volver a él queda leído"
     );
+    // Un hilo que ya no existe no deja el aviso colgado en el proyecto.
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(9999), area);
+    assert!(!ws(h.state()).has_unread());
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(agent), area);
+    assert!(ws(h.state()).has_unread());
 }
 
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y

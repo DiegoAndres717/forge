@@ -1815,6 +1815,11 @@ impl Workspace {
 
     /// Paneles con agentes activos y sus datos para sincronizar con agent_sessions:
     /// (panel_id, agent_name, Option<pid>)
+    /// ¿Queda algún hilo abierto marcado como no leído? (los cerrados no cuentan)
+    pub fn has_unread(&self) -> bool {
+        self.unread.iter().any(|id| self.panels.contains_key(id))
+    }
+
     pub fn active_agent_panels(&mut self) -> Vec<(PanelId, String, Option<u32>)> {
         let mut list = Vec::new();
         for (&id, panel) in &mut self.panels {

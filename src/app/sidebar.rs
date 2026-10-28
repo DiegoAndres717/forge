@@ -152,7 +152,7 @@ impl App {
                         tip = format!("{text}\n{tip}");
                     }
                     // Un hilo marcado como no leído también se ve desde la tarjeta.
-                    if attention[i].is_none() && !ws.unread.is_empty() {
+                    if attention[i].is_none() && ws.has_unread() {
                         ui.painter().circle_filled(
                             egui::pos2(row.rect.min.x + 14.0, row.rect.center().y),
                             4.0,
