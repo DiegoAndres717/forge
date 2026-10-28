@@ -11,7 +11,7 @@ use syntect::{
 use two_face::theme::EmbeddedThemeName;
 
 /// Más allá de este tamaño no se colorea: el editor sigue fluido con el texto plano.
-const MAX_HIGHLIGHT_BYTES: usize = 400_000;
+const MAX_HIGHLIGHT_BYTES: usize = 150_000;
 
 struct Assets {
     syntaxes: SyntaxSet,

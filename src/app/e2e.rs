@@ -1283,7 +1283,7 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
     h.run_steps(2);
     // main.ts está preparado en project(): sale marcado como añadido.
     assert_eq!(ws(h.state()).files.changes.get("main.ts"), Some(&'A'));
-    // Cada fila tiene su nombre y su botón de papelera: el nombre va primero.
+    // Cada fila tiene su nombre (clic: abre) y su menú con el clic derecho.
     h.query_all_by_label_contains("docs")
         .next()
         .unwrap()
@@ -1294,8 +1294,12 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
     });
     h.run_steps(2);
     assert!(h.query_all_by_label_contains("notas.md").next().is_some());
-    // El borrado pregunta primero y cancelar no toca nada.
-    h.get_by_label("Mandar «main.ts» a la papelera").click();
+    // El borrado pregunta primero y cancelar no toca nada (la papelera está en el menú del
+    // clic derecho, que aquí se pide directamente).
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesTrashAsk("main.ts".into()), area);
     h.run_steps(2);
     assert_eq!(
         ws(h.state()).files.confirm_trash.as_deref(),
@@ -2304,6 +2308,30 @@ fn closing_the_last_terminal_keeps_the_project_open() {
     h.run_steps(5);
     assert_eq!(h.state().workspaces.len(), 1, "el proyecto sigue abierto");
     assert_eq!(ws(h.state()).panel_count(), 1, "con una terminal nueva");
+}
+
+#[test]
+fn cmd_j_hides_and_shows_the_terminals_under_an_open_file() {
+    let _serial = serial();
+    let mut h = app(project("hide-terminal"));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpen("main.ts".into()), area);
+    h.run_steps(3);
+    assert!(!ws(h.state()).files.terminal_hidden);
+    h.key_press_modifiers(CMD, Key::J);
+    h.run_steps(3);
+    assert!(
+        ws(h.state()).files.terminal_hidden,
+        "⌘J esconde las terminales"
+    );
+    h.get_by_label_contains("Mostrar terminal").click();
+    h.run_steps(3);
+    assert!(
+        !ws(h.state()).files.terminal_hidden,
+        "la barra las vuelve a mostrar"
+    );
 }
 
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y
