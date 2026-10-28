@@ -497,6 +497,9 @@ fn ui_preview() {
     harness.state_mut().welcome = Some(0);
     settle(&mut harness);
     save(&mut harness, &out, "13-bienvenida");
+    harness.state_mut().welcome = Some(4);
+    settle(&mut harness);
+    save(&mut harness, &out, "13b-bienvenida-entorno");
     harness.state_mut().welcome = None;
     // Codex guarda su uso en sus sesiones: una de ejemplo en el HOME de demostración.
     let day = PathBuf::from(std::env::var("HOME").unwrap()).join(".codex/sessions/2026/10/10");

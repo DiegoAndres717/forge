@@ -147,6 +147,23 @@ impl Store {
             && self.launch_pref("forge", "jev_chores", None) != "off"
     }
 
+    /// «Aceptar ediciones sin preguntar» para todos los agentes (ver
+    /// `AgentSpec::with_permission`). Apagado de serie.
+    pub fn accept_edits(&self) -> bool {
+        self.launch_pref("forge", "permissions", None) == "accept-edits"
+    }
+
+    /// Programa del agente que el usuario eligió por defecto para todos los proyectos
+    /// (vacío: el primero instalado).
+    pub fn preferred_agent(&self) -> String {
+        self.launch_pref("forge", "default_agent", None)
+    }
+
+    /// Shell elegido para las terminales (ruta; vacío: el del sistema).
+    pub fn shell(&self) -> String {
+        self.launch_pref("forge", "shell", None)
+    }
+
     /// Claude en Sonnet con Opus de asesor (plan #81). Apagado de serie.
     pub fn advisor(&self) -> bool {
         self.launch_pref("forge", "advisor", None) == "on"

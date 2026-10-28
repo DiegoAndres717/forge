@@ -217,9 +217,105 @@ impl App {
         }
     }
 
+    /// Con qué se trabaja: el agente por defecto, el shell de las terminales y si los agentes
+    /// editan sin preguntar a cada paso. Va en Ajustes → General y en el último paso de la
+    /// bienvenida; se guarda al elegir y vale para todos los proyectos.
+    pub(super) fn work_defaults_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
+        let (agent, shell, accept) = (store.preferred_agent(), store.shell(), store.accept_edits());
+        let (mut new_agent, mut new_shell, mut new_accept) = (agent.clone(), shell.clone(), accept);
+        let installed: Vec<_> = forge_core::agents::builtins()
+            .into_iter()
+            .filter(|a| detected.get(a.program()).is_some_and(|d| d.path.is_some()))
+            .collect();
+        row(
+            ui,
+            tr!("Agente por defecto"),
+            tr!(
+                "El que se abre con ⌘⇧A y lleva la estrella en la barra lateral. Un agente marcado en el propio proyecto (agents.toml) gana a este."
+            ),
+            |ui| {
+                let label = installed.iter().find(|a| a.program() == agent).map_or_else(
+                    || tr!("Automático (el primero instalado)").to_string(),
+                    |a| a.name.clone(),
+                );
+                egui::ComboBox::from_id_salt("default-agent")
+                    .selected_text(label)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut new_agent,
+                            String::new(),
+                            tr!("Automático (el primero instalado)"),
+                        );
+                        for a in &installed {
+                            ui.selectable_value(&mut new_agent, a.program().to_string(), &a.name);
+                        }
+                    });
+            },
+        );
+        let shells = forge_core::available_shells();
+        if !shells.is_empty() {
+            row(
+                ui,
+                tr!("Terminal"),
+                tr!(
+                    "El shell de las terminales nuevas de Forge. Forge detecta los instalados; «del sistema» usa el que tengas por defecto en macOS. Se aplica a las terminales que abras a partir de ahora."
+                ),
+                |ui| {
+                    let label = if shell.is_empty() {
+                        tr!("Del sistema").to_string()
+                    } else {
+                        shell.clone()
+                    };
+                    egui::ComboBox::from_id_salt("default-shell")
+                        .selected_text(label)
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut new_shell, String::new(), tr!("Del sistema"));
+                            for s in &shells {
+                                ui.selectable_value(&mut new_shell, s.clone(), s);
+                            }
+                        });
+                },
+            );
+        }
+        row(
+            ui,
+            tr!("Permisos"),
+            tr!(
+                "Los agentes editan archivos sin pedir permiso a cada paso, pero siguen preguntando por lo demás (comandos, red…): Claude con «aceptar ediciones», Codex con espacio de trabajo y aprobación a petición, Antigravity con «accept-edits». Guard sigue vigilando. Se aplica a las sesiones que abras a partir de ahora; OpenCode y los demás no tienen un modo equivalente y no cambian."
+            ),
+            |ui| {
+                ui.checkbox(&mut new_accept, tr!("Aceptar ediciones sin preguntar"));
+            },
+        );
+        if new_agent == agent && new_shell == shell && new_accept == accept {
+            return;
+        }
+        let saved = store
+            .set_launch_pref("forge", "default_agent", None, &new_agent)
+            .and_then(|()| store.set_launch_pref("forge", "shell", None, &new_shell))
+            .and_then(|()| {
+                store.set_launch_pref(
+                    "forge",
+                    "permissions",
+                    None,
+                    if new_accept { "accept-edits" } else { "ask" },
+                )
+            });
+        if let Err(e) = saved {
+            self.error = Some(e);
+        }
+        self.sync_accounts();
+    }
+
     /// Idioma, avisos y terminal. Devuelve si cambió algo de `Settings` (se guarda aparte).
     fn general_tab(&mut self, ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) -> bool {
         let mut changed = false;
+        theme::section(ui, tr!("Cómo trabajas"));
+        theme::card(ui, |ui| self.work_defaults_ui(ui));
         theme::section(ui, tr!("General"));
         theme::card(ui, |ui| {
             row(

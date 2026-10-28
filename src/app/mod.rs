@@ -550,15 +550,28 @@ impl App {
         }
     }
 
+    /// El agente que el usuario eligió por defecto para todos los proyectos (programa).
+    pub(super) fn preferred_agent(&self) -> String {
+        self.store
+            .as_ref()
+            .map(|s| s.preferred_agent())
+            .unwrap_or_default()
+    }
+
     /// Reparte a cada proyecto sus cuentas, el modelo y esfuerzo de sus agentes y sus
     /// modos de trabajo.
     fn sync_accounts(&mut self) {
+        // El shell de las terminales que se abran a partir de ahora.
+        let shell = self.store.as_ref().map(|s| s.shell()).unwrap_or_default();
+        crate::terminal::set_shell(&shell);
         for i in 0..self.workspaces.len() {
             let path = self.workspaces[i].project.path.clone();
             let modes = self.modes(&path);
             self.workspaces[i].set_modes(modes);
             let advisor = self.store.as_ref().is_some_and(|s| s.advisor());
             self.workspaces[i].set_advisor(advisor);
+            let accept = self.store.as_ref().is_some_and(|s| s.accept_edits());
+            self.workspaces[i].set_accept_edits(accept);
             self.workspaces[i].set_secrets(self.secrets.clone());
             let (accounts, chosen) = self.account_state(&path);
             let launch = self.launch_state(&path);
@@ -1122,8 +1135,10 @@ impl App {
             }
             UiCmd::OpenDefaultAgent => {
                 let detected = self.agents.lock().unwrap().clone();
+                let preferred = self.preferred_agent();
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
-                    match agents::default_agent(&ws.project.agents, &detected).map(|a| a.id.clone())
+                    match agents::default_agent_with(&ws.project.agents, &detected, &preferred)
+                        .map(|a| a.id.clone())
                     {
                         Some(id) => ws.agent_click(ctx, &id, false, area),
                         None => {

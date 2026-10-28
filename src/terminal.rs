@@ -235,6 +235,16 @@ fn pwsh_args(script: &str) -> Vec<String> {
 
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
 
+/// Shell elegido en Ajustes para las terminales nuevas (vacío: el del sistema).
+static SHELL_OVERRIDE: Mutex<String> = Mutex::new(String::new());
+
+/// Cambia el shell de las terminales que se abran a partir de ahora.
+pub fn set_shell(path: &str) {
+    if let Ok(mut s) = SHELL_OVERRIDE.lock() {
+        *s = path.to_string();
+    }
+}
+
 impl Terminal {
     /// Abre el shell de login en `cwd`; si hay `command`, lo escribe en el shell al arrancar
     /// (así queda en el historial y, al terminar o con Ctrl+C, se vuelve al prompt).
@@ -254,9 +264,21 @@ impl Terminal {
                 forge_core::danger::PWSH_GUARD,
                 forge_core::danger::PWSH_REMOVE
             )));
-        } else if let Some(rc) = bash_rcfile(&cmd.get_shell()) {
-            cmd = CommandBuilder::new(cmd.get_shell());
-            cmd.args(["--rcfile", &rc, "-i"]);
+        } else {
+            // El shell elegido en Ajustes, si existe; si no, el del sistema.
+            let chosen = SHELL_OVERRIDE.lock().map(|s| s.clone()).unwrap_or_default();
+            let chosen = (!chosen.is_empty() && Path::new(&chosen).exists()).then_some(chosen);
+            if let Some(shell) = &chosen {
+                cmd = CommandBuilder::new(shell);
+                cmd.env("SHELL", shell);
+                cmd.arg("-l");
+            }
+            let shell = chosen.unwrap_or_else(|| cmd.get_shell());
+            if let Some(rc) = bash_rcfile(&shell) {
+                cmd = CommandBuilder::new(&shell);
+                cmd.env("SHELL", &shell);
+                cmd.args(["--rcfile", &rc, "-i"]);
+            }
         }
         Self::start(ctx, cwd, env, cmd, command)
     }

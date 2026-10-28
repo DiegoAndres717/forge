@@ -341,6 +341,47 @@ impl AgentSpec {
         }
     }
 
+    /// «Aceptar ediciones sin preguntar»: el modo de cada agente en que edita archivos sin
+    /// pedir permiso a cada paso, pero sigue preguntando por lo demás (Claude `acceptEdits`,
+    /// Codex en el espacio de trabajo con aprobación a petición, Antigravity `accept-edits`).
+    /// Lo que el comando ya traiga (otro modo, saltar permisos) se respeta, y un agente sin
+    /// modo equivalente queda igual. Los flags van tras el programa, como los de `with_launch`.
+    pub fn with_permission(&self, command: &str, accept_edits: bool) -> String {
+        if !accept_edits {
+            return command.to_string();
+        }
+        let has = |flags: &[&str]| {
+            command.split_whitespace().any(|w| {
+                flags
+                    .iter()
+                    .any(|f| w == *f || w.starts_with(&format!("{f}=")))
+            })
+        };
+        let flags = match self.program() {
+            "claude" if !has(&["--permission-mode", "--dangerously-skip-permissions"]) => {
+                "--permission-mode acceptEdits"
+            }
+            "codex"
+                if !has(&[
+                    "--sandbox",
+                    "-s",
+                    "--ask-for-approval",
+                    "-a",
+                    "--full-auto",
+                    "--dangerously-bypass-approvals-and-sandbox",
+                ]) =>
+            {
+                "--sandbox workspace-write --ask-for-approval on-request"
+            }
+            "agy" if !has(&["--mode", "--dangerously-skip-permissions"]) => "--mode accept-edits",
+            _ => return command.to_string(),
+        };
+        match command.split_once(' ') {
+            Some((program, rest)) => format!("{program} {flags} {rest}"),
+            None => format!("{command} {flags}"),
+        }
+    }
+
     /// El agente avisa él mismo cuando termina o espera (ver `with_events`).
     /// Comando que abre el agente con `prompt` como primer mensaje: argumento suelto
     /// (Claude Code, Codex, agentes propios), `--prompt` en OpenCode (que toma el argumento
@@ -1014,11 +1055,33 @@ pub fn default_agent<'a>(
     agents: &'a [AgentSpec],
     detected: &HashMap<String, Detection>,
 ) -> Option<&'a AgentSpec> {
+    default_agent_with(agents, detected, "")
+}
+
+/// Como `default_agent`, con el agente que el usuario eligió para todos los proyectos
+/// (`preferred`, el programa, p. ej. «codex»): va después del marcado en agents.toml y antes
+/// del primero instalado.
+pub fn default_agent_with<'a>(
+    agents: &'a [AgentSpec],
+    detected: &HashMap<String, Detection>,
+    preferred: &str,
+) -> Option<&'a AgentSpec> {
     let installed = |a: &&AgentSpec| detected.get(a.program()).is_some_and(|d| d.path.is_some());
     agents
         .iter()
         .filter(|a| a.enabled)
         .find(|a| a.default)
+        .or_else(|| {
+            (!preferred.is_empty())
+                .then(|| {
+                    agents
+                        .iter()
+                        .filter(|a| a.enabled)
+                        .filter(installed)
+                        .find(|a| a.program() == preferred)
+                })
+                .flatten()
+        })
         .or_else(|| agents.iter().filter(|a| a.enabled).find(installed))
 }
 
@@ -1241,6 +1304,82 @@ mod tests {
         assert_eq!(
             get("agy").with_launch("agy --effort low", "", "high"),
             "agy --effort low"
+        );
+    }
+
+    #[test]
+    fn accepting_edits_uses_each_agents_own_flags_and_respects_the_command() {
+        let get = |id: &str| builtins().into_iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            get("claude").with_permission("claude --continue", true),
+            "claude --permission-mode acceptEdits --continue"
+        );
+        assert_eq!(
+            get("codex").with_permission("codex resume --last", true),
+            "codex --sandbox workspace-write --ask-for-approval on-request resume --last"
+        );
+        assert_eq!(
+            get("agy").with_permission("agy", true),
+            "agy --mode accept-edits"
+        );
+        // Apagado, o con una elección propia en el comando: no se toca.
+        assert_eq!(get("claude").with_permission("claude", false), "claude");
+        assert_eq!(
+            get("claude").with_permission("claude --dangerously-skip-permissions", true),
+            "claude --dangerously-skip-permissions"
+        );
+        assert_eq!(
+            get("codex").with_permission("codex -s read-only", true),
+            "codex -s read-only"
+        );
+        // Un agente sin modo equivalente queda como está.
+        assert_eq!(
+            get("opencode").with_permission("opencode", true),
+            "opencode"
+        );
+    }
+
+    #[test]
+    fn the_preferred_default_agent_only_counts_when_none_is_marked() {
+        let agents = builtins();
+        let found = |ids: &[&str]| -> HashMap<String, Detection> {
+            ids.iter()
+                .map(|id| {
+                    (
+                        id.to_string(),
+                        Detection {
+                            path: Some(PathBuf::from("/bin/true")),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect()
+        };
+        let detected = found(&["claude", "codex"]);
+        let id = |a: Option<&AgentSpec>| a.map(|a| a.id.clone());
+        assert_eq!(
+            id(default_agent_with(&agents, &detected, "codex")),
+            Some("codex".into())
+        );
+        // No instalado o desconocido: se cae al primero instalado.
+        assert_eq!(
+            id(default_agent_with(&agents, &found(&["claude"]), "codex")),
+            Some("claude".into())
+        );
+        assert_eq!(
+            id(default_agent_with(&agents, &detected, "")),
+            id(default_agent(&agents, &detected))
+        );
+        // El marcado en agents.toml gana a la preferencia general.
+        let mut marked = builtins();
+        marked
+            .iter_mut()
+            .find(|a| a.id == "claude")
+            .unwrap()
+            .default = true;
+        assert_eq!(
+            id(default_agent_with(&marked, &detected, "codex")),
+            Some("claude".into())
         );
     }
 

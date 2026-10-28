@@ -39,6 +39,7 @@ impl App {
         }
         let detected = self.agents.lock().unwrap().clone();
         let detecting = self.detecting.load(Ordering::Relaxed);
+        let preferred = self.preferred_agent();
         let body = Rect::from_min_max(
             rect.min + Vec2::new(10.0, 8.0),
             rect.max - Vec2::new(10.0, 8.0),
@@ -252,7 +253,7 @@ impl App {
                 let Some(i) = self.active else { return };
                 let ws = &mut self.workspaces[i];
                 ui.add_space(12.0);
-                Self::agents_ui(ws, &detected, detecting, ui, cmds);
+                Self::agents_ui(ws, &detected, detecting, &preferred, ui, cmds);
 
                 if !ws.project.config.commands.is_empty() {
                     ui.add_space(12.0);
@@ -279,6 +280,7 @@ impl App {
         ws: &mut Workspace,
         detected: &HashMap<String, agents::Detection>,
         detecting: bool,
+        preferred: &str,
         ui: &mut egui::Ui,
         cmds: &mut Vec<UiCmd>,
     ) {
@@ -300,7 +302,8 @@ impl App {
                 }
             });
         });
-        let default = agents::default_agent(&ws.project.agents, detected).map(|a| a.id.clone());
+        let default = agents::default_agent_with(&ws.project.agents, detected, preferred)
+            .map(|a| a.id.clone());
         let mut missing = Vec::new();
         let sessions = ws.last_sessions().clone();
         for agent in ws.project.agents.iter().filter(|a| a.enabled) {

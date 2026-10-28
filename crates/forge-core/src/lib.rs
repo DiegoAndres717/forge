@@ -28,6 +28,23 @@ pub mod store;
 pub mod subagents;
 pub mod updates;
 
+/// Los shells instalados que `/etc/shells` lista y existen (para elegir en cuál trabajar).
+/// Windows usa siempre PowerShell: allí no hay nada que elegir.
+pub fn available_shells() -> Vec<String> {
+    let text = std::fs::read_to_string("/etc/shells").unwrap_or_default();
+    parse_shells(&text, |p| std::path::Path::new(p).exists())
+}
+
+fn parse_shells(text: &str, exists: impl Fn(&str) -> bool) -> Vec<String> {
+    let mut shells: Vec<String> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('/') && exists(line) && !shells.iter().any(|s| s == line) {
+            shells.push(line.to_string());
+        }
+    }
+    shells
+}
+
 /// Un comando del usuario en su shell: `$SHELL -l -c` en macOS y Linux (carga su PATH), y
 /// PowerShell en Windows.
 pub fn shell_command(command: &str) -> std::process::Command {
@@ -298,6 +315,13 @@ mod platform_tests {
             super::pick_home(some("/home/ana"), some(""), true),
             Some(PathBuf::from("/home/ana"))
         );
+    }
+
+    #[test]
+    fn the_shell_list_keeps_existing_absolute_paths_once() {
+        let text = "# lista\n/bin/zsh\n/bin/bash\n/bin/zsh\n/no/existe\nzsh\n  /bin/sh  \n";
+        let found = super::parse_shells(text, |p| p != "/no/existe");
+        assert_eq!(found, ["/bin/zsh", "/bin/bash", "/bin/sh"]);
     }
 
     #[test]
