@@ -68,6 +68,24 @@ pub fn project_files(root: &Path) -> Vec<String> {
     out
 }
 
+/// El mensaje para el agente con los comentarios hechos sobre el diff de un archivo.
+/// Una sola línea: así se escribe en la terminal del agente y se envía con Enter.
+/// Cada comentario lleva la línea del diff a la que se refiere.
+pub fn review_prompt(path: &str, comments: &[(String, String)]) -> String {
+    let items: Vec<String> = comments
+        .iter()
+        .enumerate()
+        .map(|(i, (line, text))| {
+            let line = line.trim().replace('`', "'");
+            format!("{}) on `{}`: {}", i + 1, line, text.trim())
+        })
+        .collect();
+    format!(
+        "Review comments on {path}, please address each one: {}",
+        items.join(" ")
+    )
+}
+
 /// `root/rel` solo si queda dentro de `root`: sin `..`, sin ruta absoluta.
 pub fn safe_path(root: &Path, rel: &Path) -> Result<PathBuf, String> {
     if rel
@@ -222,6 +240,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn the_review_prompt_names_the_file_and_each_commented_line() {
+        let comments = vec![
+            ("+let x = 1;".to_string(), "rename x".to_string()),
+            ("-old `code`".to_string(), " why removed? ".to_string()),
+        ];
+        assert_eq!(
+            review_prompt("src/a.rs", &comments),
+            "Review comments on src/a.rs, please address each one: \
+             1) on `+let x = 1;`: rename x 2) on `-old 'code'`: why removed?"
+        );
     }
 
     #[test]

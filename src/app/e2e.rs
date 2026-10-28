@@ -2264,6 +2264,39 @@ fn a_thread_marked_unread_stays_so_until_you_go_back_to_it() {
     assert!(ws(h.state()).has_unread());
 }
 
+#[test]
+fn diff_comments_go_to_the_focused_agent_and_are_cleared() {
+    let _serial = serial();
+    let dir = project("diff-comments");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AgentClick("fake".into(), false), area);
+    let agent = ws(h.state()).agent_panels("fake")[0];
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpen("main.ts".into()), area);
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesMode(files_panel::ViewMode::Diff), area);
+    let viewer = h.state_mut().workspaces[0].files.viewer.as_mut().unwrap();
+    viewer
+        .comments
+        .push(("+let x = 1;".into(), "rename x".into()));
+    h.state_mut().apply(&ctx, UiCmd::FilesSendComments, area);
+    let ws = ws(h.state());
+    assert!(ws.files.viewer.as_ref().unwrap().comments.is_empty());
+    assert_eq!(
+        ws.focused(),
+        agent,
+        "lleva al agente que recibe los comentarios"
+    );
+}
+
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y
 /// guardarlo con Enter tiene que ser instantáneo y no crear nada en disco.
 /// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo

@@ -50,6 +50,10 @@ pub struct Viewer {
     pub message: Option<String>,
     pub mode: ViewMode,
     pub diff: String,
+    /// Comentarios sobre líneas del diff: (la línea, el comentario). Se envían al agente.
+    pub comments: Vec<(String, String)>,
+    /// Comentario que se está escribiendo: (índice de línea del diff, texto).
+    pub draft: Option<(usize, String)>,
     /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
     pub pending: Option<Option<String>>,
     /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
@@ -317,7 +321,15 @@ impl App {
                             );
                         }
                         ViewMode::Preview => markdown(ui, &v.content),
-                        ViewMode::Diff => diff_lines(ui, &v.diff),
+                        ViewMode::Diff => {
+                            let Viewer {
+                                diff,
+                                comments,
+                                draft,
+                                ..
+                            } = v;
+                            diff_lines(ui, diff, comments, draft, cmds);
+                        }
                     }
                 }
             });
@@ -515,6 +527,8 @@ impl App {
             message: None,
             mode: ViewMode::Edit,
             diff: String::new(),
+            comments: Vec::new(),
+            draft: None,
             pending: None,
             modified: std::fs::metadata(root.join(rel))
                 .and_then(|m| m.modified())
@@ -607,20 +621,90 @@ fn heading(line: &str) -> Option<(usize, &str)> {
         .map(|t| (hashes, t))
 }
 
-/// Un diff con las líneas añadidas en verde y las quitadas en rojo.
-fn diff_lines(ui: &mut egui::Ui, diff: &str) {
+/// Un diff con las líneas añadidas en verde y las quitadas en rojo. Un clic en una línea
+/// añadida o quitada abre su comentario; arriba se envían todos al agente.
+fn diff_lines(
+    ui: &mut egui::Ui,
+    diff: &str,
+    comments: &mut Vec<(String, String)>,
+    draft: &mut Option<(usize, String)>,
+    cmds: &mut Vec<UiCmd>,
+) {
     if diff.trim().is_empty() {
         ui.label(RichText::new(tr!("Sin cambios desde el último commit.")).color(theme::TEXT_3));
         return;
     }
+    if !comments.is_empty() {
+        let text = tr!("Enviar {n} comentarios al agente", n = comments.len());
+        if theme::primary(ui, &text).clicked() {
+            cmds.push(UiCmd::FilesSendComments);
+        }
+        ui.add_space(4.0);
+    }
     ui.spacing_mut().item_spacing.y = 0.0;
-    for line in diff.lines() {
+    for (n, line) in diff.lines().enumerate() {
+        let changed = (line.starts_with('+') && !line.starts_with("+++"))
+            || (line.starts_with('-') && !line.starts_with("---"));
         let color = match line.chars().next() {
-            Some('+') if !line.starts_with("+++") => theme::GREEN,
-            Some('-') if !line.starts_with("---") => theme::RED,
+            Some('+') if changed => theme::GREEN,
+            Some('-') if changed => theme::RED,
             Some('@') => theme::PURPLE,
             _ => theme::TEXT_3,
         };
-        ui.label(RichText::new(line).monospace().size(12.0).color(color));
+        let label = ui.add(
+            egui::Label::new(RichText::new(line).monospace().size(12.0).color(color)).sense(
+                if changed {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                },
+            ),
+        );
+        if changed
+            && label
+                .on_hover_text(tr!("Clic para comentar esta línea"))
+                .clicked()
+        {
+            *draft = Some((n, String::new()));
+        }
+        for (text_line, text) in comments.iter().filter(|(l, _)| l == line) {
+            let _ = text_line;
+            ui.label(
+                RichText::new(format!("   {} {text}", icon::CHAT_TEXT))
+                    .size(12.0)
+                    .color(theme::ACCENT),
+            );
+        }
+        if draft.as_ref().is_some_and(|(i, _)| *i == n) {
+            let mut done = None;
+            if let Some((_, text)) = draft.as_mut() {
+                ui.horizontal(|ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .hint_text(tr!("Tu comentario…"))
+                            .desired_width(280.0),
+                    );
+                    edit.request_focus();
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+                    if (theme::secondary(ui, tr!("Añadir")).clicked() || enter)
+                        && !text.trim().is_empty()
+                    {
+                        done = Some(true);
+                    }
+                    if theme::secondary(ui, tr!("Cancelar")).clicked() {
+                        done = Some(false);
+                    }
+                });
+            }
+            match done {
+                Some(true) => {
+                    if let Some((_, text)) = draft.take() {
+                        comments.push((line.to_string(), text));
+                    }
+                }
+                Some(false) => *draft = None,
+                None => {}
+            }
+        }
     }
 }
