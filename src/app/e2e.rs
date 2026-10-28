@@ -2297,6 +2297,17 @@ fn diff_comments_go_to_the_focused_agent_and_are_cleared() {
     );
 }
 
+#[test]
+fn closing_the_last_terminal_keeps_the_project_open() {
+    let _serial = serial();
+    let mut h = app(project("close-last"));
+    assert_eq!(ws(h.state()).panel_count(), 1);
+    h.key_press_modifiers(CMD, Key::W);
+    h.run_steps(5);
+    assert_eq!(h.state().workspaces.len(), 1, "el proyecto sigue abierto");
+    assert_eq!(ws(h.state()).panel_count(), 1, "con una terminal nueva");
+}
+
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y
 /// guardarlo con Enter tiene que ser instantáneo y no crear nada en disco.
 /// Un modelo por API se añade desde Ajustes: se elige el proveedor, se pega la clave (campo
