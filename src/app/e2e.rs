@@ -1325,7 +1325,7 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
     let v = ws(h.state()).files.viewer.as_ref().expect("visor abierto");
     assert_eq!(v.path, "main.ts");
     assert_eq!(v.content, "export const x = 1;\n");
-    // Editar a mano y guardar con el botón.
+    // Editar a mano y guardar con ⌘S (sin botón: el punto del título avisa de lo pendiente).
     h.state_mut().workspaces[0]
         .files
         .viewer
@@ -1333,7 +1333,11 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
         .unwrap()
         .content = "export const x = 2;\n".into();
     h.run_steps(2);
-    h.get_by_label_contains("Guardar").click();
+    assert!(
+        h.query_by_label_contains("Guardar").is_none(),
+        "ya no hay botón de guardar"
+    );
+    h.key_press_modifiers(CMD, Key::S);
     h.run_steps(2);
     assert_eq!(
         std::fs::read_to_string(dir.join("main.ts")).unwrap(),

@@ -492,6 +492,21 @@ fn ui_preview() {
         settle(&mut harness);
         save(&mut harness, &out, name);
     }
+    // Código con color de sintaxis y números de línea.
+    std::fs::create_dir_all(project.join("src")).unwrap();
+    std::fs::write(
+        project.join("src/main.rs"),
+        "use std::collections::HashMap;\n\n/// Cuenta palabras.\nfn count(text: &str) -> HashMap<String, usize> {\n    let mut map = HashMap::new();\n    for word in text.split_whitespace() {\n        *map.entry(word.to_string()).or_insert(0) += 1; // una más\n    }\n    map\n}\n\nfn main() {\n    println!(\"{:?}\", count(\"a b a\"));\n}\n",
+    )
+    .unwrap();
+    {
+        let ctx = harness.ctx.clone();
+        harness
+            .state_mut()
+            .apply_files(&ctx, UiCmd::FilesOpen("src/main.rs".into()));
+        settle(&mut harness);
+        save(&mut harness, &out, "12g-editor-codigo");
+    }
     harness.state_mut().workspaces[0].files.viewer = None;
     harness.state_mut().workspaces[0].files.open = false;
     harness.state_mut().welcome = Some(0);
