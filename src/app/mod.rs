@@ -1788,8 +1788,10 @@ impl eframe::App for App {
                 if let Some((from, to)) = ws.agent_handoff_request.take() {
                     cmds.push(UiCmd::AgentHandoff(from, to));
                 }
+                // Sin terminales (cerraste la última) se abre una nueva: el proyecto se cierra
+                // desde la barra lateral, no por accidente desde la esquina de un panel.
                 if ws.is_empty() && !ws.is_dormant() {
-                    cmds.push(UiCmd::Close(i));
+                    ws.ensure_panel(ui.ctx());
                 }
             }
             None => self.home(ui, area, &mut cmds),

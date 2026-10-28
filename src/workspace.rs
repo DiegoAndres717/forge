@@ -1441,7 +1441,7 @@ impl Workspace {
     }
 
     /// Si no quedó ningún panel, abre uno en la raíz del proyecto.
-    fn ensure_panel(&mut self, ctx: &egui::Context) {
+    pub fn ensure_panel(&mut self, ctx: &egui::Context) {
         if self.panels.is_empty() {
             let id = self.next_id;
             self.layout = Node::Leaf(id);
@@ -2643,7 +2643,8 @@ impl Workspace {
         } else {
             tr!("Cerrar panel (⌘W)")
         };
-        if button(icon::X, close_hint, "close") {
+        // Con una sola terminal no hay X: cerrarla se llevaba el proyecto entero.
+        if (self.panels.len() > 1 || tabs.len() > 1) && button(icon::X, close_hint, "close") {
             actions.push(HeaderAction::Close);
         }
         if button(
