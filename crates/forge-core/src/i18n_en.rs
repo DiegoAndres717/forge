@@ -1857,6 +1857,10 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Abrir {p0} · {p1}", "Open {p0} · {p1}"),
     (
+        "Abrir Claude con Chrome y continuar",
+        "Open Claude with Chrome and continue",
+    ),
+    (
         "Añadir, renombrar o iniciar sesión (Ajustes)",
         "Add, rename or sign in (Settings)",
     ),
