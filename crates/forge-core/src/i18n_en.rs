@@ -1399,7 +1399,6 @@ pub const EN: &[(&str, &str)] = &[
         "Buscar acciones, archivos, proyectos, agentes… (⌘K)",
         "Search actions, files, projects, agents… (⌘K)",
     ),
-    ("Ajustes (⌘,)", "Settings (⌘,)"),
     ("Marcar como leído", "Mark as read"),
     (
         "Enviar {n} comentarios al agente",
