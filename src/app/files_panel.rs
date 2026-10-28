@@ -3,8 +3,8 @@
 use super::*;
 use forge_core::files::Entry;
 use std::collections::HashSet;
+use std::sync::Arc;
 
-/// Lo que el hilo de refresco devuelve: el contenido de cada carpeta abierta y los cambios de Git.
 /// Lo que lee el hilo del árbol: carpetas abiertas, cambios de Git y, si se busca, todos los archivos.
 pub(crate) type FilesData = (
     HashMap<String, Vec<Entry>>,
@@ -14,6 +14,9 @@ pub(crate) type FilesData = (
 
 /// Ajuste donde se guarda «no volver a preguntar» antes de mandar a la papelera.
 pub(super) const TRASH_NO_ASK: &str = "files-trash-no-ask";
+
+/// Alto de la barra que queda cuando las terminales están escondidas.
+const HIDDEN_BAR: f32 = 30.0;
 
 /// Árbol de archivos (se abre desde la barra superior).
 #[derive(Default)]
@@ -34,6 +37,10 @@ pub struct FilesView {
     pub dirty: bool,
     /// Texto del buscador de archivos y todos los archivos del proyecto (solo se leen al buscar).
     pub search: String,
+    /// Parte de la altura que ocupa el archivo (el resto, las terminales); 0 = la de siempre.
+    pub split: f32,
+    /// Terminales escondidas bajo el archivo abierto (⌘J).
+    pub terminal_hidden: bool,
     pub all: Vec<String>,
     /// Archivo abierto al lado del árbol.
     pub viewer: Option<Viewer>,
@@ -64,7 +71,7 @@ pub struct Viewer {
     /// Comentario que se está escribiendo: (índice de línea del diff, texto).
     pub draft: Option<(usize, String)>,
     /// Texto coloreado la última vez (huella del texto, secciones): no se recalcula cada fotograma.
-    pub highlight: Option<(u64, egui::text::LayoutJob)>,
+    pub highlight: Option<(u64, Arc<egui::Galley>)>,
     /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
     pub pending: Option<Option<String>>,
     /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
@@ -268,6 +275,89 @@ impl App {
             });
     }
 
+    /// Reparte el espacio con un archivo abierto: el archivo arriba y las terminales abajo, o
+    /// solo el archivo con una barra para volver a las terminales (⌘J). Devuelve el rectángulo
+    /// del archivo y el de las terminales (`None`: escondidas).
+    pub(super) fn editor_split(
+        ws: &mut Workspace,
+        ui: &mut egui::Ui,
+        rest: Rect,
+        cmds: &mut Vec<UiCmd>,
+    ) -> (Rect, Option<Rect>) {
+        if ws.files.terminal_hidden {
+            let (viewer, bar) = rest.split_top_bottom_at_y(rest.max.y - HIDDEN_BAR);
+            ui.painter().rect_filled(bar, 0.0, theme::SIDEBAR);
+            ui.painter().hline(
+                bar.x_range(),
+                bar.min.y,
+                egui::Stroke::new(1.0, theme::SEPARATOR),
+            );
+            let response = ui
+                .interact(bar, egui::Id::new("show-terminal"), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand);
+            ui.painter().text(
+                egui::pos2(bar.min.x + 16.0, bar.center().y),
+                egui::Align2::LEFT_CENTER,
+                format!(
+                    "{}  {}  {}",
+                    icon::TERMINAL_WINDOW,
+                    tr!("Mostrar terminal"),
+                    forge_core::i18n::keys("⌘J")
+                ),
+                FontId::proportional(12.5),
+                if response.hovered() {
+                    theme::TEXT
+                } else {
+                    theme::TEXT_3
+                },
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("Mostrar terminal"))
+            });
+            if response.clicked() {
+                cmds.push(UiCmd::ToggleTerminal);
+            }
+            return (viewer, None);
+        }
+        let y = Self::editor_y(rest, ws.files.split);
+        let (viewer, terminals) = rest.split_top_bottom_at_y(y);
+        (viewer, Some(terminals))
+    }
+
+    /// Dónde acaba el archivo y empiezan las terminales: a cada uno le quedan al menos 120 px.
+    fn editor_y(rest: Rect, split: f32) -> f32 {
+        let ratio = if split > 0.0 { split } else { 0.62 };
+        let low = rest.min.y + 120.0;
+        let high = (rest.max.y - 120.0).max(low);
+        (rest.min.y + rest.height() * ratio).clamp(low, high)
+    }
+
+    /// El divisor arrastrable entre el archivo y las terminales.
+    pub(super) fn editor_divider(ws: &mut Workspace, ui: &mut egui::Ui, rest: Rect) {
+        let y = Self::editor_y(rest, ws.files.split);
+        let grab = Rect::from_min_max(
+            egui::pos2(rest.min.x, y - 3.0),
+            egui::pos2(rest.max.x, y + 3.0),
+        );
+        let response = ui.interact(grab, egui::Id::new("editor-divider"), Sense::drag());
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        if let Some(pos) = response
+            .interact_pointer_pos()
+            .filter(|_| response.dragged())
+        {
+            ws.files.split = ((pos.y - rest.min.y) / rest.height()).clamp(0.15, 0.9);
+        }
+        let color = if response.hovered() || response.dragged() {
+            theme::ACCENT
+        } else {
+            theme::SEPARATOR
+        };
+        ui.painter()
+            .hline(rest.x_range(), y, egui::Stroke::new(1.0, color));
+    }
+
     /// El archivo abierto: editor, vista previa o cambios, a la izquierda del árbol.
     pub(super) fn files_viewer_ui(
         ws: &mut Workspace,
@@ -300,6 +390,11 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::icon_button(ui, icon::X, tr!("Cerrar archivo")).clicked() {
                     cmds.push(UiCmd::FilesCloseViewer);
+                }
+                if theme::icon_button(ui, icon::TERMINAL_WINDOW, tr!("Ocultar terminal (⌘J)"))
+                    .clicked()
+                {
+                    cmds.push(UiCmd::ToggleTerminal);
                 }
                 if v.is_text() {
                     let mut mode = |ui: &mut egui::Ui, m: ViewMode, text: &str| {
@@ -428,6 +523,8 @@ impl App {
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        // Las filas se pintan a mano: sin esto no tendrían nombre para los lectores de pantalla.
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
         let painter = ui.painter();
         if response.hovered() {
             painter.rect_filled(rect, 5.0, theme::SELECTED);
@@ -572,6 +669,7 @@ impl App {
                 }
                 Self::open_file(ctx, ws, Some(path), false)
             }
+            UiCmd::ToggleTerminal => ws.files.terminal_hidden = !ws.files.terminal_hidden,
             UiCmd::FilesReveal(path) => {
                 if let Err(e) = forge_core::files::reveal(&ws.project.path, Path::new(&path)) {
                     ws.files.error = Some(e);
@@ -861,7 +959,7 @@ fn code_editor(
     ui: &mut egui::Ui,
     content: &mut String,
     path: &str,
-    cache: &mut Option<(u64, egui::text::LayoutJob)>,
+    cache: &mut Option<(u64, Arc<egui::Galley>)>,
 ) {
     use std::hash::{Hash, Hasher};
     let file_name = path.rsplit('/').next().unwrap_or(path).to_string();
@@ -876,19 +974,23 @@ fn code_editor(
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         text.hash(&mut hasher);
         let key = hasher.finish();
-        if cache.as_ref().is_none_or(|(k, _)| *k != key) {
-            *cache = Some((
-                key,
-                crate::highlight::layout(text, &file_name, font.clone(), theme::TEXT_2),
-            ));
+        // Mientras el texto no cambie se reutiliza el mismo galley: nada se recalcula.
+        if let Some((k, galley)) = cache.as_ref()
+            && *k == key
+        {
+            return Arc::clone(galley);
         }
-        let mut job = cache.as_ref().map(|(_, j)| j.clone()).unwrap_or_default();
+        let mut job = crate::highlight::layout(text, &file_name, font.clone(), theme::TEXT_2);
         job.wrap.max_width = f32::INFINITY; // el código no se parte: se desplaza de lado
-        ui.ctx().fonts_mut(|f| f.layout_job(job))
+        let galley = ui.ctx().fonts_mut(|f| f.layout_job(job));
+        *cache = Some((key, Arc::clone(&galley)));
+        galley
     };
     ui.horizontal_top(|ui| {
         let left = ui.cursor().min.x;
         ui.add_space(gutter);
+        // Hueco para la línea del cursor: se rellena después, pero queda detrás del texto.
+        let line_slot = ui.painter().add(egui::Shape::Noop);
         let out = egui::TextEdit::multiline(content)
             .font(FontId::monospace(13.0))
             .frame(egui::Frame::NONE)
@@ -905,20 +1007,28 @@ fn code_editor(
                 egui::pos2(left + gutter - 6.0, origin.y + at.min.y),
                 egui::pos2(out.response.rect.max.x, origin.y + at.max.y),
             );
-            painter.rect_filled(line, 0.0, theme::SELECTED);
+            painter.set(
+                line_slot,
+                egui::Shape::rect_filled(line, 0.0, theme::SELECTED),
+            );
         }
+        let visible = ui.clip_rect().y_range();
         // Un número por línea de verdad (no por fila: el código no se parte).
         let mut n = 1;
         let mut new_line = true;
         for placed in &out.galley.rows {
-            if new_line {
+            // Solo se pintan los números de las líneas a la vista.
+            let y = origin.y + placed.pos.y;
+            if new_line && y + 20.0 >= visible.min && y <= visible.max {
                 painter.text(
-                    egui::pos2(left + gutter - 12.0, origin.y + placed.pos.y),
+                    egui::pos2(left + gutter - 12.0, y),
                     egui::Align2::RIGHT_TOP,
                     n,
                     FontId::monospace(12.0),
                     theme::TEXT_4,
                 );
+            }
+            if new_line {
                 n += 1;
             }
             new_line = placed.ends_with_newline;
@@ -984,6 +1094,19 @@ mod tests {
         assert_eq!(found.first().map(|s| s.as_str()), Some("src/main.rs"));
         assert!(!found.iter().any(|p| p.as_str() == "README.md"));
         assert!(search_files(&all, "zzzz").is_empty());
+    }
+
+    #[test]
+    fn the_editor_split_leaves_room_for_both_parts() {
+        let rest = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0));
+        // Sin valor guardado, el archivo ocupa algo más de la mitad.
+        assert_eq!(App::editor_y(rest, 0.0), 372.0);
+        // Arrastrar hasta los extremos nunca deja menos de 120 px a nadie.
+        assert_eq!(App::editor_y(rest, 0.01), 120.0);
+        assert_eq!(App::editor_y(rest, 0.99), 480.0);
+        // Un hueco diminuto no rompe nada.
+        let tiny = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 100.0));
+        assert!(App::editor_y(tiny, 0.5).is_finite());
     }
 
     #[test]

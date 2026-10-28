@@ -90,6 +90,8 @@ pub enum Action {
     ToggleMemory,
     ToggleIdeas,
     ToggleGit,
+    /// ⌘J: oculta o muestra las terminales mientras hay un archivo abierto (como VS Code).
+    ToggleTerminal,
     Palette,
     Settings,
     /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
@@ -170,6 +172,7 @@ fn shortcut_for(key: Key, m: Modifiers, mac: bool) -> Option<Action> {
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
         (Key::I, true, false) => Action::ToggleIdeas,
+        (Key::J, false, false) => Action::ToggleTerminal,
         (Key::K | Key::P, false, false) => Action::Palette,
         (Key::Comma, false, false) => Action::Settings,
         _ => return None,
@@ -232,6 +235,8 @@ enum UiCmd {
     FilesKeepEditing,
     FilesMode(files_panel::ViewMode),
     FilesSave,
+    /// Oculta o muestra las terminales bajo el archivo abierto.
+    ToggleTerminal,
     /// Muestra un archivo del árbol en el Finder.
     FilesReveal(String),
     /// Manda al agente los comentarios hechos sobre el diff del archivo abierto.
@@ -800,6 +805,7 @@ impl App {
             Action::ToggleMemory => cmds.push(UiCmd::ToggleMemory),
             Action::ToggleIdeas => cmds.push(UiCmd::ToggleIdeas),
             Action::ToggleGit => cmds.push(UiCmd::ToggleGit),
+            Action::ToggleTerminal => cmds.push(UiCmd::ToggleTerminal),
             Action::Settings => self.settings_open = !self.settings_open,
             Action::NextRecent => {
                 if self.mru.len() < 2 {
@@ -1027,6 +1033,7 @@ impl App {
                             forge_core::files::review_prompt(&v.path, &list)
                         });
                     if let (Some(id), Some(prompt)) = (id, prompt) {
+                        ws.files.terminal_hidden = false; // que se vea a quién se le escribe
                         ws.ask_agent(ctx, &id, &prompt, area);
                         if let Some(v) = ws.files.viewer.as_mut() {
                             v.comments.clear();
@@ -1055,6 +1062,7 @@ impl App {
             | UiCmd::FilesDiscard
             | UiCmd::FilesKeepEditing
             | UiCmd::FilesMode(_)
+            | UiCmd::ToggleTerminal
             | UiCmd::FilesReveal(_)
             | UiCmd::FilesSave => self.apply_files(ctx, cmd),
             UiCmd::ToggleGit => {
@@ -1696,6 +1704,9 @@ impl eframe::App for App {
         self.status_bar(ui, status);
         self.ram_tick(&ctx);
         // Panel Guard o Memoria a la derecha del workspace activo (uno a la vez).
+        let mut terminals_hidden = false;
+        // Con un archivo abierto: el espacio entero (para el divisor, que se pinta al final).
+        let mut editor_rest: Option<Rect> = None;
         if let Some(i) = self.active {
             let planner = self.planner(i).map(|(_, name)| name);
             let ws = &mut self.workspaces[i];
@@ -1710,15 +1721,16 @@ impl eframe::App for App {
                     Self::ideas_ui(ws, Some(i), planner, ui, drawer, &mut cmds);
                 } else if ws.files.open {
                     Self::files_ui(ws, ui, drawer, &mut cmds);
-                    // El archivo abierto va a la izquierda del árbol, sobre el espacio del workspace.
+                    // El archivo abierto ocupa el espacio del workspace y las terminales quedan
+                    // debajo (o escondidas), como en VS Code.
                     if ws.files.viewer.is_some() {
-                        // Al workspace siempre le quedan 240 px, aunque la ventana sea estrecha.
-                        let width = (rest.width() * 0.6)
-                            .max(420.0)
-                            .min((rest.width() - 240.0).max(0.0));
-                        let (left, viewer) = rest.split_left_right_at_x(rest.max.x - width);
+                        let (viewer, terminals) = Self::editor_split(ws, ui, rest, &mut cmds);
                         Self::files_viewer_ui(ws, ui, viewer, &mut cmds);
-                        rest = left;
+                        editor_rest = Some(rest);
+                        match terminals {
+                            Some(t) => rest = t,
+                            None => terminals_hidden = true,
+                        }
                     }
                 } else {
                     Self::git_ui(ws, ui, drawer, &mut cmds);
@@ -1775,13 +1787,19 @@ impl eframe::App for App {
                     .unwrap_or_default();
                 let ws = &mut self.workspaces[i];
                 ws.installed = installed;
-                ws.ui(
-                    ui,
-                    area,
-                    &m,
-                    &ws_actions,
-                    self.palette.is_none() && !self.settings_open && self.welcome.is_none(),
-                );
+                if !terminals_hidden {
+                    ws.ui(
+                        ui,
+                        area,
+                        &m,
+                        &ws_actions,
+                        self.palette.is_none() && !self.settings_open && self.welcome.is_none(),
+                    );
+                }
+                // El divisor se registra después de las terminales para quedar por encima.
+                if let Some(rest) = editor_rest.filter(|_| !terminals_hidden) {
+                    Self::editor_divider(ws, ui, rest);
+                }
                 if let Some(e) = ws.error.take() {
                     self.error = Some(e);
                 }
