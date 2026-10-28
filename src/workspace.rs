@@ -1401,18 +1401,20 @@ impl Workspace {
         self.open_agent_with(ctx, &spec, command, area);
     }
 
-    /// Claude Code conectado a la extensión de Chrome, continuando su última sesión.
-    pub fn open_claude_in_chrome(&mut self, ctx: &egui::Context, area: Rect) {
+    /// Claude Code conectado a la extensión de Chrome, continuando su última sesión si la hay.
+    pub fn open_claude_in_chrome(&mut self, ctx: &egui::Context, id: &str, area: Rect) {
         let Some(spec) = self
             .project
             .agents
             .iter()
-            .find(|a| a.program() == "claude")
+            .find(|a| a.id == id && a.program() == "claude")
             .cloned()
         else {
             return;
         };
-        self.open_agent_with(ctx, &spec, claude_chrome_command(&spec.command), area);
+        let has_session = self.last_sessions().contains_key(id);
+        let command = claude_chrome_command(&spec.command, has_session);
+        self.open_agent_with(ctx, &spec, command, area);
     }
 
     fn root_panel(&self) -> PanelState {
@@ -3194,8 +3196,14 @@ mod tests {
     }
 }
 
-fn claude_chrome_command(command: &str) -> String {
-    format!("{command} --chrome --continue")
+/// Claude con la extensión de Chrome; `continue_last` solo si ya hay una conversación en el
+/// proyecto (sin ella `--continue` falla en vez de abrir).
+fn claude_chrome_command(command: &str, continue_last: bool) -> String {
+    if continue_last {
+        format!("{command} --chrome --continue")
+    } else {
+        format!("{command} --chrome")
+    }
 }
 
 #[cfg(test)]
@@ -3203,10 +3211,15 @@ mod agent_tests {
     use super::*;
 
     #[test]
-    fn claude_chrome_continues_with_the_configured_command() {
+    fn claude_chrome_continues_the_last_conversation_only_if_there_is_one() {
         assert_eq!(
-            claude_chrome_command("claude --model sonnet"),
+            claude_chrome_command("claude --model sonnet", true),
             "claude --model sonnet --chrome --continue"
+        );
+        // Sin conversación previa `--continue` haría fallar a Claude.
+        assert_eq!(
+            claude_chrome_command("claude --model sonnet", false),
+            "claude --model sonnet --chrome"
         );
     }
 
