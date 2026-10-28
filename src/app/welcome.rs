@@ -4,7 +4,7 @@ use super::*;
 use forge_core::i18n::{Lang, lang};
 
 /// (icono, título, texto) de cada paso.
-fn steps() -> [(&'static str, &'static str, &'static str); 4] {
+fn steps() -> [(&'static str, &'static str, &'static str); 5] {
     [
         (
             icon::HAND_WAVING,
@@ -32,6 +32,13 @@ fn steps() -> [(&'static str, &'static str, &'static str); 4] {
             tr!("Guard y Git"),
             tr!(
                 "Antes de un commit o un push, Guard revisa tamaño, secretos y tus tests (⌘G). Instala sus hooks para que proteja también fuera de Forge. El panel de Git (⌘⇧G) prepara, confirma y sube tus cambios."
+            ),
+        ),
+        (
+            icon::SLIDERS_HORIZONTAL,
+            tr!("Cómo quieres trabajar"),
+            tr!(
+                "Elige tu agente, tu terminal y si los agentes pueden editar sin preguntar a cada paso. Lo cambias cuando quieras en Ajustes → General."
             ),
         ),
     ]
@@ -62,6 +69,10 @@ impl App {
                     ui.label(RichText::new(text).size(13.5).color(theme::TEXT_2));
                 });
                 ui.add_space(14.0);
+                // El último paso: los tres ajustes de trabajo, para no tener que buscarlos.
+                if last {
+                    self.work_defaults_ui(ui);
+                }
                 if step == 0 {
                     ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {

@@ -196,8 +196,9 @@ impl App {
         if let Some(ws) = self.active.map(|i| &self.workspaces[i]) {
             // Agentes instalados.
             let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
-            let default =
-                agents::default_agent(&ws.project.agents, &detected).map(|a| a.id.clone());
+            let preferred = self.preferred_agent();
+            let default = agents::default_agent_with(&ws.project.agents, &detected, &preferred)
+                .map(|a| a.id.clone());
             for agent in ws.project.agents.iter().filter(|a| a.enabled) {
                 let installed = detected
                     .get(agent.program())

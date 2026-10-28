@@ -2867,4 +2867,33 @@ pub const EN: &[(&str, &str)] = &[
     ("Volver", "Back"),
     ("Planes (⌘⇧I)", "Plans (⌘⇧I)"),
     ("Planes · {n} sin hacer (⌘⇧I)", "Plans · {n} to do (⌘⇧I)"),
+    (
+        "Aceptar ediciones sin preguntar",
+        "Accept edits without asking",
+    ),
+    ("Agente por defecto", "Default agent"),
+    (
+        "Automático (el primero instalado)",
+        "Automatic (the first one installed)",
+    ),
+    ("Cómo quieres trabajar", "How do you want to work"),
+    ("Cómo trabajas", "How you work"),
+    ("Del sistema", "System default"),
+    (
+        "El que se abre con ⌘⇧A y lleva la estrella en la barra lateral. Un agente marcado en el propio proyecto (agents.toml) gana a este.",
+        "The one that opens with ⌘⇧A and carries the star in the sidebar. An agent marked in the project itself (agents.toml) wins over this one.",
+    ),
+    (
+        "El shell de las terminales nuevas de Forge. Forge detecta los instalados; «del sistema» usa el que tengas por defecto en macOS. Se aplica a las terminales que abras a partir de ahora.",
+        "The shell of Forge's new terminals. Forge detects the installed ones; “System default” uses the one macOS has set for you. It applies to the terminals you open from now on.",
+    ),
+    (
+        "Elige tu agente, tu terminal y si los agentes pueden editar sin preguntar a cada paso. Lo cambias cuando quieras en Ajustes → General.",
+        "Pick your agent, your terminal and whether agents may edit without asking at every step. You can change it any time in Settings → General.",
+    ),
+    (
+        "Los agentes editan archivos sin pedir permiso a cada paso, pero siguen preguntando por lo demás (comandos, red…): Claude con «aceptar ediciones», Codex con espacio de trabajo y aprobación a petición, Antigravity con «accept-edits». Guard sigue vigilando. Se aplica a las sesiones que abras a partir de ahora; OpenCode y los demás no tienen un modo equivalente y no cambian.",
+        "Agents edit files without asking for permission at every step, but still ask about everything else (commands, network…): Claude with “accept edits”, Codex with workspace-write and on-request approval, Antigravity with “accept-edits”. Guard keeps watching. It applies to the sessions you open from now on; OpenCode and the others have no equivalent mode and stay as they are.",
+    ),
+    ("Permisos", "Permissions"),
 ];

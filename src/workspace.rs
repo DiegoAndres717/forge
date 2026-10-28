@@ -426,6 +426,8 @@ pub struct Workspace {
     modes: forge_core::mcp::Modes,
     /// Claude en Sonnet con Opus de asesor para los Claude que se abran (plan #81).
     advisor: bool,
+    /// «Aceptar ediciones sin preguntar» (ver `AgentSpec::with_permission`).
+    accept_edits: bool,
     /// Dónde están las claves de las cuentas con API (el llavero del sistema).
     secrets: std::sync::Arc<dyn forge_core::secrets::SecretStore>,
 }
@@ -539,6 +541,7 @@ impl Workspace {
             sticky: None,
             modes: Default::default(),
             advisor: false,
+            accept_edits: false,
             secrets: std::sync::Arc::new(forge_core::secrets::Keychain),
         }
     }
@@ -985,6 +988,11 @@ impl Workspace {
         self.advisor = on;
     }
 
+    /// «Aceptar ediciones sin preguntar» en los agentes que se abran después.
+    pub fn set_accept_edits(&mut self, on: bool) {
+        self.accept_edits = on;
+    }
+
     fn insert(&mut self, id: PanelId, panel: Panel) {
         self.panels.insert(id, panel);
         self.next_id = self.next_id.max(id + 1);
@@ -1100,6 +1108,7 @@ impl Workspace {
             (Some(spec), Some(command), Some(forge)) => {
                 let (model, effort) = self.launch.get(spec.program()).cloned().unwrap_or_default();
                 let command = spec.with_launch(&command, &model, &effort);
+                let command = spec.with_permission(&command, self.accept_edits);
                 Some(spec.with_events(&command, &forge.to_string_lossy(), has_mod))
             }
             (_, typed, _) => typed,

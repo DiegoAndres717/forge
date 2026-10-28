@@ -1396,6 +1396,37 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
 }
 
 #[test]
+fn accepting_edits_is_chosen_in_settings_and_remembered() {
+    let _serial = serial();
+    let mut h = app(project("workdefaults"));
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    let accept = |h: &Harness<'_, App>| h.state().store.as_ref().unwrap().accept_edits();
+    assert!(!accept(&h), "apagado de serie");
+    h.get_by_label("Aceptar ediciones sin preguntar").click();
+    h.run_steps(3);
+    assert!(accept(&h));
+    h.get_by_label("Aceptar ediciones sin preguntar").click();
+    h.run_steps(3);
+    assert!(!accept(&h));
+}
+
+#[test]
+fn the_last_welcome_step_offers_the_work_choices() {
+    let _serial = serial();
+    let mut h = app(project("welcomework"));
+    h.state_mut().welcome = Some(4); // el último paso
+    h.run_steps(3);
+    h.get_by_label("Cómo quieres trabajar");
+    h.get_by_label("Aceptar ediciones sin preguntar").click();
+    h.run_steps(3);
+    assert!(h.state().store.as_ref().unwrap().accept_edits());
+    h.get_by_label("Empezar").click();
+    h.run_steps(3);
+    assert!(h.state().welcome.is_none());
+}
+
+#[test]
 fn welcome_tour_runs_once_and_is_remembered() {
     let _serial = serial();
     let mut h = app(project("welcome"));
@@ -1407,6 +1438,9 @@ fn welcome_tour_runs_once_and_is_remembered() {
         h.run_steps(2);
     }
     h.get_by_label("Guard y Git");
+    h.get_by_label("Siguiente").click();
+    h.run_steps(2);
+    h.get_by_label("Cómo quieres trabajar");
     h.get_by_label("Empezar").click();
     h.run_steps(2);
     assert_eq!(h.state().welcome, None);
