@@ -151,6 +151,15 @@ impl App {
                         );
                         tip = format!("{text}\n{tip}");
                     }
+                    // Un hilo marcado como no leído también se ve desde la tarjeta.
+                    if attention[i].is_none() && !ws.unread.is_empty() {
+                        ui.painter().circle_filled(
+                            egui::pos2(row.rect.min.x + 14.0, row.rect.center().y),
+                            4.0,
+                            theme::ORANGE,
+                        );
+                        tip = format!("{}\n{tip}", tr!("Tiene hilos sin leer"));
+                    }
                     // Se agarra por el icono de carpeta para reordenar.
                     let grip = ui
                         .interact(
@@ -190,9 +199,23 @@ impl App {
                     // Los agentes abiertos del proyecto elegido, debajo de su tarjeta.
                     if selected {
                         for (panel, name, _) in &open_agents {
-                            if theme::sub_row(ui, theme::GREEN, name, "").clicked() {
+                            let unread = ws.unread.contains(panel);
+                            let dot = if unread { theme::ORANGE } else { theme::GREEN };
+                            let row = theme::sub_row(ui, dot, name, "");
+                            if row.clicked() {
                                 cmds.push(UiCmd::GoToPanel(*panel));
                             }
+                            row.context_menu(|ui| {
+                                let label = if unread {
+                                    tr!("Marcar como leído")
+                                } else {
+                                    tr!("Marcar como no leído")
+                                };
+                                if ui.button(label).clicked() {
+                                    cmds.push(UiCmd::ToggleUnread(*panel));
+                                    ui.close();
+                                }
+                            });
                         }
                     }
                 }

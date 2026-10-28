@@ -426,7 +426,17 @@ impl App {
                 }
                 self.trash_path(i, &path);
             }
-            UiCmd::FilesOpen(path) => Self::open_file(ctx, ws, Some(path), false),
+            UiCmd::FilesOpen(path) => {
+                // Desde la paleta el panel puede estar cerrado: se abre para ver el archivo.
+                if !ws.files.open {
+                    ws.files.open = true;
+                    ws.guard.open = false;
+                    ws.memory.open = false;
+                    ws.ideas.open = false;
+                    ws.git.open = false;
+                }
+                Self::open_file(ctx, ws, Some(path), false)
+            }
             UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
             UiCmd::FilesDiscard => {
                 let next = ws.files.viewer.as_mut().and_then(|v| v.pending.take());

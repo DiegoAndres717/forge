@@ -37,6 +37,37 @@ pub fn list_dir(root: &Path, rel: &Path) -> Result<Vec<Entry>, String> {
     Ok(out)
 }
 
+/// Carpetas que no se recorren al buscar archivos: ruido que el dueño no quiere abrir.
+const SKIPPED: [&str; 3] = [".git", "node_modules", "target"];
+
+/// Tope de archivos al buscar, para que un proyecto enorme no congele la paleta.
+const MAX_FILES: usize = 20_000;
+
+/// Rutas (relativas, con `/`) de todos los archivos del proyecto, ordenadas.
+/// No sigue enlaces a carpetas, así no sale del proyecto ni entra en bucles.
+pub fn project_files(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut pending = vec![PathBuf::new()];
+    while let Some(rel) = pending.pop() {
+        let Ok(dir) = std::fs::read_dir(root.join(&rel)) else {
+            continue;
+        };
+        for e in dir.filter_map(Result::ok) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = e.file_type() else { continue };
+            if kind.is_dir() {
+                if !SKIPPED.iter().any(|s| name.eq_ignore_ascii_case(s)) {
+                    pending.push(rel.join(&name));
+                }
+            } else if out.len() < MAX_FILES {
+                out.push(rel.join(&name).to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// `root/rel` solo si queda dentro de `root`: sin `..`, sin ruta absoluta.
 pub fn safe_path(root: &Path, rel: &Path) -> Result<PathBuf, String> {
     if rel
@@ -191,6 +222,24 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn project_files_lists_nested_files_and_skips_noise() {
+        let root = tmp("walk");
+        for d in ["src/app", ".git", "node_modules/x", "target"] {
+            std::fs::create_dir_all(root.join(d)).unwrap();
+        }
+        for f in [
+            "README.md",
+            "src/app/mod.rs",
+            ".git/HEAD",
+            "node_modules/x/i.js",
+            "target/o",
+        ] {
+            std::fs::write(root.join(f), "").unwrap();
+        }
+        assert_eq!(project_files(&root), ["README.md", "src/app/mod.rs"]);
     }
 
     #[test]
