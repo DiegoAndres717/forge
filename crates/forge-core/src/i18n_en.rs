@@ -1400,6 +1400,9 @@ pub const EN: &[(&str, &str)] = &[
         "Search actions, files, projects, agents… (⌘K)",
     ),
     ("Ajustes (⌘,)", "Settings (⌘,)"),
+    ("Buscar archivos…", "Search files…"),
+    ("Copiar ruta", "Copy path"),
+    ("Mostrar en el Finder", "Show in Finder"),
     ("Marcar como leído", "Mark as read"),
     (
         "Enviar {n} comentarios al agente",

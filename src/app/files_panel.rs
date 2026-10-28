@@ -5,7 +5,12 @@ use forge_core::files::Entry;
 use std::collections::HashSet;
 
 /// Lo que el hilo de refresco devuelve: el contenido de cada carpeta abierta y los cambios de Git.
-pub(crate) type FilesData = (HashMap<String, Vec<Entry>>, HashMap<String, char>);
+/// Lo que lee el hilo del árbol: carpetas abiertas, cambios de Git y, si se busca, todos los archivos.
+pub(crate) type FilesData = (
+    HashMap<String, Vec<Entry>>,
+    HashMap<String, char>,
+    Option<Vec<String>>,
+);
 
 /// Ajuste donde se guarda «no volver a preguntar» antes de mandar a la papelera.
 pub(super) const TRASH_NO_ASK: &str = "files-trash-no-ask";
@@ -27,6 +32,9 @@ pub struct FilesView {
     pub loading: Option<Receiver<FilesData>>,
     pub loaded: Option<Instant>,
     pub dirty: bool,
+    /// Texto del buscador de archivos y todos los archivos del proyecto (solo se leen al buscar).
+    pub search: String,
+    pub all: Vec<String>,
     /// Archivo abierto al lado del árbol.
     pub viewer: Option<Viewer>,
 }
@@ -113,12 +121,15 @@ impl App {
         let Some(i) = self.active else { return };
         let files = &mut self.workspaces[i].files;
         if let Some(rx) = &files.loading
-            && let Ok((listing, changes)) = rx.try_recv()
+            && let Ok((listing, changes, all)) = rx.try_recv()
         {
             files.loading = None;
             files.loaded = Some(Instant::now());
             files.listing = listing;
             files.changes = changes;
+            if let Some(all) = all {
+                files.all = all;
+            }
         }
         let stale = files.dirty
             || files
@@ -128,6 +139,7 @@ impl App {
             return;
         }
         files.dirty = false;
+        let want_all = !files.search.trim().is_empty();
         let mut dirs: Vec<String> = files.expanded.iter().cloned().collect();
         dirs.push(String::new());
         let (tx, rx) = channel();
@@ -150,7 +162,8 @@ impl App {
                         .collect()
                 })
                 .unwrap_or_default();
-            let _ = tx.send((listing, changes));
+            let all = want_all.then(|| forge_core::files::project_files(&root));
+            let _ = tx.send((listing, changes, all));
             repaint.request_repaint();
         });
         self.workspaces[i].files.loading = Some(rx);
@@ -218,12 +231,38 @@ impl App {
                 });
             });
         }
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(icon::MAGNIFYING_GLASS)
+                    .size(14.0)
+                    .color(theme::TEXT_3),
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut files.search)
+                    .hint_text(tr!("Buscar archivos…"))
+                    .desired_width(f32::INFINITY),
+            );
+        });
+        let searching = !files.search.trim().is_empty();
         egui::ScrollArea::vertical()
             .id_salt("file-tree")
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
-                Self::file_rows(files, ui, "", 0, cmds);
+                if searching {
+                    let found = search_files(&files.all, &files.search);
+                    if found.is_empty() {
+                        ui.label(RichText::new(tr!("Sin resultados")).color(theme::TEXT_3));
+                    }
+                    for path in found {
+                        let name = path.rsplit('/').next().unwrap_or(path);
+                        let dir = path.strip_suffix(name).unwrap_or("").trim_end_matches('/');
+                        let code = files.changes.get(path).copied();
+                        Self::file_row(ui, path, name, dir, false, false, 0, code, false, cmds);
+                    }
+                } else {
+                    Self::file_rows(files, ui, "", 0, cmds);
+                }
             });
     }
 
@@ -357,58 +396,145 @@ impl App {
                     c.strip_prefix(path.as_str())
                         .is_some_and(|r| r.starts_with('/'))
                 });
-            ui.horizontal(|ui| {
-                ui.add_space(depth as f32 * 14.0);
-                let glyph = match (entry.is_dir, open) {
-                    (true, true) => icon::FOLDER_OPEN,
-                    (true, false) => icon::FOLDER,
-                    _ => icon::FILE_TEXT,
-                };
-                let (letter, color) = code.map_or(('\0', theme::TEXT), badge);
-                let label = ui.add(
-                    egui::Label::new(
-                        RichText::new(format!("{glyph}  {}", entry.name))
-                            .size(12.5)
-                            .color(if code.is_some() { color } else { theme::TEXT_2 }),
-                    )
-                    .truncate()
-                    .sense(Sense::click()),
-                );
-                if label.clicked() {
-                    if entry.is_dir {
-                        cmds.push(UiCmd::FilesToggleDir(path.clone()));
-                    } else {
-                        cmds.push(UiCmd::FilesOpen(path.clone()));
-                    }
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if theme::icon_button_sized(
-                        ui,
-                        icon::TRASH,
-                        &tr!("Mandar «{p0}» a la papelera", p0 = path.as_str()),
-                        20.0,
-                        theme::TEXT_3,
-                    )
-                    .clicked()
-                    {
-                        cmds.push(UiCmd::FilesTrashAsk(path.clone()));
-                    }
-                    if code.is_some() {
-                        ui.label(
-                            RichText::new(letter.to_string())
-                                .monospace()
-                                .strong()
-                                .color(color),
-                        );
-                    } else if inside {
-                        ui.label(RichText::new("●").size(8.0).color(theme::YELLOW));
-                    }
-                });
-            });
+            Self::file_row(
+                ui,
+                &path,
+                &entry.name,
+                "",
+                entry.is_dir,
+                open,
+                depth,
+                code,
+                inside,
+                cmds,
+            );
             if open {
                 Self::file_rows(files, ui, &path, depth + 1, cmds);
             }
         }
+    }
+
+    /// Una fila del árbol: ancha, con resalte y manita al pasar, y su menú con el clic derecho.
+    /// `dir` solo se muestra (en gris) en los resultados de la búsqueda.
+    #[allow(clippy::too_many_arguments)]
+    fn file_row(
+        ui: &mut egui::Ui,
+        path: &str,
+        name: &str,
+        dir: &str,
+        is_dir: bool,
+        open: bool,
+        depth: usize,
+        code: Option<char>,
+        inside: bool,
+        cmds: &mut Vec<UiCmd>,
+    ) {
+        let (rect, response) =
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let painter = ui.painter();
+        if response.hovered() {
+            painter.rect_filled(rect, 5.0, theme::SELECTED);
+        }
+        let (letter, color) = code.map_or(('\0', theme::TEXT), badge);
+        let mut x = rect.min.x + 4.0 + depth as f32 * 14.0;
+        let mid = rect.center().y;
+        if is_dir {
+            let caret = if open {
+                icon::CARET_DOWN
+            } else {
+                icon::CARET_RIGHT
+            };
+            painter.text(
+                egui::pos2(x, mid),
+                egui::Align2::LEFT_CENTER,
+                caret,
+                FontId::proportional(11.0),
+                theme::TEXT_3,
+            );
+        }
+        x += 14.0;
+        let (glyph, glyph_color) = if is_dir {
+            (
+                if open {
+                    icon::FOLDER_OPEN
+                } else {
+                    icon::FOLDER
+                },
+                theme::ORANGE,
+            )
+        } else {
+            file_glyph(name)
+        };
+        painter.text(
+            egui::pos2(x, mid),
+            egui::Align2::LEFT_CENTER,
+            glyph,
+            FontId::proportional(14.0),
+            glyph_color,
+        );
+        x += 22.0;
+        let right = rect.max.x - if code.is_some() || inside { 20.0 } else { 4.0 };
+        let name_color = if code.is_some() { color } else { theme::TEXT_2 };
+        let clip = Rect::from_min_max(egui::pos2(x, rect.min.y), egui::pos2(right, rect.max.y));
+        let painter = ui.painter().with_clip_rect(clip);
+        let shown = painter.text(
+            egui::pos2(x, mid),
+            egui::Align2::LEFT_CENTER,
+            name,
+            FontId::proportional(12.5),
+            name_color,
+        );
+        if !dir.is_empty() {
+            painter.text(
+                egui::pos2(shown.max.x + 8.0, mid),
+                egui::Align2::LEFT_CENTER,
+                dir,
+                FontId::proportional(11.0),
+                theme::TEXT_4,
+            );
+        }
+        if code.is_some() {
+            ui.painter().text(
+                egui::pos2(rect.max.x - 8.0, mid),
+                egui::Align2::RIGHT_CENTER,
+                letter,
+                FontId::monospace(12.0),
+                color,
+            );
+        } else if inside {
+            ui.painter()
+                .circle_filled(egui::pos2(rect.max.x - 10.0, mid), 3.0, theme::YELLOW);
+        }
+        if response.clicked() {
+            cmds.push(if is_dir {
+                UiCmd::FilesToggleDir(path.to_string())
+            } else {
+                UiCmd::FilesOpen(path.to_string())
+            });
+        }
+        response.context_menu(|ui| {
+            ui.set_min_width(200.0);
+            if !is_dir && ui.button(tr!("Abrir")).clicked() {
+                cmds.push(UiCmd::FilesOpen(path.to_string()));
+                ui.close();
+            }
+            if ui.button(tr!("Copiar ruta")).clicked() {
+                ui.ctx().copy_text(path.to_string());
+                ui.close();
+            }
+            if ui.button(tr!("Mostrar en el Finder")).clicked() {
+                cmds.push(UiCmd::FilesReveal(path.to_string()));
+                ui.close();
+            }
+            ui.separator();
+            let trash = RichText::new(format!("{}  {}", icon::TRASH, tr!("A la papelera")))
+                .color(theme::RED);
+            if ui.button(trash).clicked() {
+                cmds.push(UiCmd::FilesTrashAsk(path.to_string()));
+                ui.close();
+            }
+        });
     }
 
     /// Acciones del panel de archivos.
@@ -449,6 +575,11 @@ impl App {
                     ws.git.open = false;
                 }
                 Self::open_file(ctx, ws, Some(path), false)
+            }
+            UiCmd::FilesReveal(path) => {
+                if let Err(e) = forge_core::files::reveal(&ws.project.path, Path::new(&path)) {
+                    ws.files.error = Some(e);
+                }
             }
             UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
             UiCmd::FilesDiscard => {
@@ -725,5 +856,73 @@ fn diff_lines(
                 None => {}
             }
         }
+    }
+}
+
+/// Icono y color de un archivo según su extensión.
+fn file_glyph(name: &str) -> (&'static str, Color32) {
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e).to_lowercase();
+    match ext.as_str() {
+        "rs" => (icon::FILE_RS, theme::ORANGE),
+        "ts" => (icon::FILE_TS, theme::ACCENT),
+        "tsx" => (icon::FILE_TSX, theme::ACCENT),
+        "js" | "mjs" | "cjs" => (icon::FILE_JS, theme::YELLOW),
+        "jsx" => (icon::FILE_JSX, theme::YELLOW),
+        "py" => (icon::FILE_PY, theme::ACCENT),
+        "c" | "h" => (icon::FILE_C, theme::ACCENT),
+        "cpp" | "cc" | "hpp" => (icon::FILE_CPP, theme::ACCENT),
+        "css" | "scss" => (icon::FILE_CSS, theme::PURPLE),
+        "html" | "htm" => (icon::FILE_HTML, theme::ORANGE),
+        "vue" => (icon::FILE_VUE, theme::GREEN),
+        "md" | "markdown" => (icon::FILE_MD, theme::TEXT_2),
+        "json" | "toml" | "yaml" | "yml" | "ini" | "lock" => (icon::FILE_CODE, theme::TEXT_3),
+        "sql" => (icon::FILE_SQL, theme::TEXT_3),
+        "csv" => (icon::FILE_CSV, theme::GREEN),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" => (icon::FILE_IMAGE, theme::PURPLE),
+        "svg" => (icon::FILE_SVG, theme::PURPLE),
+        "pdf" => (icon::FILE_PDF, theme::RED),
+        "zip" | "gz" | "tar" | "dmg" => (icon::FILE_ARCHIVE, theme::TEXT_3),
+        "mp3" | "wav" => (icon::FILE_AUDIO, theme::TEXT_3),
+        "mp4" | "mov" => (icon::FILE_VIDEO, theme::TEXT_3),
+        "txt" => (icon::FILE_TXT, theme::TEXT_3),
+        _ => (icon::FILE, theme::TEXT_3),
+    }
+}
+
+/// Los archivos que coinciden con lo escrito en el buscador (difuso, mejores primero).
+fn search_files<'a>(all: &'a [String], query: &str) -> Vec<&'a String> {
+    let mut found: Vec<(i32, &String)> = all
+        .iter()
+        .filter_map(|p| super::palette::fuzzy(query, p).map(|s| (s, p)))
+        .collect();
+    found.sort_by_key(|(s, p)| (-s, p.len()));
+    found.into_iter().take(100).map(|(_, p)| p).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_search_finds_files_by_a_part_of_their_path_best_first() {
+        let all: Vec<String> = [
+            "src/app/mod.rs",
+            "src/main.rs",
+            "README.md",
+            "docs/model.md",
+        ]
+        .map(String::from)
+        .to_vec();
+        let found = search_files(&all, "main");
+        assert_eq!(found.first().map(|s| s.as_str()), Some("src/main.rs"));
+        assert!(!found.iter().any(|p| p.as_str() == "README.md"));
+        assert!(search_files(&all, "zzzz").is_empty());
+    }
+
+    #[test]
+    fn each_kind_of_file_gets_its_own_icon() {
+        assert_eq!(file_glyph("lib.rs").0, icon::FILE_RS);
+        assert_eq!(file_glyph("App.TSX").0, icon::FILE_TSX);
+        assert_eq!(file_glyph("notes").0, icon::FILE);
     }
 }

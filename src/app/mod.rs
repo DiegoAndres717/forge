@@ -232,6 +232,8 @@ enum UiCmd {
     FilesKeepEditing,
     FilesMode(files_panel::ViewMode),
     FilesSave,
+    /// Muestra un archivo del árbol en el Finder.
+    FilesReveal(String),
     /// Manda al agente los comentarios hechos sobre el diff del archivo abierto.
     FilesSendComments,
     GitStage(Vec<String>),
@@ -1053,6 +1055,7 @@ impl App {
             | UiCmd::FilesDiscard
             | UiCmd::FilesKeepEditing
             | UiCmd::FilesMode(_)
+            | UiCmd::FilesReveal(_)
             | UiCmd::FilesSave => self.apply_files(ctx, cmd),
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
