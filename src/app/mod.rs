@@ -19,7 +19,7 @@ use forge_core::agents;
 use forge_core::candidate;
 use forge_core::guard::{self, Rules, Stage};
 use forge_core::hooks;
-use forge_core::project::{self, AutoRestart, Project, SavedCommand};
+use forge_core::project::{self, Project, SavedCommand};
 use forge_core::store::{self, Store};
 
 const SIDEBAR: f32 = 240.0;

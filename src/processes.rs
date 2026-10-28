@@ -633,28 +633,6 @@ fn command_ok(command: &str, root: &std::path::Path, timeout: Duration) -> Resul
     }
 }
 
-/// Oculta valores de variables que parecen secretas (solo para mostrarlas).
-pub fn mask(key: &str, value: &str) -> String {
-    let key = key.to_ascii_uppercase();
-    let secret = [
-        "KEY",
-        "SECRET",
-        "TOKEN",
-        "PASSWORD",
-        "PASS",
-        "PRIVATE",
-        "CREDENTIAL",
-        "AUTH",
-    ]
-    .iter()
-    .any(|s| key.contains(s));
-    if secret {
-        format!("{}••••", value.chars().take(2).collect::<String>())
-    } else {
-        value.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,9 +680,6 @@ mod tests {
         assert_eq!(backoff(1), Duration::from_secs(1));
         assert_eq!(backoff(3), Duration::from_secs(4));
         assert_eq!(backoff(10), Duration::from_secs(30));
-
-        assert_eq!(mask("STRIPE_SECRET_KEY", "sk_live_123"), "sk••••");
-        assert_eq!(mask("NODE_ENV", "development"), "development");
     }
 
     #[test]

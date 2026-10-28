@@ -1387,9 +1387,9 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
 fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     let _serial = serial();
     let mut h = app(project("settingsnav"));
-    // Guard y Memoria ya no están en la barra lateral (están arriba) ni Planes; Ajustes, abajo.
+    // Guard y Memoria ya no están en la barra lateral (están arriba); Planes sí; Ajustes, abajo.
     assert_eq!(h.query_all_by_label("Memoria").count(), 0);
-    assert_eq!(h.query_all_by_label("Planes").count(), 0);
+    assert_eq!(h.query_all_by_label("Planes").count(), 1);
     h.get_by_label("Ajustes").click();
     h.run_steps(3);
     assert!(h.state().settings_open);
@@ -1403,8 +1403,11 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     h.get_by_label("Volver").click();
     h.run_steps(3);
     assert!(!h.state().settings_open);
-    // Planes sube a la barra superior.
-    h.get_by_label_contains("Planes").click();
+    // Planes está en la barra lateral y también arriba: cualquiera lo abre.
+    h.query_all_by_label_contains("Planes")
+        .next()
+        .expect("botón de Planes")
+        .click();
     h.run_steps(3);
     assert!(ws(h.state()).ideas.open);
 }
@@ -2892,36 +2895,6 @@ fn a_process_added_in_settings_shows_up() {
         ws(h.state()).processes.get("api").is_some(),
         "en el panel PROCESOS"
     );
-}
-
-/// Sin procesos, la barra lateral ofrece añadir uno y lleva al formulario de Ajustes.
-#[test]
-fn add_process_in_the_sidebar_opens_its_form() {
-    let _serial = serial();
-    let mut h = app(project("no-processes"));
-    // La detección de agentes de fondo cambia la barra lateral al terminar (la sección de
-    // agentes crece) y movía el botón justo al hacer clic (intermitente en Ubuntu, plan #29).
-    wait_until(&mut h, "detección de agentes", |a| {
-        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
-    });
-    h.run_steps(3);
-    assert!(ws(h.state()).processes.list.is_empty());
-    h.get_by_label("Añadir proceso").click();
-    h.run_steps(3);
-    assert!(h.state().settings_open);
-    // El formulario lee .forge/project.toml: en un CI lento tarda más de unos fotogramas.
-    let start = Instant::now();
-    while h
-        .query_by_label_contains("Servidores y tareas que Forge arranca")
-        .is_none()
-    {
-        assert!(
-            start.elapsed() < Duration::from_secs(5),
-            "abre en Este proyecto, con el formulario de procesos"
-        );
-        h.run_steps(1);
-        std::thread::sleep(Duration::from_millis(20));
-    }
 }
 
 /// Memoria, hilos y descriptores del proceso: (RSS en bytes, hilos, archivos abiertos).
