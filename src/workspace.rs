@@ -1401,6 +1401,20 @@ impl Workspace {
         self.open_agent_with(ctx, &spec, command, area);
     }
 
+    /// Claude Code conectado a la extensión de Chrome, continuando su última sesión.
+    pub fn open_claude_in_chrome(&mut self, ctx: &egui::Context, area: Rect) {
+        let Some(spec) = self
+            .project
+            .agents
+            .iter()
+            .find(|a| a.program() == "claude")
+            .cloned()
+        else {
+            return;
+        };
+        self.open_agent_with(ctx, &spec, claude_chrome_command(&spec.command), area);
+    }
+
     fn root_panel(&self) -> PanelState {
         PanelState {
             name: None,
@@ -3180,9 +3194,21 @@ mod tests {
     }
 }
 
+fn claude_chrome_command(command: &str) -> String {
+    format!("{command} --chrome --continue")
+}
+
 #[cfg(test)]
 mod agent_tests {
     use super::*;
+
+    #[test]
+    fn claude_chrome_continues_with_the_configured_command() {
+        assert_eq!(
+            claude_chrome_command("claude --model sonnet"),
+            "claude --model sonnet --chrome --continue"
+        );
+    }
 
     /// Fase 8: un panel de agente guarda su identidad y al restaurar se reanuda la sesión.
     #[test]

@@ -403,6 +403,23 @@ impl App {
                 if plus.clicked() {
                     cmds.push(UiCmd::AgentClick(agent.id.clone(), true));
                 }
+                #[cfg(target_os = "macos")]
+                if agent.program() == "claude" {
+                    let at = Rect::from_center_size(
+                        egui::pos2(row.rect.max.x - 40.0, row.rect.center().y),
+                        Vec2::splat(22.0),
+                    );
+                    let chrome = ui
+                        .put(
+                            at,
+                            egui::Button::new(RichText::new(icon::GLOBE).color(theme::TEXT_3))
+                                .frame(false),
+                        )
+                        .on_hover_text(tr!("Abrir Claude con Chrome y continuar"));
+                    if chrome.clicked() {
+                        cmds.push(UiCmd::OpenClaudeChrome);
+                    }
+                }
             }
             row.context_menu(|ui| {
                 ui.set_min_width(240.0);

@@ -271,6 +271,8 @@ enum UiCmd {
     MemoryRestoreVersion(i64),
     /// Abre un agente: (id, reanudar la última sesión).
     OpenAgent(String, bool),
+    /// Abre Claude Code con su extensión de Chrome y continúa la última conversación.
+    OpenClaudeChrome,
     /// Clic en un agente: (id, sesión nueva). Ver `Workspace::agent_click`.
     AgentClick(String, bool),
     /// Lleva a una terminal del proyecto activo.
@@ -891,6 +893,11 @@ impl App {
             UiCmd::OpenAgent(id, resume) => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.open_agent(ctx, &id, resume, area);
+                }
+            }
+            UiCmd::OpenClaudeChrome => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    ws.open_claude_in_chrome(ctx, area);
                 }
             }
             UiCmd::AgentClick(id, new) => {
