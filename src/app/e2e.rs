@@ -567,6 +567,20 @@ fn command_palette_runs_actions_by_fuzzy_name() {
 }
 
 #[test]
+fn the_palette_opens_a_project_file_by_name() {
+    let _serial = serial();
+    let mut h = app(project("palette-files"));
+    assert!(!ws(h.state()).files.open);
+    palette(&mut h, "main.ts");
+    let ws = ws(h.state());
+    assert!(ws.files.open, "abre el panel de archivos");
+    assert_eq!(
+        ws.files.viewer.as_ref().map(|v| v.path.as_str()),
+        Some("main.ts")
+    );
+}
+
+#[test]
 fn pull_request_draft_after_guard_passes() {
     let _serial = serial();
     let dir = project("pr");
@@ -2216,6 +2230,38 @@ fn clicking_an_agent_goes_to_its_open_terminal_instead_of_opening_another() {
         "+ abre una sesión nueva"
     );
     assert_eq!(ws(h.state()).agent_panels("fake").len(), 2);
+}
+
+#[test]
+fn a_thread_marked_unread_stays_so_until_you_go_back_to_it() {
+    let _serial = serial();
+    let dir = project("unread");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AgentClick("fake".into(), false), area);
+    let agent = ws(h.state()).agent_panels("fake")[0];
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(agent), area);
+    assert!(ws(h.state()).unread.contains(&agent));
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(agent), area);
+    assert!(ws(h.state()).unread.is_empty(), "otro clic lo desmarca");
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(agent), area);
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(agent), area);
+    assert!(
+        ws(h.state()).unread.is_empty(),
+        "al volver a él queda leído"
+    );
+    // Un hilo que ya no existe no deja el aviso colgado en el proyecto.
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(9999), area);
+    assert!(!ws(h.state()).has_unread());
+    h.state_mut().apply(&ctx, UiCmd::ToggleUnread(agent), area);
+    assert!(ws(h.state()).has_unread());
 }
 
 /// Informe: cambiar el nombre de una cuenta nueva colgaba el Mac. Escribir en el campo y

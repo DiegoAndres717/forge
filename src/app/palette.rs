@@ -9,6 +9,8 @@ pub(super) struct Palette {
     selected: usize,
     /// Proyectos recientes (se leen al abrir, no en cada fotograma).
     recent: Vec<(String, PathBuf)>,
+    /// Archivos del proyecto activo (se listan al abrir) para abrirlos escribiendo su nombre.
+    files: Vec<String>,
 }
 
 /// Qué hace una entrada al elegirla.
@@ -135,8 +137,13 @@ impl App {
             .filter(|r| !open.contains(&r.path) && r.path.is_dir())
             .map(|r| (r.name, r.path))
             .collect();
+        let files = self
+            .active
+            .map(|i| forge_core::files::project_files(&self.workspaces[i].project.path))
+            .unwrap_or_default();
         self.palette = Some(Palette {
             recent,
+            files,
             ..Default::default()
         });
     }
@@ -189,6 +196,22 @@ impl App {
                     tr!("Abrir proyecto {name}", name = name),
                     &tilde(path),
                     cmd(UiCmd::Open(path.clone())),
+                );
+            }
+        }
+
+        // Archivos: solo con dos letras o más, para no inundar la lista al abrirla.
+        if let Some(palette) = self
+            .palette
+            .as_ref()
+            .filter(|p| p.query.trim().chars().count() >= 2)
+        {
+            for path in &palette.files {
+                add(
+                    icon::FILE,
+                    path.clone(),
+                    "",
+                    cmd(UiCmd::FilesOpen(path.clone())),
                 );
             }
         }
@@ -659,7 +682,7 @@ impl App {
                             let edit = ui.add(
                                 egui::TextEdit::singleline(&mut palette.query)
                                     .hint_text(tr!(
-                                        "Buscar acciones, proyectos, agentes, procesos…"
+                                        "Buscar acciones, archivos, proyectos, agentes…"
                                     ))
                                     .font(FontId::proportional(16.0))
                                     .frame(egui::Frame::NONE)

@@ -334,8 +334,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Reducir texto", "Smaller text"),
     ("Tamaño de texto normal", "Default text size"),
     (
-        "Buscar acciones, proyectos, agentes, procesos…",
-        "Search actions, projects, agents, processes…",
+        "Buscar acciones, archivos, proyectos, agentes…",
+        "Search actions, files, projects, agents…",
     ),
     ("Sin resultados", "No results"),
     (
@@ -1396,10 +1396,13 @@ pub const EN: &[(&str, &str)] = &[
     ("Proyecto: {name}", "Project: {name}"),
     ("Buscar", "Search"),
     (
-        "Buscar acciones, proyectos, agentes, procesos… (⌘K)",
-        "Search actions, projects, agents, processes… (⌘K)",
+        "Buscar acciones, archivos, proyectos, agentes… (⌘K)",
+        "Search actions, files, projects, agents… (⌘K)",
     ),
     ("Ajustes (⌘,)", "Settings (⌘,)"),
+    ("Marcar como leído", "Mark as read"),
+    ("Marcar como no leído", "Mark as unread"),
+    ("Tiene hilos sin leer", "Has unread threads"),
     ("{name} espera tu respuesta", "{name} is waiting for you"),
     ("{name} terminó", "{name} finished"),
     ("nombre de rama no válido", "invalid branch name"),

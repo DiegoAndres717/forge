@@ -1,6 +1,6 @@
 // Workspace de un proyecto: paneles (terminales y logs de procesos), layout, foco y procesos.
 use forge_core::tr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -413,6 +413,8 @@ pub struct Workspace {
     seen_failures: Vec<String>,
     /// Bytes que había escrito cada terminal la última vez que se vio el proyecto.
     seen_output: HashMap<PanelId, u64>,
+    /// Hilos (terminales de agente) marcados a mano como no leídos, para volver luego.
+    pub unread: HashSet<PanelId>,
     /// Salida de cada terminal la última vez que estuvo a la vista (avisos en la lista).
     tab_seen: HashMap<PanelId, u64>,
     /// Bytes de cada terminal cuando se guardó su historial (para no reescribirlo igual).
@@ -535,6 +537,7 @@ impl Workspace {
             seen: Instant::now(),
             seen_failures: Vec::new(),
             seen_output: HashMap::new(),
+            unread: HashSet::new(),
             tab_seen: HashMap::new(),
             history_saved: HashMap::new(),
             notified: Vec::new(),
@@ -1812,6 +1815,11 @@ impl Workspace {
 
     /// Paneles con agentes activos y sus datos para sincronizar con agent_sessions:
     /// (panel_id, agent_name, Option<pid>)
+    /// ¿Queda algún hilo abierto marcado como no leído? (los cerrados no cuentan)
+    pub fn has_unread(&self) -> bool {
+        self.unread.iter().any(|id| self.panels.contains_key(id))
+    }
+
     pub fn active_agent_panels(&mut self) -> Vec<(PanelId, String, Option<u32>)> {
         let mut list = Vec::new();
         for (&id, panel) in &mut self.panels {

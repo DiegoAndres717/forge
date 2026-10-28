@@ -236,7 +236,7 @@ impl App {
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
         if child
             .add_sized(rect.size(), button)
-            .on_hover_text(tr!("Buscar acciones, proyectos, agentes, procesos… (⌘K)"))
+            .on_hover_text(tr!("Buscar acciones, archivos, proyectos, agentes… (⌘K)"))
             .clicked()
         {
             cmds.push(UiCmd::OpenPalette);

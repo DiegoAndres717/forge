@@ -170,7 +170,7 @@ fn shortcut_for(key: Key, m: Modifiers, mac: bool) -> Option<Action> {
         (Key::A, true, false) => Action::OpenDefaultAgent,
         (Key::M, true, false) => Action::ToggleMemory,
         (Key::I, true, false) => Action::ToggleIdeas,
-        (Key::K, false, false) => Action::Palette,
+        (Key::K | Key::P, false, false) => Action::Palette,
         (Key::Comma, false, false) => Action::Settings,
         _ => return None,
     })
@@ -277,6 +277,8 @@ enum UiCmd {
     AgentClick(String, bool),
     /// Lleva a una terminal del proyecto activo.
     GoToPanel(crate::layout::PanelId),
+    /// Marca (o desmarca) un hilo del proyecto activo como no leído.
+    ToggleUnread(crate::layout::PanelId),
     /// Elige la cuenta del agente en el proyecto activo: (programa, id de cuenta).
     UseAccount(String, i64),
     AccountAdd(String),
@@ -988,6 +990,14 @@ impl App {
             UiCmd::GoToPanel(panel) => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
                     ws.go_to_panel(panel);
+                    ws.unread.remove(&panel); // al volver a él, queda leído
+                }
+            }
+            UiCmd::ToggleUnread(panel) => {
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i])
+                    && !ws.unread.remove(&panel)
+                {
+                    ws.unread.insert(panel);
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),
