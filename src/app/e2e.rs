@@ -2286,7 +2286,7 @@ fn diff_comments_go_to_the_focused_agent_and_are_cleared() {
     let viewer = h.state_mut().workspaces[0].files.viewer.as_mut().unwrap();
     viewer
         .comments
-        .push(("+let x = 1;".into(), "rename x".into()));
+        .push((3, "+let x = 1;".into(), "rename x".into()));
     h.state_mut().apply(&ctx, UiCmd::FilesSendComments, area);
     let ws = ws(h.state());
     assert!(ws.files.viewer.as_ref().unwrap().comments.is_empty());

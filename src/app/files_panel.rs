@@ -50,8 +50,9 @@ pub struct Viewer {
     pub message: Option<String>,
     pub mode: ViewMode,
     pub diff: String,
-    /// Comentarios sobre líneas del diff: (la línea, el comentario). Se envían al agente.
-    pub comments: Vec<(String, String)>,
+    /// Comentarios sobre líneas del diff: (índice de la línea, la línea con su bloque, el
+    /// comentario). Se envían al agente; si el diff se regenera, se descartan.
+    pub comments: Vec<(usize, String, String)>,
     /// Comentario que se está escribiendo: (índice de línea del diff, texto).
     pub draft: Option<(usize, String)>,
     /// Otro archivo (o cerrar, con `None`) que espera a decidir qué hacer con lo sin guardar.
@@ -466,6 +467,9 @@ impl App {
                 if let Some(v) = ws.files.viewer.as_mut() {
                     v.mode = mode;
                     if mode == ViewMode::Diff {
+                        // El diff nuevo puede tener otras líneas: lo comentado ya no vale.
+                        v.comments.clear();
+                        v.draft = None;
                         v.diff = forge_core::files::diff(&root, Path::new(&v.path))
                             .unwrap_or_else(|e| e);
                     }
@@ -626,7 +630,7 @@ fn heading(line: &str) -> Option<(usize, &str)> {
 fn diff_lines(
     ui: &mut egui::Ui,
     diff: &str,
-    comments: &mut Vec<(String, String)>,
+    comments: &mut Vec<(usize, String, String)>,
     draft: &mut Option<(usize, String)>,
     cmds: &mut Vec<UiCmd>,
 ) {
@@ -642,7 +646,12 @@ fn diff_lines(
         ui.add_space(4.0);
     }
     ui.spacing_mut().item_spacing.y = 0.0;
+    // Último encabezado de bloque (@@ …): sitúa la línea comentada para el agente.
+    let mut hunk = "";
     for (n, line) in diff.lines().enumerate() {
+        if line.starts_with("@@") {
+            hunk = line;
+        }
         let changed = (line.starts_with('+') && !line.starts_with("+++"))
             || (line.starts_with('-') && !line.starts_with("---"));
         let color = match line.chars().next() {
@@ -665,10 +674,12 @@ fn diff_lines(
                 .on_hover_text(tr!("Clic para comentar esta línea"))
                 .clicked()
         {
-            *draft = Some((n, String::new()));
+            // Con un comentario a medias, otro clic no lo pisa.
+            if draft.as_ref().is_none_or(|(_, t)| t.trim().is_empty()) {
+                *draft = Some((n, String::new()));
+            }
         }
-        for (text_line, text) in comments.iter().filter(|(l, _)| l == line) {
-            let _ = text_line;
+        for (_, _, text) in comments.iter().filter(|(i, _, _)| *i == n) {
             ui.label(
                 RichText::new(format!("   {} {text}", icon::CHAT_TEXT))
                     .size(12.0)
@@ -684,7 +695,10 @@ fn diff_lines(
                             .hint_text(tr!("Tu comentario…"))
                             .desired_width(280.0),
                     );
-                    edit.request_focus();
+                    // Foco solo al abrir; después el campo lo conserva mientras se escribe.
+                    if text.is_empty() {
+                        edit.request_focus();
+                    }
                     let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
                     if (theme::secondary(ui, tr!("Añadir")).clicked() || enter)
                         && !text.trim().is_empty()
@@ -699,7 +713,12 @@ fn diff_lines(
             match done {
                 Some(true) => {
                     if let Some((_, text)) = draft.take() {
-                        comments.push((line.to_string(), text));
+                        let place = if hunk.is_empty() || line.starts_with("@@") {
+                            line.to_string()
+                        } else {
+                            format!("{hunk} {line}")
+                        };
+                        comments.push((n, place, text));
                     }
                 }
                 Some(false) => *draft = None,

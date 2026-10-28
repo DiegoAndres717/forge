@@ -1016,7 +1016,14 @@ impl App {
                         .viewer
                         .as_ref()
                         .filter(|v| !v.comments.is_empty())
-                        .map(|v| forge_core::files::review_prompt(&v.path, &v.comments));
+                        .map(|v| {
+                            let list: Vec<(String, String)> = v
+                                .comments
+                                .iter()
+                                .map(|(_, line, text)| (line.clone(), text.clone()))
+                                .collect();
+                            forge_core::files::review_prompt(&v.path, &list)
+                        });
                     if let (Some(id), Some(prompt)) = (id, prompt) {
                         ws.ask_agent(ctx, &id, &prompt, area);
                         if let Some(v) = ws.files.viewer.as_mut() {
