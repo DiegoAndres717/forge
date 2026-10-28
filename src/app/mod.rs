@@ -232,6 +232,8 @@ enum UiCmd {
     FilesKeepEditing,
     FilesMode(files_panel::ViewMode),
     FilesSave,
+    /// Manda al agente los comentarios hechos sobre el diff del archivo abierto.
+    FilesSendComments,
     GitStage(Vec<String>),
     GitUnstage(Vec<String>),
     GitDiscardAsk(forge_core::git::FileChange),
@@ -998,6 +1000,36 @@ impl App {
                     && !ws.unread.remove(&panel)
                 {
                     ws.unread.insert(panel);
+                }
+            }
+            UiCmd::FilesSendComments => {
+                let detected = self.agents.lock().map(|d| d.clone()).unwrap_or_default();
+                let preferred = self.preferred_agent();
+                if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {
+                    // El agente enfocado; si no hay, el de siempre del proyecto.
+                    let id = ws.focused_agent().or_else(|| {
+                        agents::default_agent_with(&ws.project.agents, &detected, &preferred)
+                            .map(|a| a.id.clone())
+                    });
+                    let prompt = ws
+                        .files
+                        .viewer
+                        .as_ref()
+                        .filter(|v| !v.comments.is_empty())
+                        .map(|v| {
+                            let list: Vec<(String, String)> = v
+                                .comments
+                                .iter()
+                                .map(|(_, line, text)| (line.clone(), text.clone()))
+                                .collect();
+                            forge_core::files::review_prompt(&v.path, &list)
+                        });
+                    if let (Some(id), Some(prompt)) = (id, prompt) {
+                        ws.ask_agent(ctx, &id, &prompt, area);
+                        if let Some(v) = ws.files.viewer.as_mut() {
+                            v.comments.clear();
+                        }
+                    }
                 }
             }
             UiCmd::DetectAgents => self.detect_agents(ctx, true),

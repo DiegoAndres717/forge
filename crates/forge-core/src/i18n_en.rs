@@ -1401,6 +1401,16 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Ajustes (⌘,)", "Settings (⌘,)"),
     ("Marcar como leído", "Mark as read"),
+    (
+        "Enviar {n} comentarios al agente",
+        "Send {n} comments to the agent",
+    ),
+    (
+        "Clic para comentar esta línea",
+        "Click to comment on this line",
+    ),
+    ("Tu comentario…", "Your comment…"),
+    ("Añadir", "Add"),
     ("Marcar como no leído", "Mark as unread"),
     ("Tiene hilos sin leer", "Has unread threads"),
     ("{name} espera tu respuesta", "{name} is waiting for you"),
