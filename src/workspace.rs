@@ -1402,12 +1402,12 @@ impl Workspace {
     }
 
     /// Claude Code conectado a la extensión de Chrome, continuando su última sesión.
-    pub fn open_claude_in_chrome(&mut self, ctx: &egui::Context, area: Rect) {
+    pub fn open_claude_in_chrome(&mut self, ctx: &egui::Context, id: &str, area: Rect) {
         let Some(spec) = self
             .project
             .agents
             .iter()
-            .find(|a| a.program() == "claude")
+            .find(|a| a.id == id && a.program() == "claude")
             .cloned()
         else {
             return;

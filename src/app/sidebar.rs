@@ -417,7 +417,7 @@ impl App {
                         )
                         .on_hover_text(tr!("Abrir Claude con Chrome y continuar"));
                     if chrome.clicked() {
-                        cmds.push(UiCmd::OpenClaudeChrome);
+                        cmds.push(UiCmd::OpenClaudeChrome(agent.id.clone()));
                     }
                 }
             }
