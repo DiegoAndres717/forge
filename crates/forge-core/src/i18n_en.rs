@@ -1406,6 +1406,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
     ("Antes", "Before"),
+    ("Nuevo archivo", "New file"),
+    ("Nueva carpeta", "New folder"),
+    ("Nombre del archivo", "File name"),
+    ("Nombre de la carpeta", "Folder name"),
     ("Ocultar terminal (⌘J)", "Hide terminal (⌘J)"),
     (
         "Enviar {n} comentarios al agente",

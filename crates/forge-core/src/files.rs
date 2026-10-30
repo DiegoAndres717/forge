@@ -141,6 +141,52 @@ pub fn trash(root: &Path, rel: &Path) -> Result<(), String> {
     Err("la papelera solo está disponible en macOS".into())
 }
 
+/// Crea un archivo vacío o una carpeta llamada `name` dentro de `root/parent`. Devuelve su
+/// ruta relativa al proyecto.
+pub fn create(root: &Path, parent: &Path, name: &str, is_dir: bool) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+        return Err(format!("nombre no válido: «{name}»"));
+    }
+    let at_root = parent.components().all(|c| matches!(c, Component::CurDir));
+    if at_root && name.eq_ignore_ascii_case(".git") {
+        return Err("no se crea .git desde aquí".into());
+    }
+    let dir = safe_path(root, parent)?;
+    let first = parent
+        .components()
+        .find(|c| matches!(c, Component::Normal(_)));
+    if first.is_some_and(|c| c.as_os_str().eq_ignore_ascii_case(".git")) {
+        return Err("no se crea nada dentro de .git desde aquí".into());
+    }
+    if !dir.is_dir() {
+        return Err(format!("no es una carpeta: {}", parent.display()));
+    }
+    let path = dir.join(name);
+    // `create_new` y `create_dir` fallan si ya existe: nunca pisan nada.
+    let made = if is_dir {
+        std::fs::create_dir(&path)
+    } else {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map(|_| ())
+    };
+    made.map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => format!("ya existe «{name}»"),
+        _ => e.to_string(),
+    })?;
+    // Siempre con «/», como el resto del árbol.
+    let parent = parent.to_string_lossy().replace('\\', "/");
+    let parent = parent.trim_matches('/');
+    Ok(if parent.is_empty() {
+        name.to_string()
+    } else {
+        format!("{parent}/{name}")
+    })
+}
+
 /// Lo que se puede mostrar de un archivo.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Loaded {
@@ -402,6 +448,44 @@ mod tests {
     fn a_file_git_does_not_track_has_no_gutter_marks() {
         let diff = "--- /dev/null\n+++ b/f\n+uno\n+dos\n";
         assert!(gutter_marks(diff).is_empty());
+    }
+
+    #[test]
+    fn create_makes_files_and_folders_and_refuses_unsafe_names() {
+        let root = tmp("create");
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        // Archivo en la raíz y en una carpeta anidada; carpeta nueva.
+        assert_eq!(
+            create(&root, Path::new(""), "a.txt", false).unwrap(),
+            "a.txt"
+        );
+        assert!(root.join("a.txt").is_file());
+        assert_eq!(
+            create(&root, Path::new("src/deep"), "mod.rs", false).unwrap(),
+            "src/deep/mod.rs"
+        );
+        assert_eq!(
+            create(&root, Path::new("src"), "nueva", true).unwrap(),
+            "src/nueva"
+        );
+        assert!(root.join("src/nueva").is_dir());
+        // No pisa lo que ya existe (ni su contenido).
+        std::fs::write(root.join("a.txt"), "hola").unwrap();
+        assert!(create(&root, Path::new(""), "a.txt", false).is_err());
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "hola");
+        assert!(create(&root, Path::new("src"), "nueva", true).is_err());
+        // Nombres que se salen o no valen.
+        for bad in ["", "  ", "..", ".", "a/b", "a\\b", "../fuera"] {
+            assert!(create(&root, Path::new(""), bad, false).is_err(), "{bad:?}");
+        }
+        // Ni fuera del proyecto, ni dentro de .git, ni en una carpeta que no existe.
+        assert!(create(&root, Path::new(".."), "x", false).is_err());
+        assert!(create(&root, Path::new(""), ".git", true).is_err());
+        assert!(create(&root, Path::new(""), ".GIT", true).is_err());
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        assert!(create(&root, Path::new(".git"), "x", false).is_err());
+        assert!(create(&root, Path::new("no-existe"), "x", false).is_err());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

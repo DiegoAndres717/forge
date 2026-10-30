@@ -1312,6 +1312,107 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
 }
 
 #[test]
+fn a_new_file_is_named_in_the_tree_created_and_opened() {
+    let _serial = serial();
+    let dir = project("newitem");
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    // Se empieza a nombrar un archivo en la raíz y se crea.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesNewItem("".into(), false), area);
+    h.run_steps(2);
+    assert!(ws(h.state()).files.new_item.is_some());
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesCreate("".into(), false, "nuevo.rs".into()),
+        area,
+    );
+    h.run_steps(2);
+    assert!(dir.join("nuevo.rs").is_file());
+    assert!(ws(h.state()).files.new_item.is_none());
+    let v = ws(h.state())
+        .files
+        .viewer
+        .as_ref()
+        .expect("se abre el archivo nuevo");
+    assert_eq!(v.path, "nuevo.rs");
+    // Un nombre repetido avisa y no pisa nada: se sigue nombrando.
+    std::fs::write(dir.join("nuevo.rs"), "fn main() {}").unwrap();
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesNewItem("".into(), true), area);
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesCreate("".into(), true, "nuevo.rs".into()),
+        area,
+    );
+    h.run_steps(2);
+    assert!(ws(h.state()).files.error.is_some());
+    assert!(ws(h.state()).files.new_item.is_some());
+    assert!(dir.join("nuevo.rs").is_file());
+    // Esc deja de nombrar.
+    h.state_mut().apply(&ctx, UiCmd::FilesCancelNew, area);
+    assert!(ws(h.state()).files.new_item.is_none());
+    // Una carpeta nueva se crea y se despliega.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesNewItem("".into(), true), area);
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesCreate("".into(), true, "lib".into()),
+        area,
+    );
+    assert!(dir.join("lib").is_dir());
+    assert!(ws(h.state()).files.expanded.contains("lib"));
+}
+
+#[test]
+fn typing_a_name_in_the_tree_and_pressing_enter_creates_it() {
+    let _serial = serial();
+    let dir = project("typename");
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesNewItem("".into(), false), area);
+    h.run_steps(3);
+    h.event(egui::Event::Text("hola.txt".into()));
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert!(dir.join("hola.txt").is_file(), "Intro crea el archivo");
+    assert!(ws(h.state()).files.new_item.is_none());
+    // Un nombre repetido avisa y se puede corregir sin tocar el ratón: sigue con el foco.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesNewItem("".into(), false), area);
+    h.run_steps(3);
+    h.event(egui::Event::Text("hola.txt".into()));
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert!(ws(h.state()).files.error.is_some());
+    h.event(egui::Event::Text("2".into()));
+    h.run_steps(2);
+    assert_eq!(
+        ws(h.state())
+            .files
+            .new_item
+            .as_ref()
+            .map(|d| d.name.as_str()),
+        Some("hola.txt2")
+    );
+    // Esc con el foco en la casilla cancela.
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(ws(h.state()).files.new_item.is_none());
+}
+
+#[test]
 fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
     let _serial = serial();
     let dir = project("editor");
