@@ -87,6 +87,8 @@ pub struct Viewer {
     pub diff: String,
     /// Marcas del margen del editor (líneas añadidas, cambiadas o quitadas respecto al commit).
     pub marks: Vec<forge_core::files::GutterMark>,
+    /// Huella del texto con el que se calcularon las marcas en vivo (0 = las del disco) y cuándo.
+    pub marks_live: (u64, Option<std::time::Instant>),
     /// Comentarios sobre líneas del diff: (índice de la línea, la línea con su bloque, el
     /// comentario). Se envían al agente; si el diff se regenera, se descartan.
     pub comments: Vec<(usize, String, String)>,
@@ -299,7 +301,10 @@ impl App {
                         let name = path.rsplit('/').next().unwrap_or(path);
                         let dir = path.strip_suffix(name).unwrap_or("").trim_end_matches('/');
                         let code = files.changes.get(path).copied();
-                        Self::file_row(ui, path, name, dir, false, false, 0, code, false, cmds);
+                        let selected = files.viewer.as_ref().is_some_and(|v| v.path == *path);
+                        Self::file_row(
+                            ui, path, name, dir, false, false, 0, code, false, selected, cmds,
+                        );
                     }
                 } else {
                     Self::file_rows(files, &mut draft, &mut renaming, ui, "", 0, cmds);
@@ -450,6 +455,9 @@ impl App {
         {
             cmds.push(UiCmd::FilesSave);
         }
+        if v.is_text() && v.mode == ViewMode::Edit {
+            live_marks(v, &ws.project.path, ui.ctx());
+        }
         if v.pending.is_some() {
             ui.group(|ui| {
                 ui.label(RichText::new(tr!("Hay cambios sin guardar.")).size(12.5));
@@ -539,6 +547,10 @@ impl App {
                     depth,
                     code,
                     inside,
+                    files
+                        .viewer
+                        .as_ref()
+                        .is_some_and(|v| !entry.is_dir && v.path == path),
                     cmds,
                 );
             }
@@ -634,16 +646,33 @@ impl App {
         depth: usize,
         code: Option<char>,
         inside: bool,
+        selected: bool,
         cmds: &mut Vec<UiCmd>,
     ) {
         let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         // Las filas se pintan a mano: sin esto no tendrían nombre para los lectores de pantalla.
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
         let painter = ui.painter().clone();
-        if response.hovered() {
-            painter.rect_filled(rect, 5.0, theme::SELECTED);
+        if selected {
+            // El archivo abierto: fondo con el color de acento y una barra a la izquierda.
+            painter.rect_filled(rect, 6.0, theme::ACCENT.gamma_multiply(0.22));
+            painter.rect_filled(
+                Rect::from_min_size(
+                    rect.min + Vec2::new(0.0, 4.0),
+                    Vec2::new(3.0, rect.height() - 8.0),
+                ),
+                1.5,
+                theme::ACCENT,
+            );
+        } else if response.hovered() {
+            painter.rect_filled(rect, 6.0, theme::SURFACE_HOVER.gamma_multiply(0.6));
+        }
+        // Guías verticales de la sangría, como en VS Code.
+        for d in 0..depth {
+            let gx = rect.min.x + 4.0 + d as f32 * 14.0 + 7.0;
+            painter.vline(gx, rect.y_range(), egui::Stroke::new(1.0, theme::SEPARATOR));
         }
         let (letter, color) = code.map_or(('\0', theme::TEXT), badge);
         let mut x = rect.min.x + 4.0 + depth as f32 * 14.0;
@@ -670,7 +699,7 @@ impl App {
                 } else {
                     icon::FOLDER
                 },
-                theme::ORANGE,
+                if open { theme::YELLOW } else { theme::ORANGE },
             )
         } else {
             file_glyph(name)
@@ -679,12 +708,18 @@ impl App {
             egui::pos2(x, mid),
             egui::Align2::LEFT_CENTER,
             glyph,
-            FontId::proportional(14.0),
+            FontId::proportional(15.0),
             glyph_color,
         );
-        x += 22.0;
+        x += 24.0;
         let right = rect.max.x - if code.is_some() || inside { 20.0 } else { 4.0 };
-        let name_color = if code.is_some() { color } else { theme::TEXT_2 };
+        let name_color = if code.is_some() {
+            color
+        } else if selected || response.hovered() {
+            theme::TEXT
+        } else {
+            theme::TEXT_2
+        };
         let clip = Rect::from_min_max(egui::pos2(x, rect.min.y), egui::pos2(right, rect.max.y));
         let painter = ui.painter().with_clip_rect(clip);
         let shown = painter.text(
@@ -962,6 +997,7 @@ impl App {
             mode: ViewMode::Edit,
             diff: String::new(),
             marks: Vec::new(),
+            marks_live: (0, None),
             comments: Vec::new(),
             draft: None,
             highlight: None,
@@ -1291,6 +1327,33 @@ fn code_editor(
     });
 }
 
+/// Mantiene las marcas del margen al día mientras se escribe: tras una pausa breve compara el
+/// texto con el último commit; sin cambios sin guardar vuelven las del disco.
+fn live_marks(v: &mut Viewer, root: &Path, ctx: &egui::Context) {
+    use std::hash::{Hash, Hasher};
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
+    if v.content == v.saved {
+        if v.marks_live.0 != 0 {
+            v.marks = gutter(root, Path::new(&v.path));
+            v.marks_live = (0, None);
+        }
+        return;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    v.content.hash(&mut hasher);
+    let key = hasher.finish().max(1);
+    if key == v.marks_live.0 {
+        return;
+    }
+    match v.marks_live.1 {
+        Some(at) if at.elapsed() < PAUSE => ctx.request_repaint_after(PAUSE),
+        _ => {
+            v.marks = forge_core::files::live_gutter_marks(root, Path::new(&v.path), &v.content);
+            v.marks_live = (key, Some(std::time::Instant::now()));
+        }
+    }
+}
+
 /// Marcas del margen de un archivo; sin Git o sin cambios, ninguna.
 fn gutter(root: &Path, rel: &Path) -> Vec<forge_core::files::GutterMark> {
     forge_core::files::diff(root, rel)
@@ -1313,15 +1376,15 @@ fn gutter_mark(
         let (color, bar) = match m.kind {
             MarkKind::Added => (
                 theme::GREEN,
-                Rect::from_min_size(egui::pos2(x, y), Vec2::new(3.0, height)),
+                Rect::from_min_size(egui::pos2(x, y), Vec2::new(4.0, height)),
             ),
             MarkKind::Modified => (
                 theme::ACCENT,
-                Rect::from_min_size(egui::pos2(x, y), Vec2::new(3.0, height)),
+                Rect::from_min_size(egui::pos2(x, y), Vec2::new(4.0, height)),
             ),
             MarkKind::Deleted => (
                 theme::RED,
-                Rect::from_min_size(egui::pos2(x, y + height - 2.0), Vec2::new(8.0, 4.0)),
+                Rect::from_min_size(egui::pos2(x, y + height - 1.5), Vec2::new(10.0, 3.0)),
             ),
         };
         ui.painter().rect_filled(bar, 0.0, color);
