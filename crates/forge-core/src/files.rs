@@ -245,6 +245,99 @@ pub fn pdf_preview(root: &Path, rel: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// Qué le pasó a una línea del archivo respecto al último commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarkKind {
+    Added,
+    Modified,
+    /// Se quitaron líneas justo después de esta.
+    Deleted,
+}
+
+/// Marca del margen: línea (desde 1) del texto actual y lo que había antes en su lugar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GutterMark {
+    pub line: usize,
+    pub kind: MarkKind,
+    pub removed: Vec<String>,
+}
+
+/// Marcas del margen sacadas de un diff unificado.
+pub fn gutter_marks(diff: &str) -> Vec<GutterMark> {
+    // Un archivo que Git no sigue sale entero como añadido: no hay nada que marcar.
+    if diff.starts_with("--- /dev/null") {
+        return Vec::new();
+    }
+    let mut marks = Vec::new();
+    let mut in_hunk = false; // las cabeceras «---»/«+++» solo existen antes del primer bloque
+    let mut next = 1usize; // próxima línea del texto actual
+    let mut removed: Vec<String> = Vec::new();
+    let mut added = 0usize;
+    // Cierra el bloque de cambios que se estaba leyendo.
+    let flush =
+        |marks: &mut Vec<GutterMark>, next: usize, removed: &mut Vec<String>, added: &mut usize| {
+            let first = next - *added;
+            if *added == 0 {
+                if !removed.is_empty() {
+                    marks.push(GutterMark {
+                        line: next.saturating_sub(1).max(1),
+                        kind: MarkKind::Deleted,
+                        removed: std::mem::take(removed),
+                    });
+                }
+            } else {
+                for k in 0..*added {
+                    let modified = k == 0 && !removed.is_empty();
+                    marks.push(GutterMark {
+                        line: first + k,
+                        kind: if modified {
+                            MarkKind::Modified
+                        } else {
+                            MarkKind::Added
+                        },
+                        removed: if modified {
+                            std::mem::take(removed)
+                        } else {
+                            Vec::new()
+                        },
+                    });
+                }
+            }
+            removed.clear();
+            *added = 0;
+        };
+    for line in diff.lines() {
+        if let Some(h) = line.strip_prefix("@@") {
+            in_hunk = true;
+            flush(&mut marks, next, &mut removed, &mut added);
+            // «@@ -a,b +c,d @@»: c es la primera línea del bloque en el texto actual.
+            next = h
+                .split('+')
+                .nth(1)
+                .and_then(|r| r.split([',', ' ']).next())
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(1);
+        } else if (!in_hunk && (line.starts_with("---") || line.starts_with("+++")))
+            || line.starts_with('\\')
+        {
+            continue; // cabeceras y «\ No newline at end of file»
+        } else if let Some(text) = line.strip_prefix('-') {
+            if added > 0 {
+                flush(&mut marks, next, &mut removed, &mut added);
+            }
+            removed.push(text.to_string());
+        } else if line.starts_with('+') {
+            added += 1;
+            next += 1;
+        } else {
+            flush(&mut marks, next, &mut removed, &mut added);
+            next += 1;
+        }
+    }
+    flush(&mut marks, next, &mut removed, &mut added);
+    marks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -254,6 +347,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn the_gutter_marks_added_modified_and_deleted_lines() {
+        let diff = "--- a/f\n+++ b/f\n@@ -1,6 +1,7 @@\n keep\n-old\n+new\n+extra\n keep2\n-gone\n keep3\n+tail\n";
+        let marks = gutter_marks(diff);
+        assert_eq!(
+            marks,
+            vec![
+                GutterMark {
+                    line: 2,
+                    kind: MarkKind::Modified,
+                    removed: vec!["old".into()]
+                },
+                GutterMark {
+                    line: 3,
+                    kind: MarkKind::Added,
+                    removed: vec![]
+                },
+                GutterMark {
+                    line: 4,
+                    kind: MarkKind::Deleted,
+                    removed: vec!["gone".into()]
+                },
+                GutterMark {
+                    line: 6,
+                    kind: MarkKind::Added,
+                    removed: vec![]
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn gutter_marks_do_not_mistake_content_for_diff_headers() {
+        // «++i;» añadida sale como «+++i;» y «-- nota» quitada como «--- nota».
+        let diff = "--- a/f\n+++ b/f\n@@ -1,3 +1,3 @@\n a\n--- nota\n+++i;\n b\n";
+        let marks = gutter_marks(diff);
+        assert_eq!(
+            marks,
+            vec![GutterMark {
+                line: 2,
+                kind: MarkKind::Modified,
+                removed: vec!["-- nota".into()]
+            }]
+        );
+        // Quitar las primeras líneas deja la marca en la línea 1, no en la 0.
+        let top = "--- a/f\n+++ b/f\n@@ -1,2 +1,1 @@\n-x\n y\n";
+        assert_eq!(gutter_marks(top)[0].line, 1);
+    }
+
+    #[test]
+    fn a_file_git_does_not_track_has_no_gutter_marks() {
+        let diff = "--- /dev/null\n+++ b/f\n+uno\n+dos\n";
+        assert!(gutter_marks(diff).is_empty());
     }
 
     #[test]
