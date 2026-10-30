@@ -355,6 +355,52 @@ pub struct GutterMark {
     pub removed: Vec<String>,
 }
 
+/// Marcas del margen del texto que se está escribiendo (aún sin guardar) frente al último
+/// commit. Sin Git, sin commit o archivo sin seguimiento: ninguna.
+pub fn live_gutter_marks(root: &Path, rel: &Path, content: &str) -> Vec<GutterMark> {
+    let run = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .output()
+    };
+    // «./» hace la ruta relativa a la carpeta del proyecto, no a la raíz del repo.
+    let spec = format!("HEAD:./{}", rel.to_string_lossy().replace('\\', "/"));
+    let Some(head) = run(&["show", &spec]).ok().filter(|o| o.status.success()) else {
+        return Vec::new();
+    };
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    rel.hash(&mut hasher);
+    let dir = std::env::temp_dir().join(format!(
+        "forge-gutter-{}-{:x}",
+        std::process::id(),
+        hasher.finish()
+    ));
+    if std::fs::create_dir_all(&dir).is_err() {
+        return Vec::new();
+    }
+    let (old, new) = (dir.join("antes"), dir.join("ahora"));
+    let wrote = std::fs::write(&old, &head.stdout).and_then(|_| std::fs::write(&new, content));
+    // `--no-index` sale con 1 si hay diferencias: solo importa lo que escribe.
+    let out = wrote.ok().and_then(|_| {
+        run(&[
+            "diff",
+            "--no-index",
+            "--no-color",
+            "--",
+            &old.to_string_lossy(),
+            &new.to_string_lossy(),
+        ])
+        .ok()
+    });
+    let _ = std::fs::remove_dir_all(&dir);
+    out.map(|o| gutter_marks(&String::from_utf8_lossy(&o.stdout)))
+        .unwrap_or_default()
+}
+
 /// Marcas del margen sacadas de un diff unificado.
 pub fn gutter_marks(diff: &str) -> Vec<GutterMark> {
     // Un archivo que Git no sigue sale entero como añadido: no hay nada que marcar.
@@ -489,6 +535,44 @@ mod tests {
         // Quitar las primeras líneas deja la marca en la línea 1, no en la 0.
         let top = "--- a/f\n+++ b/f\n@@ -1,2 +1,1 @@\n-x\n y\n";
         assert_eq!(gutter_marks(top)[0].line, 1);
+    }
+
+    #[test]
+    fn live_gutter_marks_follow_the_unsaved_text() {
+        let root = tmp("live-gutter");
+        let sh = |args: &[&str]| {
+            assert!(
+                std::process::Command::new("git")
+                    .args(args)
+                    .current_dir(&root)
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+            )
+        };
+        sh(&["init", "-q"]);
+        std::fs::write(root.join("f.txt"), "uno\ndos\ntres\n").unwrap();
+        sh(&["add", "f.txt"]);
+        sh(&[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "commit",
+            "-qm",
+            "x",
+        ]);
+        // Sin tocar el archivo en disco: solo el texto que se está escribiendo.
+        let marks = live_gutter_marks(&root, Path::new("f.txt"), "uno\nDOS\ntres\ncuatro\n");
+        assert_eq!(marks.len(), 2);
+        assert_eq!(marks[0].kind, MarkKind::Modified);
+        assert_eq!(marks[0].removed, vec!["dos".to_string()]);
+        assert_eq!(marks[1].line, 4);
+        assert_eq!(marks[1].kind, MarkKind::Added);
+        // Texto igual al del commit: sin marcas. Archivo sin seguimiento: tampoco.
+        assert!(live_gutter_marks(&root, Path::new("f.txt"), "uno\ndos\ntres\n").is_empty());
+        assert!(live_gutter_marks(&root, Path::new("nuevo.txt"), "a\nb\n").is_empty());
     }
 
     #[test]
