@@ -97,6 +97,10 @@ fn ws(app: &App) -> &Workspace {
     &app.workspaces[0]
 }
 
+fn ws_mut(app: &mut App) -> &mut Workspace {
+    &mut app.workspaces[0]
+}
+
 #[test]
 fn split_and_close_panels_with_shortcuts() {
     let _serial = serial();
@@ -1410,6 +1414,101 @@ fn typing_a_name_in_the_tree_and_pressing_enter_creates_it() {
     h.key_press(Key::Escape);
     h.run_steps(3);
     assert!(ws(h.state()).files.new_item.is_none());
+}
+
+#[test]
+fn renaming_in_the_tree_keeps_the_open_file_and_its_unsaved_text() {
+    let _serial = serial();
+    let dir = project("rename");
+    std::fs::create_dir_all(dir.join("docs")).unwrap();
+    std::fs::write(dir.join("docs/notas.md"), "# Notas\n").unwrap();
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    // Archivo abierto con texto sin guardar, renombrado desde la fila del árbol con Intro.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpen("main.ts".into()), area);
+    h.state_mut().workspaces[0]
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .content
+        .push_str("// sin guardar\n");
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesRenameStart("main.ts".into()), area);
+    h.run_steps(3);
+    let r = ws(h.state()).files.renaming.as_ref().expect("renombrando");
+    assert_eq!(r.name, "main.ts", "empieza con el nombre de ahora");
+    ws_mut(h.state_mut()).files.renaming.as_mut().unwrap().name = "app.ts".into();
+    h.run_steps(2);
+    h.key_press(Key::Enter);
+    h.run_steps(4);
+    assert!(dir.join("app.ts").is_file());
+    assert!(!dir.join("main.ts").exists());
+    assert!(ws(h.state()).files.renaming.is_none());
+    let v = ws(h.state()).files.viewer.as_ref().expect("sigue abierto");
+    assert_eq!(v.path, "app.ts");
+    assert!(
+        v.content.ends_with("// sin guardar\n"),
+        "no pierde lo escrito"
+    );
+    // Se guarda con la ruta nueva (la fecha del archivo no cambió al renombrarlo).
+    h.state_mut().apply(&ctx, UiCmd::FilesSave, area);
+    assert!(
+        std::fs::read_to_string(dir.join("app.ts"))
+            .unwrap()
+            .ends_with("// sin guardar\n")
+    );
+    // Una carpeta con un archivo abierto dentro y desplegada: todo sigue la nueva ruta.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesToggleDir("docs".into()), area);
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpen("docs/notas.md".into()), area);
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesRename("docs".into(), "guias".into()),
+        area,
+    );
+    h.run_steps(2);
+    assert!(dir.join("guias/notas.md").is_file());
+    let files = &ws(h.state()).files;
+    assert_eq!(files.viewer.as_ref().unwrap().path, "guias/notas.md");
+    assert!(files.expanded.contains("guias") && !files.expanded.contains("docs"));
+    // Un nombre que ya existe avisa y la casilla sigue abierta; Esc la cierra.
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesRenameStart("app.ts".into()), area);
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesRename("app.ts".into(), "guias".into()),
+        area,
+    );
+    assert!(ws(h.state()).files.error.is_some());
+    assert!(dir.join("app.ts").is_file());
+    assert!(
+        ws(h.state()).files.renaming.is_some(),
+        "la casilla sigue abierta"
+    );
+    // Intro con el mismo nombre no es un error: se cierra.
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesRename("app.ts".into(), "app.ts".into()),
+        area,
+    );
+    assert!(ws(h.state()).files.renaming.is_none());
+    assert!(ws(h.state()).files.error.is_none());
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesRenameStart("app.ts".into()), area);
+    // Renombrar desde una búsqueda limpia la búsqueda para que se vea la casilla.
+    ws_mut(h.state_mut()).files.search = "app".into();
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesRenameStart("app.ts".into()), area);
+    assert!(ws(h.state()).files.search.is_empty());
+    h.state_mut().apply(&ctx, UiCmd::FilesCancelRename, area);
+    assert!(ws(h.state()).files.renaming.is_none());
 }
 
 #[test]

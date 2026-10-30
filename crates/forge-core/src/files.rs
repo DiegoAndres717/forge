@@ -144,10 +144,7 @@ pub fn trash(root: &Path, rel: &Path) -> Result<(), String> {
 /// Crea un archivo vacío o una carpeta llamada `name` dentro de `root/parent`. Devuelve su
 /// ruta relativa al proyecto.
 pub fn create(root: &Path, parent: &Path, name: &str, is_dir: bool) -> Result<String, String> {
-    let name = name.trim();
-    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
-        return Err(format!("nombre no válido: «{name}»"));
-    }
+    let name = valid_name(name)?;
     let at_root = parent.components().all(|c| matches!(c, Component::CurDir));
     if at_root && name.eq_ignore_ascii_case(".git") {
         return Err("no se crea .git desde aquí".into());
@@ -177,14 +174,64 @@ pub fn create(root: &Path, parent: &Path, name: &str, is_dir: bool) -> Result<St
         std::io::ErrorKind::AlreadyExists => format!("ya existe «{name}»"),
         _ => e.to_string(),
     })?;
-    // Siempre con «/», como el resto del árbol.
+    Ok(join_rel(parent, name))
+}
+
+/// El nombre sin espacios sobrantes, o error si no sirve para un archivo o carpeta.
+fn valid_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+        return Err(format!("nombre no válido: «{name}»"));
+    }
+    Ok(name)
+}
+
+/// `parent/name` siempre con «/», como el resto del árbol.
+fn join_rel(parent: &Path, name: &str) -> String {
     let parent = parent.to_string_lossy().replace('\\', "/");
     let parent = parent.trim_matches('/');
-    Ok(if parent.is_empty() {
+    if parent.is_empty() {
         name.to_string()
     } else {
         format!("{parent}/{name}")
-    })
+    }
+}
+
+/// Renombra `root/rel` a `new_name` dentro de su misma carpeta. Devuelve la ruta nueva.
+pub fn rename(root: &Path, rel: &Path, new_name: &str) -> Result<String, String> {
+    let new_name = valid_name(new_name)?;
+    let first = rel.components().find(|c| matches!(c, Component::Normal(_)));
+    let Some(first) = first else {
+        return Err("no se renombra la carpeta del proyecto".into());
+    };
+    let parent = rel.parent().unwrap_or(Path::new(""));
+    let at_root = parent.components().all(|c| matches!(c, Component::CurDir));
+    if first.as_os_str().eq_ignore_ascii_case(".git")
+        || (at_root && new_name.eq_ignore_ascii_case(".git"))
+    {
+        return Err("no se toca .git desde aquí".into());
+    }
+    let from = safe_path(root, rel)?;
+    // Sin seguir enlaces: renombrar un enlace cambia el enlace, no su destino.
+    if std::fs::symlink_metadata(&from).is_err() {
+        return Err(format!("no existe: {}", rel.display()));
+    }
+    let to = from.with_file_name(new_name);
+    if to == from {
+        return Err("el nombre es el mismo".into());
+    }
+    // En un sistema que no distingue mayúsculas, «a» y «A» son lo mismo: eso sí se deja, pero
+    // solo si el nombre cambia únicamente en las mayúsculas (nunca por un enlace al mismo sitio).
+    let only_case = from
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().to_lowercase() == new_name.to_lowercase())
+        && matches!((from.canonicalize(), to.canonicalize()), (Ok(a), Ok(b)) if a == b);
+    // `symlink_metadata`: un enlace roto en el destino también cuenta como ocupado.
+    if std::fs::symlink_metadata(&to).is_ok() && !only_case {
+        return Err(format!("ya existe «{new_name}»"));
+    }
+    std::fs::rename(&from, &to).map_err(|e| e.to_string())?;
+    Ok(join_rel(parent, new_name))
 }
 
 /// Lo que se puede mostrar de un archivo.
@@ -485,6 +532,66 @@ mod tests {
         std::fs::create_dir_all(root.join(".git")).unwrap();
         assert!(create(&root, Path::new(".git"), "x", false).is_err());
         assert!(create(&root, Path::new("no-existe"), "x", false).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn rename_moves_files_and_folders_within_their_folder_and_refuses_collisions() {
+        let root = tmp("rename");
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/a.txt"), "uno").unwrap();
+        std::fs::write(root.join("b.txt"), "dos").unwrap();
+        // Un archivo anidado conserva su carpeta y su contenido.
+        assert_eq!(
+            rename(&root, Path::new("src/deep/a.txt"), "c.rs").unwrap(),
+            "src/deep/c.rs"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("src/deep/c.rs")).unwrap(),
+            "uno"
+        );
+        assert!(!root.join("src/deep/a.txt").exists());
+        // Una carpeta lleva su contenido.
+        assert_eq!(
+            rename(&root, Path::new("src/deep"), "hondo").unwrap(),
+            "src/hondo"
+        );
+        assert!(root.join("src/hondo/c.rs").is_file());
+        // Cambiar solo mayúsculas vale aunque el sistema no distinga.
+        assert_eq!(rename(&root, Path::new("b.txt"), "B.txt").unwrap(), "B.txt");
+        // Nada de pisar otro elemento, ni nombre igual, ni nombres o rutas peligrosos.
+        std::fs::write(root.join("x.txt"), "x").unwrap();
+        assert!(rename(&root, Path::new("x.txt"), "src").is_err());
+        assert!(rename(&root, Path::new("x.txt"), "B.txt").is_err());
+        assert_eq!(std::fs::read_to_string(root.join("B.txt")).unwrap(), "dos");
+        assert!(rename(&root, Path::new("x.txt"), "x.txt").is_err());
+        for bad in ["", "..", "a/b", "../x", "a\\b"] {
+            assert!(rename(&root, Path::new("x.txt"), bad).is_err(), "{bad:?}");
+        }
+        assert!(rename(&root, Path::new("../fuera"), "y").is_err());
+        assert!(rename(&root, Path::new(""), "y").is_err(), "no el proyecto");
+        assert!(rename(&root, Path::new("no-existe"), "y").is_err());
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        assert!(rename(&root, Path::new(".git"), "otro").is_err());
+        assert!(rename(&root, Path::new("x.txt"), ".git").is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rename_never_overwrites_through_a_symlink() {
+        let root = tmp("rename-link");
+        std::fs::write(root.join("real"), "datos").unwrap();
+        std::os::unix::fs::symlink("real", root.join("ln")).unwrap();
+        std::os::unix::fs::symlink("no-existe", root.join("roto")).unwrap();
+        std::fs::write(root.join("otro"), "o").unwrap();
+        // Ni el enlace pisa su destino, ni el destino pisa al enlace, ni un enlace roto.
+        assert!(rename(&root, Path::new("ln"), "real").is_err());
+        assert!(rename(&root, Path::new("real"), "ln").is_err());
+        assert!(rename(&root, Path::new("otro"), "roto").is_err());
+        assert_eq!(std::fs::read_to_string(root.join("real")).unwrap(), "datos");
+        assert!(std::fs::symlink_metadata(root.join("ln")).is_ok());
+        assert!(std::fs::symlink_metadata(root.join("roto")).is_ok());
         let _ = std::fs::remove_dir_all(&root);
     }
 
