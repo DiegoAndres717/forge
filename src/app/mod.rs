@@ -239,6 +239,12 @@ enum UiCmd {
     ToggleTerminal,
     /// Muestra un archivo del árbol en el Finder.
     FilesReveal(String),
+    /// Empieza a nombrar un archivo (`false`) o carpeta (`true`) nuevo dentro de la carpeta.
+    FilesNewItem(String, bool),
+    /// Crea lo que se está nombrando: carpeta, si es carpeta y nombre.
+    FilesCreate(String, bool, String),
+    /// Deja de nombrar lo nuevo.
+    FilesCancelNew,
     /// Manda al agente los comentarios hechos sobre el diff del archivo abierto.
     FilesSendComments,
     GitStage(Vec<String>),
@@ -1064,6 +1070,9 @@ impl App {
             | UiCmd::FilesMode(_)
             | UiCmd::ToggleTerminal
             | UiCmd::FilesReveal(_)
+            | UiCmd::FilesNewItem(..)
+            | UiCmd::FilesCreate(..)
+            | UiCmd::FilesCancelNew
             | UiCmd::FilesSave => self.apply_files(ctx, cmd),
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {

@@ -42,8 +42,19 @@ pub struct FilesView {
     /// Terminales escondidas bajo el archivo abierto (⌘J).
     pub terminal_hidden: bool,
     pub all: Vec<String>,
+    /// Archivo o carpeta nuevos que se están nombrando en el árbol.
+    pub new_item: Option<NewItem>,
     /// Archivo abierto al lado del árbol.
     pub viewer: Option<Viewer>,
+}
+
+/// Lo nuevo que se está nombrando: dónde va, si es carpeta y el nombre escrito hasta ahora.
+pub struct NewItem {
+    pub parent: String,
+    pub is_dir: bool,
+    pub name: String,
+    /// Falta darle el foco a la casilla (solo el primer fotograma).
+    pub focus: bool,
 }
 
 /// Cómo se ve el archivo abierto.
@@ -213,6 +224,13 @@ impl App {
                 if theme::icon_button(ui, icon::X, tr!("Cerrar")).clicked() {
                     cmds.push(UiCmd::ToggleFiles);
                 }
+                if theme::icon_button(ui, icon::FOLDER_SIMPLE_PLUS, tr!("Nueva carpeta")).clicked()
+                {
+                    cmds.push(UiCmd::FilesNewItem(String::new(), true));
+                }
+                if theme::icon_button(ui, icon::FILE_PLUS, tr!("Nuevo archivo")).clicked() {
+                    cmds.push(UiCmd::FilesNewItem(String::new(), false));
+                }
             });
         });
         if let Some(e) = &files.error {
@@ -255,6 +273,8 @@ impl App {
             );
         });
         let searching = !files.search.trim().is_empty();
+        // Al buscar se ve otra lista: lo que se estaba nombrando se deja.
+        let mut draft = files.new_item.take().filter(|_| !searching);
         egui::ScrollArea::vertical()
             .id_salt("file-tree")
             .auto_shrink([false, false])
@@ -272,9 +292,10 @@ impl App {
                         Self::file_row(ui, path, name, dir, false, false, 0, code, false, cmds);
                     }
                 } else {
-                    Self::file_rows(files, ui, "", 0, cmds);
+                    Self::file_rows(files, &mut draft, ui, "", 0, cmds);
                 }
             });
+        files.new_item = draft;
     }
 
     /// Reparte el espacio con un archivo abierto: el archivo arriba y las terminales abajo, o
@@ -471,11 +492,15 @@ impl App {
     /// Las filas de una carpeta; las subcarpetas abiertas se dibujan debajo de la suya.
     fn file_rows(
         files: &FilesView,
+        draft: &mut Option<NewItem>,
         ui: &mut egui::Ui,
         dir: &str,
         depth: usize,
         cmds: &mut Vec<UiCmd>,
     ) {
+        if draft.as_ref().is_some_and(|d| d.parent == dir) {
+            Self::new_item_row(ui, draft, depth, cmds);
+        }
         let Some(entries) = files.listing.get(dir) else {
             return;
         };
@@ -502,8 +527,54 @@ impl App {
                 cmds,
             );
             if open {
-                Self::file_rows(files, ui, &path, depth + 1, cmds);
+                Self::file_rows(files, draft, ui, &path, depth + 1, cmds);
             }
+        }
+    }
+
+    /// La fila donde se escribe el nombre de lo nuevo: Intro lo crea, Esc o salir lo cancela.
+    fn new_item_row(
+        ui: &mut egui::Ui,
+        draft: &mut Option<NewItem>,
+        depth: usize,
+        cmds: &mut Vec<UiCmd>,
+    ) {
+        let Some(item) = draft.as_mut() else { return };
+        let glyph = if item.is_dir {
+            icon::FOLDER_SIMPLE_PLUS
+        } else {
+            icon::FILE_PLUS
+        };
+        let mut done = None; // Some(true) crea, Some(false) cancela
+        ui.horizontal(|ui| {
+            ui.add_space(4.0 + depth as f32 * 14.0 + 14.0);
+            ui.label(RichText::new(glyph).size(14.0).color(theme::TEXT_3));
+            let edit = ui.add(
+                egui::TextEdit::singleline(&mut item.name)
+                    .hint_text(if item.is_dir {
+                        tr!("Nombre de la carpeta")
+                    } else {
+                        tr!("Nombre del archivo")
+                    })
+                    .desired_width(f32::INFINITY),
+            );
+            if item.focus {
+                edit.request_focus();
+                item.focus = false;
+            }
+            // Intro y Esc le quitan el foco a la casilla; hacer clic fuera también.
+            if edit.lost_focus() {
+                done = Some(ui.input(|i| i.key_pressed(Key::Enter)));
+            }
+        });
+        match done {
+            Some(true) => cmds.push(UiCmd::FilesCreate(
+                item.parent.clone(),
+                item.is_dir,
+                item.name.clone(),
+            )),
+            Some(false) => cmds.push(UiCmd::FilesCancelNew),
+            None => {}
         }
     }
 
@@ -622,6 +693,21 @@ impl App {
                 cmds.push(UiCmd::FilesReveal(path.to_string()));
                 ui.close();
             }
+            // Lo nuevo va dentro de la carpeta, o junto al archivo.
+            let parent = if is_dir {
+                path.to_string()
+            } else {
+                path.rsplit_once('/').map_or("", |(d, _)| d).to_string()
+            };
+            ui.separator();
+            if ui.button(tr!("Nuevo archivo")).clicked() {
+                cmds.push(UiCmd::FilesNewItem(parent.clone(), false));
+                ui.close();
+            }
+            if ui.button(tr!("Nueva carpeta")).clicked() {
+                cmds.push(UiCmd::FilesNewItem(parent, true));
+                ui.close();
+            }
             ui.separator();
             let trash = RichText::new(format!("{}  {}", icon::TRASH, tr!("A la papelera")))
                 .color(theme::RED);
@@ -677,6 +763,36 @@ impl App {
                     ws.files.error = Some(e);
                 }
             }
+            UiCmd::FilesNewItem(parent, is_dir) => {
+                ws.files.expanded.insert(parent.clone());
+                ws.files.new_item = Some(NewItem {
+                    parent,
+                    is_dir,
+                    name: String::new(),
+                    focus: true,
+                });
+            }
+            UiCmd::FilesCreate(parent, is_dir, name) => {
+                let root = ws.project.path.clone();
+                match forge_core::files::create(&root, Path::new(&parent), &name, is_dir) {
+                    Ok(rel) => {
+                        ws.files.new_item = None;
+                        if is_dir {
+                            ws.files.expanded.insert(rel);
+                        } else {
+                            Self::open_file(ctx, ws, Some(rel), false);
+                        }
+                    }
+                    // Se sigue nombrando: el aviso sale arriba y el nombre se puede corregir.
+                    Err(e) => {
+                        ws.files.error = Some(e);
+                        if let Some(item) = ws.files.new_item.as_mut() {
+                            item.focus = true;
+                        }
+                    }
+                }
+            }
+            UiCmd::FilesCancelNew => ws.files.new_item = None,
             UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
             UiCmd::FilesDiscard => {
                 let next = ws.files.viewer.as_mut().and_then(|v| v.pending.take());
