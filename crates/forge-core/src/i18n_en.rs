@@ -1407,6 +1407,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
     ("Antes", "Before"),
     ("Nuevo archivo", "New file"),
+    ("Renombrar", "Rename"),
+    ("Nombre nuevo", "New name"),
     ("Nueva carpeta", "New folder"),
     ("Nombre del archivo", "File name"),
     ("Nombre de la carpeta", "Folder name"),

@@ -245,6 +245,12 @@ enum UiCmd {
     FilesCreate(String, bool, String),
     /// Deja de nombrar lo nuevo.
     FilesCancelNew,
+    /// Empieza a escribir el nombre nuevo de un archivo o carpeta del árbol.
+    FilesRenameStart(String),
+    /// Renombra la ruta con el nombre escrito.
+    FilesRename(String, String),
+    /// Deja de renombrar.
+    FilesCancelRename,
     /// Manda al agente los comentarios hechos sobre el diff del archivo abierto.
     FilesSendComments,
     GitStage(Vec<String>),
@@ -1073,6 +1079,9 @@ impl App {
             | UiCmd::FilesNewItem(..)
             | UiCmd::FilesCreate(..)
             | UiCmd::FilesCancelNew
+            | UiCmd::FilesRenameStart(_)
+            | UiCmd::FilesRename(..)
+            | UiCmd::FilesCancelRename
             | UiCmd::FilesSave => self.apply_files(ctx, cmd),
             UiCmd::ToggleGit => {
                 if let Some(ws) = self.active.map(|i| &mut self.workspaces[i]) {

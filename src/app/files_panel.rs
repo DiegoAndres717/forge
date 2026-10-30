@@ -44,6 +44,8 @@ pub struct FilesView {
     pub all: Vec<String>,
     /// Archivo o carpeta nuevos que se están nombrando en el árbol.
     pub new_item: Option<NewItem>,
+    /// Archivo o carpeta del árbol cuyo nombre se está cambiando.
+    pub renaming: Option<Renaming>,
     /// Archivo abierto al lado del árbol.
     pub viewer: Option<Viewer>,
 }
@@ -54,6 +56,13 @@ pub struct NewItem {
     pub is_dir: bool,
     pub name: String,
     /// Falta darle el foco a la casilla (solo el primer fotograma).
+    pub focus: bool,
+}
+
+/// Lo que se está renombrando: la ruta, el nombre escrito hasta ahora y si falta dar el foco.
+pub struct Renaming {
+    pub path: String,
+    pub name: String,
     pub focus: bool,
 }
 
@@ -275,6 +284,7 @@ impl App {
         let searching = !files.search.trim().is_empty();
         // Al buscar se ve otra lista: lo que se estaba nombrando se deja.
         let mut draft = files.new_item.take().filter(|_| !searching);
+        let mut renaming = files.renaming.take().filter(|_| !searching);
         egui::ScrollArea::vertical()
             .id_salt("file-tree")
             .auto_shrink([false, false])
@@ -292,10 +302,11 @@ impl App {
                         Self::file_row(ui, path, name, dir, false, false, 0, code, false, cmds);
                     }
                 } else {
-                    Self::file_rows(files, &mut draft, ui, "", 0, cmds);
+                    Self::file_rows(files, &mut draft, &mut renaming, ui, "", 0, cmds);
                 }
             });
         files.new_item = draft;
+        files.renaming = renaming;
     }
 
     /// Reparte el espacio con un archivo abierto: el archivo arriba y las terminales abajo, o
@@ -493,6 +504,7 @@ impl App {
     fn file_rows(
         files: &FilesView,
         draft: &mut Option<NewItem>,
+        renaming: &mut Option<Renaming>,
         ui: &mut egui::Ui,
         dir: &str,
         depth: usize,
@@ -514,22 +526,57 @@ impl App {
                     c.strip_prefix(path.as_str())
                         .is_some_and(|r| r.starts_with('/'))
                 });
-            Self::file_row(
-                ui,
-                &path,
-                &entry.name,
-                "",
-                entry.is_dir,
-                open,
-                depth,
-                code,
-                inside,
-                cmds,
-            );
+            if let Some(r) = renaming.as_mut().filter(|r| r.path == path) {
+                Self::rename_row(ui, r, entry.is_dir, depth, cmds);
+            } else {
+                Self::file_row(
+                    ui,
+                    &path,
+                    &entry.name,
+                    "",
+                    entry.is_dir,
+                    open,
+                    depth,
+                    code,
+                    inside,
+                    cmds,
+                );
+            }
             if open {
-                Self::file_rows(files, draft, ui, &path, depth + 1, cmds);
+                Self::file_rows(files, draft, renaming, ui, &path, depth + 1, cmds);
             }
         }
+    }
+
+    /// Una casilla de nombre en el árbol: `Some(true)` con Intro (aceptar), `Some(false)` con Esc
+    /// o al salir de ella (cancelar).
+    fn name_edit(
+        ui: &mut egui::Ui,
+        glyph: &str,
+        hint: &str,
+        name: &mut String,
+        focus: &mut bool,
+        depth: usize,
+    ) -> Option<bool> {
+        let mut done = None;
+        ui.horizontal(|ui| {
+            ui.add_space(4.0 + depth as f32 * 14.0 + 14.0);
+            ui.label(RichText::new(glyph).size(14.0).color(theme::TEXT_3));
+            let edit = ui.add(
+                egui::TextEdit::singleline(name)
+                    .hint_text(hint)
+                    .desired_width(f32::INFINITY),
+            );
+            if *focus {
+                edit.request_focus();
+                *focus = false;
+            }
+            // Intro y Esc le quitan el foco a la casilla; hacer clic fuera también.
+            if edit.lost_focus() {
+                done = Some(ui.input(|i| i.key_pressed(Key::Enter)));
+            }
+        });
+        done
     }
 
     /// La fila donde se escribe el nombre de lo nuevo: Intro lo crea, Esc o salir lo cancela.
@@ -540,40 +587,36 @@ impl App {
         cmds: &mut Vec<UiCmd>,
     ) {
         let Some(item) = draft.as_mut() else { return };
-        let glyph = if item.is_dir {
-            icon::FOLDER_SIMPLE_PLUS
+        let (glyph, hint) = if item.is_dir {
+            (icon::FOLDER_SIMPLE_PLUS, tr!("Nombre de la carpeta"))
         } else {
-            icon::FILE_PLUS
+            (icon::FILE_PLUS, tr!("Nombre del archivo"))
         };
-        let mut done = None; // Some(true) crea, Some(false) cancela
-        ui.horizontal(|ui| {
-            ui.add_space(4.0 + depth as f32 * 14.0 + 14.0);
-            ui.label(RichText::new(glyph).size(14.0).color(theme::TEXT_3));
-            let edit = ui.add(
-                egui::TextEdit::singleline(&mut item.name)
-                    .hint_text(if item.is_dir {
-                        tr!("Nombre de la carpeta")
-                    } else {
-                        tr!("Nombre del archivo")
-                    })
-                    .desired_width(f32::INFINITY),
-            );
-            if item.focus {
-                edit.request_focus();
-                item.focus = false;
-            }
-            // Intro y Esc le quitan el foco a la casilla; hacer clic fuera también.
-            if edit.lost_focus() {
-                done = Some(ui.input(|i| i.key_pressed(Key::Enter)));
-            }
-        });
-        match done {
+        match Self::name_edit(ui, glyph, hint, &mut item.name, &mut item.focus, depth) {
             Some(true) => cmds.push(UiCmd::FilesCreate(
                 item.parent.clone(),
                 item.is_dir,
                 item.name.clone(),
             )),
             Some(false) => cmds.push(UiCmd::FilesCancelNew),
+            None => {}
+        }
+    }
+
+    /// La fila de un elemento cuyo nombre se está cambiando.
+    fn rename_row(
+        ui: &mut egui::Ui,
+        renaming: &mut Renaming,
+        is_dir: bool,
+        depth: usize,
+        cmds: &mut Vec<UiCmd>,
+    ) {
+        let glyph = if is_dir { icon::FOLDER } else { icon::FILE };
+        let hint = tr!("Nombre nuevo");
+        let r = renaming;
+        match Self::name_edit(ui, glyph, hint, &mut r.name, &mut r.focus, depth) {
+            Some(true) => cmds.push(UiCmd::FilesRename(r.path.clone(), r.name.clone())),
+            Some(false) => cmds.push(UiCmd::FilesCancelRename),
             None => {}
         }
     }
@@ -700,6 +743,10 @@ impl App {
                 path.rsplit_once('/').map_or("", |(d, _)| d).to_string()
             };
             ui.separator();
+            if ui.button(tr!("Renombrar")).clicked() {
+                cmds.push(UiCmd::FilesRenameStart(path.to_string()));
+                ui.close();
+            }
             if ui.button(tr!("Nuevo archivo")).clicked() {
                 cmds.push(UiCmd::FilesNewItem(parent.clone(), false));
                 ui.close();
@@ -793,6 +840,45 @@ impl App {
                 }
             }
             UiCmd::FilesCancelNew => ws.files.new_item = None,
+            UiCmd::FilesRenameStart(path) => {
+                // Con una búsqueda activa el árbol no se ve: se limpia y se abren las carpetas
+                // hasta la fila para que la casilla salga en su sitio.
+                ws.files.search.clear();
+                let mut dir = String::new();
+                for part in path.split('/').take(path.matches('/').count()) {
+                    dir = join(&dir, part);
+                    ws.files.expanded.insert(dir.clone());
+                }
+                let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+                ws.files.renaming = Some(Renaming {
+                    path,
+                    name,
+                    focus: true,
+                });
+            }
+            // Intro sin cambiar el nombre: no hay nada que renombrar, se cierra la casilla.
+            UiCmd::FilesRename(path, name)
+                if path.rsplit('/').next().is_some_and(|n| n == name.trim()) =>
+            {
+                ws.files.renaming = None;
+            }
+            UiCmd::FilesRename(path, name) => {
+                let root = ws.project.path.clone();
+                match forge_core::files::rename(&root, Path::new(&path), &name) {
+                    Ok(new) => {
+                        ws.files.renaming = None;
+                        Self::moved(&mut ws.files, &root, &path, &new);
+                    }
+                    // Se sigue escribiendo: el aviso sale arriba y el nombre se puede corregir.
+                    Err(e) => {
+                        ws.files.error = Some(e);
+                        if let Some(r) = ws.files.renaming.as_mut() {
+                            r.focus = true;
+                        }
+                    }
+                }
+            }
+            UiCmd::FilesCancelRename => ws.files.renaming = None,
             UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
             UiCmd::FilesDiscard => {
                 let next = ws.files.viewer.as_mut().and_then(|v| v.pending.take());
@@ -918,6 +1004,50 @@ impl App {
             Err(e) => viewer.message = Some(e),
         }
         ws.files.viewer = Some(viewer);
+    }
+
+    /// `old` ahora es `new`: las carpetas abiertas y el archivo del visor siguen su nueva ruta.
+    fn moved(files: &mut FilesView, root: &Path, old: &str, new: &str) {
+        let remap = |p: &str| -> Option<String> {
+            if p == old {
+                Some(new.to_string())
+            } else {
+                p.strip_prefix(old)
+                    .and_then(|rest| rest.strip_prefix('/'))
+                    .map(|rest| format!("{new}/{rest}"))
+            }
+        };
+        files.expanded = files
+            .expanded
+            .drain()
+            .map(|p| remap(&p).unwrap_or(p))
+            .collect();
+        if let Some(v) = files.viewer.as_mut() {
+            if let Some(path) = remap(&v.path) {
+                v.path = path;
+                // El color depende de la extensión: con otro nombre hay que recalcularlo, y
+                // las marcas y el diff eran de la ruta de antes.
+                v.highlight = None;
+                v.marks = gutter(root, Path::new(&v.path));
+                if v.mode == ViewMode::Diff {
+                    v.comments.clear();
+                    v.draft = None;
+                    v.diff =
+                        forge_core::files::diff(root, Path::new(&v.path)).unwrap_or_else(|e| e);
+                }
+            }
+            // Lo que esperaba a decidir sobre otro archivo también apunta a la ruta nueva.
+            if let Some(Some(next)) = v.pending.as_mut()
+                && let Some(path) = remap(next)
+            {
+                *next = path;
+            }
+        }
+        if let Some(p) = files.confirm_trash.as_mut()
+            && let Some(path) = remap(p)
+        {
+            *p = path;
+        }
     }
 
     fn trash_path(&mut self, i: usize, rel: &str) {
