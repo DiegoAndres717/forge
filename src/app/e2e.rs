@@ -1329,6 +1329,10 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
     let v = ws(h.state()).files.viewer.as_ref().expect("visor abierto");
     assert_eq!(v.path, "main.ts");
     assert_eq!(v.content, "export const x = 1;\n");
+    assert!(
+        h.query_by_label("Editar").is_none(),
+        "el editor está abierto directamente, sin un modo Editar redundante"
+    );
     // Editar a mano y guardar con ⌘S (sin botón: el punto del título avisa de lo pendiente).
     h.state_mut().workspaces[0]
         .files

@@ -1405,6 +1405,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Marcar como leído", "Mark as read"),
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
+    ("Antes", "Before"),
     ("Ocultar terminal (⌘J)", "Hide terminal (⌘J)"),
     (
         "Enviar {n} comentarios al agente",

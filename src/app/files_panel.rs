@@ -65,6 +65,8 @@ pub struct Viewer {
     pub message: Option<String>,
     pub mode: ViewMode,
     pub diff: String,
+    /// Marcas del margen del editor (líneas añadidas, cambiadas o quitadas respecto al commit).
+    pub marks: Vec<forge_core::files::GutterMark>,
     /// Comentarios sobre líneas del diff: (índice de la línea, la línea con su bloque, el
     /// comentario). Se envían al agente; si el diff se regenera, se descartan.
     pub comments: Vec<(usize, String, String)>,
@@ -402,11 +404,10 @@ impl App {
                             cmds.push(UiCmd::FilesMode(m));
                         }
                     };
-                    mode(ui, ViewMode::Diff, tr!("Cambios"));
                     if v.is_markdown() {
                         mode(ui, ViewMode::Preview, tr!("Vista previa"));
                     }
-                    mode(ui, ViewMode::Edit, tr!("Editar"));
+                    mode(ui, ViewMode::Diff, tr!("Cambios"));
                 }
             });
         });
@@ -447,9 +448,10 @@ impl App {
                                 content,
                                 path,
                                 highlight,
+                                marks,
                                 ..
                             } = v;
-                            code_editor(ui, content, path, highlight);
+                            code_editor(ui, content, path, highlight, marks);
                         }
                         ViewMode::Preview => markdown(ui, &v.content),
                         ViewMode::Diff => {
@@ -525,7 +527,7 @@ impl App {
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         // Las filas se pintan a mano: sin esto no tendrían nombre para los lectores de pantalla.
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-        let painter = ui.painter();
+        let painter = ui.painter().clone();
         if response.hovered() {
             painter.rect_filled(rect, 5.0, theme::SELECTED);
         }
@@ -718,6 +720,7 @@ impl App {
                                 v.modified = std::fs::metadata(root.join(rel))
                                     .and_then(|m| m.modified())
                                     .ok();
+                                v.marks = gutter(&root, rel);
                                 if v.mode == ViewMode::Diff {
                                     v.diff =
                                         forge_core::files::diff(&root, rel).unwrap_or_else(|e| e);
@@ -756,6 +759,7 @@ impl App {
             message: None,
             mode: ViewMode::Edit,
             diff: String::new(),
+            marks: Vec::new(),
             comments: Vec::new(),
             draft: None,
             highlight: None,
@@ -774,6 +778,7 @@ impl App {
             Ok(forge_core::files::Loaded::Text(text)) => {
                 viewer.saved = text.clone();
                 viewer.content = text;
+                viewer.marks = gutter(&root, rel);
                 if viewer.is_markdown() {
                     viewer.mode = ViewMode::Preview;
                 }
@@ -960,6 +965,7 @@ fn code_editor(
     content: &mut String,
     path: &str,
     cache: &mut Option<(u64, Arc<egui::Galley>)>,
+    marks: &[forge_core::files::GutterMark],
 ) {
     use std::hash::{Hash, Hasher};
     let file_name = path.rsplit('/').next().unwrap_or(path).to_string();
@@ -998,7 +1004,7 @@ fn code_editor(
             .desired_rows(30)
             .layouter(&mut layouter)
             .show(ui);
-        let painter = ui.painter();
+        let painter = ui.painter().clone();
         let origin = out.galley_pos;
         // La línea del cursor, resaltada detrás del texto.
         if let Some(range) = out.cursor_range {
@@ -1028,12 +1034,70 @@ fn code_editor(
                     theme::TEXT_4,
                 );
             }
+            if new_line && y + 20.0 >= visible.min && y <= visible.max {
+                gutter_mark(ui, marks, n, left + gutter - 6.0, y, placed.height());
+            }
             if new_line {
                 n += 1;
             }
             new_line = placed.ends_with_newline;
         }
     });
+}
+
+/// Marcas del margen de un archivo; sin Git o sin cambios, ninguna.
+fn gutter(root: &Path, rel: &Path) -> Vec<forge_core::files::GutterMark> {
+    forge_core::files::diff(root, rel)
+        .map(|d| forge_core::files::gutter_marks(&d))
+        .unwrap_or_default()
+}
+
+/// Barra de color junto a la línea `n` si cambió: verde añadida, azul cambiada, triángulo rojo
+/// si se quitó algo justo debajo. Al pasar el cursor sale lo que había antes.
+fn gutter_mark(
+    ui: &mut egui::Ui,
+    marks: &[forge_core::files::GutterMark],
+    n: usize,
+    x: f32,
+    y: f32,
+    height: f32,
+) {
+    use forge_core::files::MarkKind;
+    for (i, m) in marks.iter().enumerate().filter(|(_, m)| m.line == n) {
+        let (color, bar) = match m.kind {
+            MarkKind::Added => (
+                theme::GREEN,
+                Rect::from_min_size(egui::pos2(x, y), Vec2::new(3.0, height)),
+            ),
+            MarkKind::Modified => (
+                theme::ACCENT,
+                Rect::from_min_size(egui::pos2(x, y), Vec2::new(3.0, height)),
+            ),
+            MarkKind::Deleted => (
+                theme::RED,
+                Rect::from_min_size(egui::pos2(x, y + height - 2.0), Vec2::new(8.0, 4.0)),
+            ),
+        };
+        ui.painter().rect_filled(bar, 0.0, color);
+        if m.removed.is_empty() {
+            continue;
+        }
+        let hit = ui.interact(
+            bar.expand2(Vec2::new(4.0, 0.0)),
+            ui.id().with(("gutter", i)),
+            egui::Sense::hover(),
+        );
+        hit.on_hover_ui(|ui| {
+            ui.label(RichText::new(tr!("Antes")).size(11.0).color(theme::TEXT_3));
+            for l in &m.removed {
+                ui.label(
+                    RichText::new(format!("- {l}"))
+                        .monospace()
+                        .color(theme::RED),
+                );
+            }
+        });
+    }
 }
 
 /// Icono y color de un archivo según su extensión.
