@@ -1406,6 +1406,17 @@ pub const EN: &[(&str, &str)] = &[
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
     ("Antes", "Before"),
+    ("Revisar", "Review"),
+    ("Revisar con…", "Review with…"),
+    ("Revisión", "Review"),
+    (
+        "Pedirle a otro agente que revise esta fase",
+        "Ask another agent to review this phase",
+    ),
+    (
+        "Este agente no tiene modo de solo lectura: solo el mensaje le pide no editar",
+        "This agent has no read-only mode: only the message asks it not to edit",
+    ),
     ("Ver el cambio", "Show the change"),
     ("Cambio {p0} de {p1}", "Change {p0} of {p1}"),
     ("Cambio siguiente", "Next change"),

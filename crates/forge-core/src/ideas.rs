@@ -56,6 +56,38 @@ pub struct Phase {
     pub branch_tip: Option<String>,
     #[serde(default)]
     pub tasks: Vec<Task>,
+    /// Agente que empezó la fase (el nombre del cliente MCP que la marcó en curso, p. ej.
+    /// «claude-code»): las correcciones de una revisión irán a él.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worked_by: Option<String>,
+}
+
+/// El mensaje para el agente que revisa la fase `index` de un plan (texto para agentes, en
+/// inglés). Solo lectura: quien corrige es el agente que hizo la fase. `None` si la fase no
+/// existe o no tiene rama.
+pub fn review_prompt(idea: &Idea, index: usize) -> Option<String> {
+    let phase = idea.phases.get(index)?;
+    let branch = phase.branch.as_deref()?;
+    let tasks: String = phase
+        .tasks
+        .iter()
+        .map(|t| format!("- [{}] {}\n", if t.done { "x" } else { " " }, t.text))
+        .collect();
+    let notes = if phase.notes.is_empty() {
+        String::new()
+    } else {
+        format!("Phase notes: {}\n", phase.notes)
+    };
+    Some(format!(
+        "You are a code reviewer. Review phase {n} (\"{title}\") of plan #{id} (\"{plan}\") in Forge's plans, on branch `{branch}`.\n\
+         {notes}Tasks of the phase:\n{tasks}\n\
+         This review is READ-ONLY. Do NOT edit files, and do NOT run git checkout, switch, stash, reset, commit or anything else that changes the working tree or the branch: another agent may be working in this folder. Read the changes with `git diff main...{branch}` and `git log main..{branch}` (use the repository's default branch if it is not main), and read files with your normal read tools.\n\
+         Check, in this order: 1) bugs and wrong behavior; 2) every task above is really done; 3) tests that cannot fail or are missing; 4) the project's conventions (read them with project_context and memory_search from Forge's MCP tools). List your findings ordered by severity; for each give the file and line, what is wrong and why. If you find nothing, say so. Do not fix anything: the agent that wrote the phase will fix what you report.",
+        n = index + 1,
+        title = phase.title,
+        id = idea.id,
+        plan = idea.title,
+    ))
 }
 
 fn pending() -> String {
@@ -63,6 +95,13 @@ fn pending() -> String {
 }
 
 impl Phase {
+    /// ¿Se puede pedir una revisión? Tiene rama (con qué comparar), está en curso y le queda
+    /// como mucho una tarea. Las fases hechas ya están en main y las pendientes no empezaron.
+    pub fn reviewable(&self) -> bool {
+        let left = self.tasks.iter().filter(|t| !t.done).count();
+        self.branch.is_some() && self.status == "doing" && left <= 1
+    }
+
     pub fn new(title: &str) -> Self {
         Phase {
             title: title.trim().to_string(),
@@ -80,6 +119,7 @@ impl Default for Phase {
             branch: None,
             branch_tip: None,
             tasks: Vec::new(),
+            worked_by: None,
         }
     }
 }
@@ -349,6 +389,10 @@ impl Store {
         };
         let mut phases = clean_phases(phases)?;
         for (i, phase) in phases.iter_mut().enumerate() {
+            // Quién trabajó la fase no se pierde al reescribir el plan.
+            if phase.worked_by.is_none() {
+                phase.worked_by = idea.phases.get(i).and_then(|prev| prev.worked_by.clone());
+            }
             if let (None, Some(branch)) = (&phase.branch_tip, &phase.branch) {
                 phase.branch_tip = idea
                     .phases
@@ -406,6 +450,9 @@ impl Store {
         })?;
         if let Some(status) = change.status {
             phase.status = check_status(status)?.into();
+            if phase.status == "doing" && !by.trim().is_empty() {
+                phase.worked_by = Some(by.trim().to_string());
+            }
         }
         if let Some(branch) = change.branch {
             let branch = branch.trim();
@@ -569,6 +616,7 @@ fn clean_phases(phases: &[Phase]) -> Result<Vec<Phase>, String> {
                         done: t.done,
                     })
                     .collect(),
+                worked_by: p.worked_by.clone().filter(|w| !w.trim().is_empty()),
             })
         })
         .collect()
@@ -748,6 +796,7 @@ mod tests {
                 text: "t".into(),
                 done: false,
             }],
+            worked_by: None,
         };
         store
             .set_phases(p, id3, &[phase_no_branch], "claude-code")
@@ -946,6 +995,114 @@ mod tests {
                 "#{b} ◐ Notificar vencidas (claude-code)\n    push y correo"
             ))
         );
+    }
+
+    #[test]
+    fn only_a_phase_with_a_branch_that_is_nearly_done_can_be_reviewed() {
+        let task = |done: bool| Task {
+            text: "t".into(),
+            done,
+        };
+        let mut p = Phase::new("Fase");
+        // Sin rama no hay nada que comparar con main.
+        p.status = "doing".into();
+        assert!(!p.reviewable());
+        p.branch = Some("feat/x".into());
+        // En curso y sin tareas: se puede revisar; con varias tareas por hacer, aún no.
+        assert!(p.reviewable());
+        p.tasks = vec![task(true), task(false), task(false)];
+        assert!(!p.reviewable());
+        // Queda una tarea o ninguna: sí.
+        p.tasks[1].done = true;
+        assert!(p.reviewable());
+        p.tasks[2].done = true;
+        assert!(p.reviewable());
+        // Pendiente (sin empezar) no; hecha (ya en main) tampoco.
+        p.status = "pending".into();
+        assert!(!p.reviewable());
+        p.status = "done".into();
+        assert!(!p.reviewable());
+    }
+
+    #[test]
+    fn the_review_prompt_asks_for_a_read_only_review_of_the_phase_branch() {
+        let store = Store::in_memory().unwrap();
+        let p = Some(Path::new("/p/forge"));
+        let mut phase = Phase::new("Botón Revisar");
+        phase.branch = Some("feat/plans-review-button".into());
+        phase.notes = "El revisor no toca el árbol de trabajo.".into();
+        phase.tasks = vec![
+            Task {
+                text: "Botón en la fase".into(),
+                done: true,
+            },
+            Task {
+                text: "Menú de agentes".into(),
+                done: false,
+            },
+        ];
+        let id = store
+            .add_plan(p, "Revisión de fases", "", &[phase], "claude-code")
+            .unwrap();
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        let prompt = review_prompt(&plan, 0).unwrap();
+        assert!(prompt.contains("feat/plans-review-button"));
+        assert!(prompt.contains("git diff"));
+        assert!(prompt.contains("- [x] Botón en la fase"));
+        assert!(prompt.contains("- [ ] Menú de agentes"));
+        assert!(prompt.contains("El revisor no toca el árbol de trabajo."));
+        // Solo lectura, dicho sin rodeos.
+        assert!(prompt.contains("Do NOT edit files"));
+        assert!(prompt.contains("checkout"));
+        // Una fase sin rama no se puede revisar.
+        let id2 = store
+            .add_plan(p, "Otro", "", &[Phase::new("Sin rama")], "claude-code")
+            .unwrap();
+        let plan2 = store.get_idea(p, id2).unwrap().unwrap();
+        assert!(review_prompt(&plan2, 0).is_none());
+        assert!(review_prompt(&plan, 5).is_none());
+    }
+
+    #[test]
+    fn the_agent_that_starts_a_phase_is_recorded_and_survives_a_replace() {
+        let store = Store::in_memory().unwrap();
+        let p = Some(Path::new("/p/forge"));
+        let id = store
+            .add_plan(
+                p,
+                "Plan",
+                "",
+                &[Phase::new("Uno"), Phase::new("Dos")],
+                "claude-code",
+            )
+            .unwrap();
+        let start = PhaseChange {
+            status: Some("in_progress"),
+            ..Default::default()
+        };
+        store.update_phase(p, id, 1, start, "codex").unwrap();
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        assert_eq!(plan.phases[0].worked_by, None);
+        assert_eq!(plan.phases[1].worked_by.as_deref(), Some("codex"));
+        // Tachar una tarea (otro agente) no cambia quién empezó la fase.
+        let tick = PhaseChange {
+            add_task: Some("Algo"),
+            ..Default::default()
+        };
+        store.update_phase(p, id, 1, tick, "opencode").unwrap();
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        assert_eq!(plan.phases[1].worked_by.as_deref(), Some("codex"));
+        // Reemplazar las fases (el agente reescribe el plan) conserva quién trabajó cada una.
+        store
+            .set_phases(
+                p,
+                id,
+                &[Phase::new("Uno"), Phase::new("Dos")],
+                "claude-code",
+            )
+            .unwrap();
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        assert_eq!(plan.phases[1].worked_by.as_deref(), Some("codex"));
     }
 
     #[test]

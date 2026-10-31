@@ -2184,6 +2184,36 @@ fn asking_an_agent_opens_it_with_the_prompt_or_writes_to_it() {
     assert_eq!(ws(h.state()).panel_count(), 2, "no abre otro panel");
 }
 
+/// «Revisar»: el revisor se abre en un panel nuevo con la fase por revisar, aunque ya haya otro
+/// panel del mismo agente trabajando (a ese no se le escribe: sigue con lo suyo).
+#[test]
+fn a_reviewer_opens_in_its_own_panel_next_to_the_agent_that_works() {
+    let _serial = serial();
+    let dir = project("review-agent");
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} pedido:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "trabaja", area);
+    wait_until(&mut h, "el agente trabaja", |a| {
+        ws(a).panel_count() == 2 && ws(a).shell_text().contains("pedido: trabaja")
+    });
+    h.state_mut().workspaces[0].review_agent(&ctx, "fake", "revisa-la-fase", area);
+    wait_until(&mut h, "el revisor tiene su panel", |a| {
+        ws(a).panel_count() == 3 && ws(a).shell_text().contains("pedido: revisa-la-fase")
+    });
+}
+
 /// Una división se gira desde la cabecera del panel: lado a lado ↔ uno encima del otro.
 #[test]
 fn a_split_can_be_rotated_from_the_panel_header() {

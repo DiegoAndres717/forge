@@ -283,6 +283,8 @@ enum UiCmd {
     PhaseAdd(IdeasTarget, i64),
     /// Pedir al agente por defecto que planifique por fases una idea del backlog.
     PlanWithAgent(i64),
+    /// Revisar una fase con el agente elegido: (plan, fase, id del agente).
+    ReviewPhase(i64, usize, String),
     MemorySave,
     /// Abre la memoria con el formulario de nota nueva.
     NewNote,
@@ -1131,6 +1133,7 @@ impl App {
             | UiCmd::TaskToggle(..)
             | UiCmd::PhaseAdd(..) => self.apply_idea(cmd),
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
+            UiCmd::ReviewPhase(id, phase, agent) => self.review_phase(ctx, id, phase, &agent, area),
             UiCmd::ToggleMemory
             | UiCmd::NewNote
             | UiCmd::MemorySave
@@ -1728,7 +1731,9 @@ impl eframe::App for App {
         let mut editor_rest: Option<Rect> = None;
         if let Some(i) = self.active {
             let planner = self.planner(i).map(|(_, name)| name);
+            let reviewers = self.reviewers(i);
             let ws = &mut self.workspaces[i];
+            ws.ideas.reviewers = reviewers;
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {
                 let (mut rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
                 if ws.guard.open {
