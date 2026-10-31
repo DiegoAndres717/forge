@@ -355,6 +355,41 @@ pub struct GutterMark {
     pub removed: Vec<String>,
 }
 
+/// Un bloque de cambio: las líneas `first..=last` del texto actual y lo que había antes.
+/// Con `deleted_only` no se añadió nada: solo se quitó, justo después de `first`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hunk {
+    pub first: usize,
+    pub last: usize,
+    pub removed: Vec<String>,
+    pub deleted_only: bool,
+}
+
+/// Junta las marcas del margen en bloques (una línea cambiada y las añadidas que la siguen
+/// van juntas), en orden de aparición.
+pub fn gutter_hunks(marks: &[GutterMark]) -> Vec<Hunk> {
+    let mut hunks: Vec<Hunk> = Vec::new();
+    for m in marks {
+        let joins = m.kind == MarkKind::Added
+            && hunks
+                .last()
+                .is_some_and(|h| !h.deleted_only && h.last + 1 == m.line);
+        if joins {
+            if let Some(h) = hunks.last_mut() {
+                h.last = m.line;
+            }
+        } else {
+            hunks.push(Hunk {
+                first: m.line,
+                last: m.line,
+                removed: m.removed.clone(),
+                deleted_only: m.kind == MarkKind::Deleted,
+            });
+        }
+    }
+    hunks
+}
+
 /// Marcas del margen del texto que se está escribiendo (aún sin guardar) frente al último
 /// commit. Sin Git, sin commit o archivo sin seguimiento: ninguna.
 pub fn live_gutter_marks(root: &Path, rel: &Path, content: &str) -> Vec<GutterMark> {
@@ -535,6 +570,38 @@ mod tests {
         // Quitar las primeras líneas deja la marca en la línea 1, no en la 0.
         let top = "--- a/f\n+++ b/f\n@@ -1,2 +1,1 @@\n-x\n y\n";
         assert_eq!(gutter_marks(top)[0].line, 1);
+    }
+
+    #[test]
+    fn marks_group_into_hunks_with_what_was_removed_and_added() {
+        let diff = "--- a/f\n+++ b/f\n@@ -1,6 +1,7 @@\n keep\n-old\n+new\n+extra\n keep2\n-gone\n keep3\n+tail\n";
+        let hunks = gutter_hunks(&gutter_marks(diff));
+        assert_eq!(
+            hunks,
+            vec![
+                // «old» pasó a ser «new» y «extra»: un solo bloque de dos líneas.
+                Hunk {
+                    first: 2,
+                    last: 3,
+                    removed: vec!["old".into()],
+                    deleted_only: false
+                },
+                // Solo se quitó algo: nada añadido, el bloque cuelga de la línea de arriba.
+                Hunk {
+                    first: 4,
+                    last: 4,
+                    removed: vec!["gone".into()],
+                    deleted_only: true
+                },
+                Hunk {
+                    first: 6,
+                    last: 6,
+                    removed: vec![],
+                    deleted_only: false
+                },
+            ]
+        );
+        assert!(gutter_hunks(&[]).is_empty());
     }
 
     #[test]

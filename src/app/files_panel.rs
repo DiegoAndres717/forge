@@ -74,6 +74,15 @@ pub enum ViewMode {
     Diff,
 }
 
+/// El cuadro con el detalle de un cambio, abierto al hacer clic en el margen.
+#[derive(Default)]
+pub struct Peek {
+    /// Primera línea del bloque abierto.
+    pub first: Option<usize>,
+    /// Hay que llevar el editor hasta ese bloque (al saltar al anterior o al siguiente).
+    pub goto: bool,
+}
+
 /// Un archivo abierto: su texto editable, o una imagen, o el motivo de no poder mostrarlo.
 pub struct Viewer {
     pub path: String,
@@ -89,6 +98,8 @@ pub struct Viewer {
     pub marks: Vec<forge_core::files::GutterMark>,
     /// Huella del texto con el que se calcularon las marcas en vivo (0 = las del disco) y cuándo.
     pub marks_live: (u64, Option<std::time::Instant>),
+    /// Bloque de cambio abierto bajo el margen (por su primera línea).
+    pub peek: Peek,
     /// Comentarios sobre líneas del diff: (índice de la línea, la línea con su bloque, el
     /// comentario). Se envían al agente; si el diff se regenera, se descartan.
     pub comments: Vec<(usize, String, String)>,
@@ -501,9 +512,10 @@ impl App {
                                 path,
                                 highlight,
                                 marks,
+                                peek,
                                 ..
                             } = v;
-                            code_editor(ui, content, path, highlight, marks);
+                            code_editor(ui, content, path, highlight, marks, peek);
                         }
                         ViewMode::Preview => markdown(ui, &v.content),
                         ViewMode::Diff => {
@@ -1017,6 +1029,7 @@ impl App {
             diff: String::new(),
             marks: Vec::new(),
             marks_live: (0, None),
+            peek: Peek::default(),
             comments: Vec::new(),
             draft: None,
             highlight: None,
@@ -1267,8 +1280,18 @@ fn code_editor(
     path: &str,
     cache: &mut Option<(u64, Arc<egui::Galley>)>,
     marks: &[forge_core::files::GutterMark],
+    peek: &mut Peek,
 ) {
     use std::hash::{Hash, Hasher};
+    let hunks = forge_core::files::gutter_hunks(marks);
+    // Si el texto cambió y el bloque ya no existe, el cuadro se cierra.
+    if peek
+        .first
+        .is_some_and(|f| !hunks.iter().any(|h| h.first == f))
+    {
+        peek.first = None;
+    }
+    let mut peek_bottom: Option<f32> = None;
     let file_name = path.rsplit('/').next().unwrap_or(path).to_string();
     let font = FontId::monospace(13.0);
     let digits = (content.lines().count().max(1) + 1)
@@ -1336,12 +1359,39 @@ fn code_editor(
                 );
             }
             if new_line && y + 20.0 >= visible.min && y <= visible.max {
-                gutter_mark(ui, marks, n, left + gutter - 6.0, y, placed.height());
+                let strip = Rect::from_min_size(
+                    egui::pos2(left, y),
+                    Vec2::new(gutter - 2.0, placed.height()),
+                );
+                gutter_mark(ui, marks, &hunks, peek, n, strip, left + gutter - 6.0);
+            }
+            if let Some(h) = peek.first.and_then(|f| hunks.iter().find(|h| h.first == f)) {
+                if new_line && n == h.last {
+                    peek_bottom = Some(y + placed.height());
+                }
+                if peek.goto && new_line && n == h.first {
+                    ui.scroll_to_rect(
+                        Rect::from_min_size(egui::pos2(left, y), Vec2::new(10.0, placed.height())),
+                        Some(egui::Align::Center),
+                    );
+                    peek.goto = false;
+                }
             }
             if new_line {
                 n += 1;
             }
             new_line = placed.ends_with_newline;
+        }
+        // Si el bloque salió de la vista al hacer scroll, el cuadro no se pinta fuera del editor.
+        if let Some(bottom) = peek_bottom.filter(|b| ui.clip_rect().y_range().contains(*b)) {
+            peek_box(
+                ui,
+                content,
+                &hunks,
+                peek,
+                egui::pos2(left + gutter - 6.0, bottom),
+                ui.clip_rect().right(),
+            );
         }
     });
 }
@@ -1381,17 +1431,22 @@ fn gutter(root: &Path, rel: &Path) -> Vec<forge_core::files::GutterMark> {
 }
 
 /// Barra de color junto a la línea `n` si cambió: verde añadida, azul cambiada, triángulo rojo
-/// si se quitó algo justo debajo. Al pasar el cursor sale lo que había antes.
+/// si se quitó algo justo debajo. Toda la franja `strip` (números y barra) se puede pulsar para
+/// abrir o cerrar el detalle del bloque de cambio.
 fn gutter_mark(
     ui: &mut egui::Ui,
     marks: &[forge_core::files::GutterMark],
+    hunks: &[forge_core::files::Hunk],
+    peek: &mut Peek,
     n: usize,
+    strip: Rect,
     x: f32,
-    y: f32,
-    height: f32,
 ) {
     use forge_core::files::MarkKind;
-    for (i, m) in marks.iter().enumerate().filter(|(_, m)| m.line == n) {
+    let (y, height) = (strip.min.y, strip.height());
+    let mut marked = false;
+    for m in marks.iter().filter(|m| m.line == n) {
+        marked = true;
         let (color, bar) = match m.kind {
             MarkKind::Added => (
                 theme::GREEN,
@@ -1407,25 +1462,116 @@ fn gutter_mark(
             ),
         };
         ui.painter().rect_filled(bar, 0.0, color);
-        if m.removed.is_empty() {
-            continue;
-        }
-        let hit = ui.interact(
-            bar.expand2(Vec2::new(4.0, 0.0)),
-            ui.id().with(("gutter", i)),
-            egui::Sense::hover(),
-        );
-        hit.on_hover_ui(|ui| {
-            ui.label(RichText::new(tr!("Antes")).size(11.0).color(theme::TEXT_3));
-            for l in &m.removed {
-                ui.label(
-                    RichText::new(format!("- {l}"))
-                        .monospace()
-                        .color(theme::RED),
-                );
-            }
-        });
     }
+    if !marked {
+        return;
+    }
+    let hit = ui
+        .interact(strip, ui.id().with(("gutter", n)), egui::Sense::click())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    hit.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("Ver el cambio"))
+    });
+    if hit.clicked()
+        && let Some(h) = hunks
+            .iter()
+            .find(|h| n >= h.first && n <= h.last.max(h.first))
+    {
+        peek.first = if peek.first == Some(h.first) {
+            None
+        } else {
+            Some(h.first)
+        };
+    }
+}
+
+/// El detalle de un cambio bajo su última línea, encima del código: lo quitado en rojo, lo
+/// añadido en verde y flechas para ir al cambio anterior o al siguiente.
+fn peek_box(
+    ui: &mut egui::Ui,
+    content: &str,
+    hunks: &[forge_core::files::Hunk],
+    peek: &mut Peek,
+    pos: egui::Pos2,
+    right: f32,
+) {
+    let Some(at) = peek
+        .first
+        .and_then(|f| hunks.iter().position(|h| h.first == f))
+    else {
+        return;
+    };
+    let h = &hunks[at];
+    // Esc cierra el cuadro y no llega a nadie más.
+    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Escape)) {
+        peek.first = None;
+        peek.goto = false;
+        return;
+    }
+    let width = (right - pos.x - 12.0).max(260.0);
+    egui::Area::new(ui.id().with("gutter-peek"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(theme::SURFACE)
+                .stroke(egui::Stroke::new(1.0, theme::SEPARATOR))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::same(6))
+                .show(ui, |ui| {
+                    ui.set_width(width);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(tr!(
+                                "Cambio {p0} de {p1}",
+                                p0 = at + 1,
+                                p1 = hunks.len()
+                            ))
+                            .size(11.5)
+                            .color(theme::TEXT_3),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if theme::icon_button(ui, icon::X, tr!("Cerrar")).clicked() {
+                                peek.first = None;
+                            }
+                            if theme::icon_button(ui, icon::ARROW_DOWN, tr!("Cambio siguiente"))
+                                .clicked()
+                            {
+                                peek.first = Some(hunks[(at + 1) % hunks.len()].first);
+                                peek.goto = true;
+                            }
+                            if theme::icon_button(ui, icon::ARROW_UP, tr!("Cambio anterior"))
+                                .clicked()
+                            {
+                                peek.first =
+                                    Some(hunks[(at + hunks.len() - 1) % hunks.len()].first);
+                                peek.goto = true;
+                            }
+                        });
+                    });
+                    let line = |ui: &mut egui::Ui, sign: &str, text: &str, color: Color32| {
+                        egui::Frame::NONE
+                            .fill(color.gamma_multiply(0.18))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(
+                                    RichText::new(format!("{sign} {text}"))
+                                        .monospace()
+                                        .size(12.5)
+                                        .color(color),
+                                );
+                            });
+                    };
+                    for l in &h.removed {
+                        line(ui, "-", l, theme::RED);
+                    }
+                    if !h.deleted_only {
+                        for l in content.lines().skip(h.first - 1).take(h.last + 1 - h.first) {
+                            line(ui, "+", l, theme::GREEN);
+                        }
+                    }
+                });
+        });
 }
 
 /// Icono y color de un archivo según su extensión.
