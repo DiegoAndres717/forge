@@ -863,8 +863,7 @@ impl App {
                 FontId::monospace(12.0),
                 color,
             );
-        } else if let Some(c) = inside {
-            let _ = c;
+        } else if inside.is_some() {
             ui.painter()
                 .circle_filled(egui::pos2(rect.max.x - 12.0, mid), 2.5, theme::TEXT_3);
         }
