@@ -10,6 +10,7 @@ pub(crate) type FilesData = (
     HashMap<String, Vec<Entry>>,
     HashMap<String, char>,
     Option<Vec<String>>,
+    HashSet<String>,
 );
 
 /// Ajuste donde se guarda «no volver a preguntar» antes de mandar a la papelera.
@@ -27,6 +28,8 @@ pub struct FilesView {
     pub listing: HashMap<String, Vec<Entry>>,
     /// Estado de Git de cada archivo con cambios (`M`, `A`, `D`, `?`…).
     pub changes: HashMap<String, char>,
+    /// Lo que Git ignora entre lo que se ve en el árbol (se muestra atenuado).
+    pub ignored: HashSet<String>,
     pub error: Option<String>,
     /// Ruta que espera confirmación para ir a la papelera.
     pub confirm_trash: Option<String>,
@@ -134,15 +137,27 @@ impl Viewer {
     }
 }
 
-/// Letra y color del estado de un archivo (`git status`).
+// Colores del explorador: los de la barra lateral de VS Code (tema oscuro), suaves y planos.
+const EXPLORER_BG: Color32 = Color32::from_rgb(0x18, 0x18, 0x18);
+const ROW_TEXT: Color32 = Color32::from_rgb(0xcc, 0xcc, 0xcc);
+const ROW_DIMMED: Color32 = Color32::from_rgb(0x7f, 0x7f, 0x7f);
+const ROW_SELECTED: Color32 = Color32::from_rgb(0x37, 0x37, 0x3d);
+const ROW_HOVER: Color32 = Color32::from_rgb(0x2a, 0x2d, 0x2e);
+const ROW_GUIDE: Color32 = Color32::from_rgb(0x40, 0x40, 0x40);
+const FOLDER_ICON: Color32 = Color32::from_rgb(0x90, 0xa4, 0xae);
+/// Alto de cada fila del árbol y sangría a su izquierda.
+const ROW_HEIGHT: f32 = 22.0;
+const ROW_INSET: f32 = 10.0;
+
+/// Letra y color del estado de un archivo (`git status`), con los tonos de VS Code.
 fn badge(code: char) -> (char, Color32) {
     match code {
-        'M' => ('M', theme::YELLOW),
-        'A' => ('A', theme::GREEN),
-        'D' => ('D', theme::RED),
-        'R' | 'C' => ('R', theme::PURPLE),
-        '?' => ('U', theme::GREEN),
-        'U' => ('!', theme::RED),
+        'M' => ('M', Color32::from_rgb(0xe2, 0xc0, 0x8d)),
+        'A' => ('A', Color32::from_rgb(0x81, 0xb8, 0x8b)),
+        'D' => ('D', Color32::from_rgb(0xc7, 0x4e, 0x39)),
+        'R' | 'C' => ('R', Color32::from_rgb(0x73, 0xc9, 0x91)),
+        '?' => ('U', Color32::from_rgb(0x73, 0xc9, 0x91)),
+        'U' => ('!', Color32::from_rgb(0xe4, 0x67, 0x6b)),
         c => (c, theme::TEXT_3),
     }
 }
@@ -221,11 +236,12 @@ impl App {
             }
         }
         if let Some(rx) = &files.loading
-            && let Ok((listing, changes, all)) = rx.try_recv()
+            && let Ok((listing, changes, all, ignored)) = rx.try_recv()
         {
             files.loading = None;
             files.loaded = Some(Instant::now());
             files.listing = listing;
+            files.ignored = ignored;
             let before = std::mem::replace(&mut files.changes, changes);
             // Si cambió el estado de Git del archivo abierto (un commit, un descarte), sus
             // marcas del margen se calculan de nuevo.
@@ -260,7 +276,7 @@ impl App {
         let (tx, rx) = channel();
         let (root, repaint) = (self.workspaces[i].project.path.clone(), ctx.clone());
         std::thread::spawn(move || {
-            let listing = dirs
+            let listing: HashMap<String, Vec<Entry>> = dirs
                 .into_iter()
                 // Una carpeta que ya no existe simplemente no sale en el árbol.
                 .filter_map(|d| {
@@ -278,7 +294,12 @@ impl App {
                 })
                 .unwrap_or_default();
             let all = want_all.then(|| forge_core::files::project_files(&root));
-            let _ = tx.send((listing, changes, all));
+            let paths: Vec<String> = listing
+                .iter()
+                .flat_map(|(d, entries)| entries.iter().map(move |e| join(d, &e.name)))
+                .collect();
+            let ignored = forge_core::git::ignored(&root, &paths);
+            let _ = tx.send((listing, changes, all, ignored));
             repaint.request_repaint();
         });
         self.workspaces[i].files.loading = Some(rx);
@@ -291,7 +312,7 @@ impl App {
         rect: Rect,
         cmds: &mut Vec<UiCmd>,
     ) {
-        ui.painter().rect_filled(rect, 0.0, theme::SIDEBAR);
+        ui.painter().rect_filled(rect, 0.0, EXPLORER_BG);
         ui.painter().vline(
             rect.min.x + 0.5,
             rect.y_range(),
@@ -301,18 +322,9 @@ impl App {
             ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(16.0, 14.0))));
         ui.spacing_mut().item_spacing.y = 6.0;
         let files = &mut ws.files;
+        let project_name = ws.project.name().to_uppercase();
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(icon::FOLDER_OPEN)
-                    .size(18.0)
-                    .color(theme::ORANGE),
-            );
-            ui.label(
-                RichText::new(tr!("Archivos"))
-                    .size(15.0)
-                    .color(theme::TEXT)
-                    .strong(),
-            );
+            ui.label(RichText::new(tr!("Archivos")).size(12.0).color(ROW_TEXT));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::icon_button(ui, icon::X, tr!("Cerrar")).clicked() {
                     cmds.push(UiCmd::ToggleFiles);
@@ -325,6 +337,16 @@ impl App {
                     cmds.push(UiCmd::FilesNewItem(String::new(), false));
                 }
             });
+        });
+        // La raíz del proyecto, como en VS Code: su nombre en mayúsculas bajo el título.
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(icon::CARET_DOWN).size(10.0).color(ROW_TEXT));
+            ui.label(
+                RichText::new(project_name)
+                    .size(11.0)
+                    .color(ROW_TEXT)
+                    .strong(),
+            );
         });
         if let Some(e) = &files.error {
             ui.label(RichText::new(e).size(12.0).color(theme::RED));
@@ -369,10 +391,13 @@ impl App {
         // Al buscar se ve otra lista: lo que se estaba nombrando se deja.
         let mut draft = files.new_item.take().filter(|_| !searching);
         let mut renaming = files.renaming.take().filter(|_| !searching);
+        // El árbol ocupa todo el ancho del panel: la banda de selección toca los bordes.
+        let tree = Rect::from_min_max(egui::pos2(rect.min.x + 1.0, ui.cursor().min.y), rect.max);
+        let mut tree_ui = ui.new_child(egui::UiBuilder::new().max_rect(tree));
         egui::ScrollArea::vertical()
             .id_salt("file-tree")
             .auto_shrink([false, false])
-            .show(&mut ui, |ui| {
+            .show(&mut tree_ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 1.0;
                 if searching {
                     let found = search_files(&files.all, &files.search);
@@ -384,8 +409,10 @@ impl App {
                         let dir = path.strip_suffix(name).unwrap_or("").trim_end_matches('/');
                         let code = files.changes.get(path).copied();
                         let selected = files.viewer.as_ref().is_some_and(|v| v.path == *path);
+                        let ignored = files.ignored.contains(path.as_str());
                         Self::file_row(
-                            ui, path, name, dir, false, false, 0, code, None, selected, cmds,
+                            ui, path, name, dir, false, false, 0, code, None, selected, ignored,
+                            cmds,
                         );
                     }
                 } else {
@@ -634,6 +661,7 @@ impl App {
                         .viewer
                         .as_ref()
                         .is_some_and(|v| !entry.is_dir && v.path == path),
+                    files.ignored.contains(&path),
                     cmds,
                 );
             }
@@ -655,7 +683,7 @@ impl App {
     ) -> Option<bool> {
         let mut done = None;
         ui.horizontal(|ui| {
-            ui.add_space(4.0 + depth as f32 * 14.0 + 14.0);
+            ui.add_space(ROW_INSET + depth as f32 * 14.0 + 14.0);
             ui.label(RichText::new(glyph).size(14.0).color(theme::TEXT_3));
             let edit = ui.add(
                 egui::TextEdit::singleline(name)
@@ -730,35 +758,28 @@ impl App {
         code: Option<char>,
         inside: Option<char>,
         selected: bool,
+        ignored: bool,
         cmds: &mut Vec<UiCmd>,
     ) {
         let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.0), Sense::click());
+            ui.allocate_exact_size(Vec2::new(ui.available_width(), ROW_HEIGHT), Sense::click());
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         // Las filas se pintan a mano: sin esto no tendrían nombre para los lectores de pantalla.
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
         let painter = ui.painter().clone();
+        // El archivo abierto: banda de ancho completo; al pasar el cursor, una más tenue.
         if selected {
-            // El archivo abierto: fondo con el color de acento y una barra a la izquierda.
-            painter.rect_filled(rect, 6.0, theme::ACCENT.gamma_multiply(0.22));
-            painter.rect_filled(
-                Rect::from_min_size(
-                    rect.min + Vec2::new(0.0, 4.0),
-                    Vec2::new(3.0, rect.height() - 8.0),
-                ),
-                1.5,
-                theme::ACCENT,
-            );
+            painter.rect_filled(rect, 0.0, ROW_SELECTED);
         } else if response.hovered() {
-            painter.rect_filled(rect, 6.0, theme::SURFACE_HOVER.gamma_multiply(0.6));
+            painter.rect_filled(rect, 0.0, ROW_HOVER);
         }
         // Guías verticales de la sangría, como en VS Code.
         for d in 0..depth {
-            let gx = rect.min.x + 4.0 + d as f32 * 14.0 + 7.0;
-            painter.vline(gx, rect.y_range(), egui::Stroke::new(1.0, theme::SEPARATOR));
+            let gx = rect.min.x + ROW_INSET + d as f32 * 14.0 + 7.0;
+            painter.vline(gx, rect.y_range(), egui::Stroke::new(1.0, ROW_GUIDE));
         }
         let (letter, color) = code.map_or(('\0', theme::TEXT), badge);
-        let mut x = rect.min.x + 4.0 + depth as f32 * 14.0;
+        let mut x = rect.min.x + ROW_INSET + depth as f32 * 14.0;
         let mid = rect.center().y;
         if is_dir {
             let caret = if open {
@@ -770,8 +791,8 @@ impl App {
                 egui::pos2(x, mid),
                 egui::Align2::LEFT_CENTER,
                 caret,
-                FontId::proportional(11.0),
-                theme::TEXT_3,
+                FontId::proportional(10.0),
+                ROW_TEXT,
             );
         }
         x += 14.0;
@@ -782,16 +803,22 @@ impl App {
                 } else {
                     icon::FOLDER
                 },
-                if open { theme::YELLOW } else { theme::ORANGE },
+                FOLDER_ICON,
             )
         } else {
             file_glyph(name)
+        };
+        // Lo que Git ignora (dependencias, compilación) se ve atenuado, icono incluido.
+        let glyph_color = if ignored {
+            glyph_color.gamma_multiply(0.5)
+        } else {
+            glyph_color
         };
         painter.text(
             egui::pos2(x, mid),
             egui::Align2::LEFT_CENTER,
             glyph,
-            FontId::proportional(15.0),
+            FontId::proportional(14.0),
             glyph_color,
         );
         x += 24.0;
@@ -805,10 +832,10 @@ impl App {
             color
         } else if let Some(c) = inside {
             badge(c).1
-        } else if selected || response.hovered() {
-            theme::TEXT
+        } else if ignored {
+            ROW_DIMMED
         } else {
-            theme::TEXT_2
+            ROW_TEXT
         };
         let clip = Rect::from_min_max(egui::pos2(x, rect.min.y), egui::pos2(right, rect.max.y));
         let painter = ui.painter().with_clip_rect(clip);
@@ -816,7 +843,7 @@ impl App {
             egui::pos2(x, mid),
             egui::Align2::LEFT_CENTER,
             name,
-            FontId::proportional(12.5),
+            FontId::proportional(13.0),
             name_color,
         );
         if !dir.is_empty() {
@@ -837,8 +864,9 @@ impl App {
                 color,
             );
         } else if let Some(c) = inside {
+            let _ = c;
             ui.painter()
-                .circle_filled(egui::pos2(rect.max.x - 10.0, mid), 3.0, badge(c).1);
+                .circle_filled(egui::pos2(rect.max.x - 12.0, mid), 2.5, theme::TEXT_3);
         }
         if response.clicked() {
             cmds.push(if is_dir {

@@ -463,6 +463,17 @@ fn ui_preview() {
     // Árbol de archivos con una carpeta abierta y el cambio de arriba marcado.
     std::fs::create_dir_all(project.join("docs")).unwrap();
     std::fs::write(project.join("docs/notas.md"), "# Notas\n").unwrap();
+    // Lo que Git ignora (dependencias, compilación) sale atenuado en el árbol.
+    std::fs::write(
+        project.join(".gitignore"),
+        "node_modules/\ndist/\n*.tsbuildinfo\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(project.join("node_modules/pkg")).unwrap();
+    std::fs::write(project.join("node_modules/pkg/index.js"), "x\n").unwrap();
+    std::fs::create_dir_all(project.join("dist")).unwrap();
+    std::fs::write(project.join("dist/app.js"), "x\n").unwrap();
+    std::fs::write(project.join("tsconfig.tsbuildinfo"), "{}\n").unwrap();
     harness.state_mut().workspaces[0].files.open = true;
     harness.state_mut().workspaces[0]
         .files
