@@ -48,6 +48,12 @@ pub struct FilesView {
     pub renaming: Option<Renaming>,
     /// Archivo abierto al lado del árbol.
     pub viewer: Option<Viewer>,
+    /// Observador de la carpeta del proyecto: avisa de lo que cambia en disco (solo vive mientras
+    /// el panel o un archivo están abiertos).
+    pub watcher: Option<super::files_watch::ProjectWatcher>,
+    /// El observador no pudo arrancar (por ejemplo, demasiados archivos vigilados en Linux):
+    /// se vuelve a mirar el disco cada pocos segundos, como antes.
+    pub watcher_failed: bool,
 }
 
 /// Lo nuevo que se está nombrando: dónde va, si es carpeta y el nombre escrito hasta ahora.
@@ -175,14 +181,63 @@ impl App {
     /// Relee el árbol del proyecto activo cada pocos segundos (en otro hilo).
     pub(super) fn files_tick(&mut self, ctx: &egui::Context) {
         let Some(i) = self.active else { return };
+        let root = self.workspaces[i].project.path.clone();
+        // Solo el proyecto activo se observa: los demás sueltan el suyo.
+        for (n, w) in self.workspaces.iter_mut().enumerate() {
+            if n != i {
+                w.files.watcher = None;
+                w.files.watcher_failed = false;
+            }
+        }
         let files = &mut self.workspaces[i].files;
+        // Un observador del disco avisa de lo que cambia (un agente, un commit): el árbol se
+        // recarga y el archivo abierto se vuelve a leer, sin preguntar cada poco tiempo.
+        if files.open || files.viewer.is_some() {
+            if files.watcher.is_none() && !files.watcher_failed {
+                files.watcher = super::files_watch::ProjectWatcher::start(&root, ctx);
+                files.watcher_failed = files.watcher.is_none();
+                files.dirty = true;
+            }
+        } else {
+            files.watcher = None;
+            files.watcher_failed = false;
+        }
+        // Sin observador, el archivo abierto se mira junto con el árbol.
+        if files.watcher_failed
+            && files
+                .loaded
+                .is_none_or(|t| t.elapsed() > Duration::from_secs(3))
+            && let Some(v) = files.viewer.as_mut().filter(|v| v.is_text())
+        {
+            follow_disk(&root, v);
+        }
+        if let Some(changes) = files.watcher.as_ref().and_then(|w| w.take()) {
+            files.dirty = true;
+            if let Some(w) = files.watcher.as_ref()
+                && let Some(v) = files.viewer.as_mut().filter(|v| v.is_text())
+                && changes.touches(&w.root().join(&v.path))
+            {
+                follow_disk(&root, v);
+            }
+        }
         if let Some(rx) = &files.loading
             && let Ok((listing, changes, all)) = rx.try_recv()
         {
             files.loading = None;
             files.loaded = Some(Instant::now());
             files.listing = listing;
-            files.changes = changes;
+            let before = std::mem::replace(&mut files.changes, changes);
+            // Si cambió el estado de Git del archivo abierto (un commit, un descarte), sus
+            // marcas del margen se calculan de nuevo.
+            if let Some(v) = files
+                .viewer
+                .as_mut()
+                .filter(|v| v.is_text() && v.content == v.saved)
+                && before.get(&v.path) != files.changes.get(&v.path)
+            {
+                v.marks = gutter(&root, Path::new(&v.path));
+                v.marks_live = (0, None);
+            }
             if let Some(all) = all {
                 files.all = all;
             }
@@ -190,11 +245,15 @@ impl App {
         let stale = files.dirty
             || files
                 .loaded
-                .is_none_or(|t| t.elapsed() > Duration::from_secs(3));
+                // Con observador, solo un respaldo lento por si se perdiera algún aviso.
+                .is_none_or(|t| {
+                    t.elapsed() > Duration::from_secs(if files.watcher_failed { 3 } else { 30 })
+                });
         if !files.open || files.loading.is_some() || !stale {
             return;
         }
         files.dirty = false;
+        let poll = if files.watcher_failed { 3 } else { 30 };
         let want_all = !files.search.trim().is_empty();
         let mut dirs: Vec<String> = files.expanded.iter().cloned().collect();
         dirs.push(String::new());
@@ -223,7 +282,7 @@ impl App {
             repaint.request_repaint();
         });
         self.workspaces[i].files.loading = Some(rx);
-        ctx.request_repaint_after(Duration::from_secs(3));
+        ctx.request_repaint_after(Duration::from_secs(poll));
     }
 
     pub(super) fn files_ui(
@@ -1394,6 +1453,35 @@ fn code_editor(
             );
         }
     });
+}
+
+/// Si un agente cambió en disco el archivo abierto y no hay texto tuyo sin guardar, lo vuelve
+/// a leer y recalcula las marcas. Con cambios sin guardar no se toca nada: guardar avisa.
+fn follow_disk(root: &Path, v: &mut Viewer) {
+    if v.content != v.saved || v.pending.is_some() {
+        return;
+    }
+    let rel = Path::new(&v.path);
+    let on_disk = std::fs::metadata(root.join(rel))
+        .and_then(|m| m.modified())
+        .ok();
+    if on_disk == v.modified {
+        return;
+    }
+    // Pase lo que pase se da por vista esta hora: un archivo borrado o ilegible no se relee.
+    v.modified = on_disk;
+    if let Ok(forge_core::files::Loaded::Text(text)) = forge_core::files::load(root, rel) {
+        v.saved = text.clone();
+        v.content = text;
+        v.marks = gutter(root, rel);
+        v.marks_live = (0, None);
+        if v.mode == ViewMode::Diff {
+            // El diff nuevo puede tener otras líneas: lo comentado ya no vale.
+            v.comments.clear();
+            v.draft = None;
+            v.diff = forge_core::files::diff(root, rel).unwrap_or_else(|e| e);
+        }
+    }
 }
 
 /// Mantiene las marcas del margen al día mientras se escribe: tras una pausa breve compara el

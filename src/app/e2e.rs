@@ -1316,6 +1316,87 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
 }
 
 #[test]
+fn an_open_file_follows_what_an_agent_writes_to_disk_unless_you_have_unsaved_text() {
+    let _serial = serial();
+    let dir = project("follow");
+    assert!(
+        std::process::Command::new("git")
+            .args(["commit", "-qm", "base"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .apply_files(&ctx, UiCmd::FilesOpen("main.ts".into()));
+    h.run_steps(2);
+    assert!(
+        ws(h.state())
+            .files
+            .viewer
+            .as_ref()
+            .unwrap()
+            .marks
+            .is_empty()
+    );
+    // Un agente escribe el archivo por fuera (con otra hora de modificación).
+    let touch = |text: &str, secs: u64| {
+        let path = dir.join("main.ts");
+        std::fs::write(&path, text).unwrap();
+        let t = std::time::SystemTime::now() + std::time::Duration::from_secs(secs);
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(t)
+            .unwrap();
+    };
+    touch("export const x = 2;\nconst y = 3;\n", 5);
+    wait_until(&mut h, "el editor sigue al agente", |a| {
+        ws(a).files.viewer.as_ref().is_some_and(|v| {
+            v.content == "export const x = 2;\nconst y = 3;\n" && !v.marks.is_empty()
+        })
+    });
+    // Con texto tuyo sin guardar no se pisa nada.
+    ws_mut(h.state_mut()).files.viewer.as_mut().unwrap().content = "lo mío".into();
+    touch("otra cosa\n", 10);
+    for _ in 0..40 {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert_eq!(
+        ws(h.state()).files.viewer.as_ref().unwrap().content,
+        "lo mío"
+    );
+}
+
+#[test]
+fn a_file_created_outside_shows_up_in_the_tree_long_before_the_slow_fallback() {
+    let _serial = serial();
+    let dir = project("watch-tree");
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    // Un agente crea un archivo: el árbol lo recoge por el aviso del sistema, sin esperar los 30 s.
+    std::fs::write(dir.join("creado-por-un-agente.rs"), "fn main() {}\n").unwrap();
+    let start = Instant::now();
+    wait_until(&mut h, "archivo nuevo en el árbol", |a| {
+        ws(a)
+            .files
+            .listing
+            .get("")
+            .is_some_and(|l| l.iter().any(|e| e.name == "creado-por-un-agente.rs"))
+    });
+    assert!(start.elapsed() < Duration::from_secs(10));
+}
+
+#[test]
 fn clicking_a_gutter_mark_opens_the_change_and_escape_closes_it() {
     let _serial = serial();
     let dir = project("peek");

@@ -29,6 +29,7 @@ mod approvals;
 mod chrome;
 mod editors;
 mod files_panel;
+mod files_watch;
 mod git_panel;
 mod guard_form;
 mod guard_panel;
