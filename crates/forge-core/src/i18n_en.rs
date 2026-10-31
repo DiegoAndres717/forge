@@ -1473,6 +1473,25 @@ pub const EN: &[(&str, &str)] = &[
     ("{n} hallazgos", "{n} findings"),
     ("paso {s} de {t}", "step {s} of {t}"),
     ("faltan ~{m} min", "~{m} min left"),
+    ("Aprender", "Learn"),
+    (
+        "Elige qué errores de esta revisión debe recordar el proyecto",
+        "Choose which mistakes from this review the project should remember",
+    ),
+    (
+        "Qué recordar de esta revisión",
+        "What to remember from this review",
+    ),
+    (
+        "Marca lo que valga la pena que todos los agentes recuerden; lo demás se descarta.",
+        "Tick what is worth every agent remembering; the rest is dropped.",
+    ),
+    ("Guardar lo marcado ({n})", "Save the ticked ({n})"),
+    ("Descartar todo", "Discard all"),
+    (
+        "tipo de memoria desconocido: {kind}",
+        "unknown memory kind: {kind}",
+    ),
     ("Reabrir", "Reopen"),
     ("Marcar como resuelto", "Mark as resolved"),
     ("Borrar comentario", "Delete comment"),

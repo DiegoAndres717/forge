@@ -3,7 +3,7 @@
 // Backlog y Completado (plegada). La lista general (sin proyecto) usa el mismo componente
 // en Inicio.
 use super::*;
-use crate::workspace::IdeasView;
+use crate::workspace::{IdeasView, LearnItem, Learning};
 use forge_core::ideas::{Idea, Phase};
 use forge_core::tr;
 
@@ -149,10 +149,12 @@ impl App {
             phase_toggled,
             highlighted,
             phase_input,
+            learning,
             ..
         } = view;
         let mut toggles = Toggles::default();
         let phase_cell = std::cell::RefCell::new(phase_input.take());
+        let learn_cell = std::cell::RefCell::new(learning.take());
         let doing: Vec<&Idea> = items.iter().filter(|i| i.status == "doing").collect();
         let backlog: Vec<&Idea> = items.iter().filter(|i| i.status == "pending").collect();
         let done: Vec<&Idea> = items.iter().filter(|i| i.done()).collect();
@@ -166,6 +168,7 @@ impl App {
                 reviewers: &reviewers,
                 comments: &comments,
                 runs: &runs,
+                learning: &learn_cell,
                 highlighted: *highlighted,
                 phase_input: &phase_cell,
             };
@@ -219,6 +222,7 @@ impl App {
         }
 
         *phase_input = phase_cell.into_inner();
+        *learning = learn_cell.into_inner();
         if let Some((id, open)) = toggles.plan {
             toggled.insert(id, open);
         }
@@ -338,6 +342,10 @@ impl App {
             UiCmd::IdeaSet(t, ..) | UiCmd::IdeaDelete(t, _) => *t,
             UiCmd::PhaseSet(t, ..) | UiCmd::TaskToggle(t, ..) | UiCmd::PhaseAdd(t, _) => *t,
             UiCmd::CommentSet(t, ..) | UiCmd::CommentDelete(t, _) => *t,
+            UiCmd::LearnOpen(t, ..)
+            | UiCmd::LearnSave(t)
+            | UiCmd::LearnDiscard(t)
+            | UiCmd::LearnClose(t) => *t,
             _ => return,
         };
         let path = target
@@ -395,6 +403,65 @@ impl App {
                     ..Default::default()
                 };
                 self.db(|s| s.update_phase(project, id, phase, change, "usuario"));
+            }
+            UiCmd::LearnOpen(_, plan, phase) => {
+                let Some(idea) = view.items.iter().find(|i| i.id == plan) else {
+                    return;
+                };
+                let Some(phase_id) = idea.phases.get(phase).map(|p| p.id.clone()) else {
+                    return;
+                };
+                let items: Vec<LearnItem> = view
+                    .comments
+                    .iter()
+                    .filter(|c| {
+                        c.plan_id == plan
+                            && c.phase_id == phase_id
+                            && c.status == "resolved"
+                            && !c.learned
+                    })
+                    .map(|c| LearnItem {
+                        lesson: forge_core::ideas::lesson_from_comment(idea, phase, c),
+                        save: false, // nada se guarda solo: la persona marca lo que vale
+                        kind: "error",
+                    })
+                    .collect();
+                if !items.is_empty() {
+                    view.learning = Some(Learning {
+                        plan,
+                        phase_id,
+                        items,
+                    });
+                }
+            }
+            UiCmd::LearnClose(_) => view.learning = None,
+            UiCmd::LearnSave(_) | UiCmd::LearnDiscard(_) => {
+                // Sin proyecto (la lista general) no hay memoria donde guardar: se conserva lo elegido.
+                let Some(path) = path.as_deref() else { return };
+                let Some(learning) = view.learning.take() else {
+                    return;
+                };
+                let discard = matches!(cmd, UiCmd::LearnDiscard(_));
+                let chosen: Vec<(forge_core::ideas::Lesson, &str)> = learning
+                    .items
+                    .iter()
+                    .filter(|i| i.save && !discard)
+                    .map(|i| (i.lesson.clone(), i.kind))
+                    .collect();
+                // Lo no marcado también se da por visto: no se vuelve a proponer.
+                let skipped: Vec<i64> = learning
+                    .items
+                    .iter()
+                    .filter(|i| discard || !i.save)
+                    .map(|i| i.lesson.comment_id)
+                    .collect();
+                let path = path.to_path_buf();
+                if self
+                    .db(|s| s.save_review_lessons(&path, &chosen, &skipped))
+                    .is_none()
+                {
+                    self.ideas_view(target).learning = Some(learning); // se conserva lo elegido
+                }
             }
             UiCmd::CommentSet(_, id, resolved) => {
                 // Desde el panel no hay explicación: quien resuelve con una es el agente.
@@ -566,6 +633,8 @@ struct ItemCtx<'a> {
     comments: &'a [forge_core::ideas::ReviewComment],
     /// Revisiones de fases del proyecto (para el avance de la que está en curso).
     runs: &'a [forge_core::ideas::ReviewRun],
+    /// Lo que se propone recordar (lo edita una tarjeta mientras las demás solo leen).
+    learning: &'a std::cell::RefCell<Option<Learning>>,
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
@@ -794,13 +863,23 @@ fn phase_row(
             .collect()
     };
     let open_comments = mine.iter().filter(|c| c.status == "open").count();
+    // Resueltos que aún no se han propuesto para recordar, y si la lista de esta fase está abierta.
+    let learnable = mine
+        .iter()
+        .filter(|c| c.status == "resolved" && !c.learned)
+        .count();
+    let learning_here = ctx
+        .learning
+        .borrow()
+        .as_ref()
+        .is_some_and(|l| l.plan == idea.id && l.phase_id == phase.id);
     // Las tareas de la fase en curso se ven (y la fase con comentarios sin resolver); las
     // demás, al pulsar la fase (y lo elegido a mano se respeta).
     let open = ctx
         .phase_toggled
         .get(&(idea.id, index))
         .copied()
-        .unwrap_or(current || open_comments > 0);
+        .unwrap_or(current || open_comments > 0 || learning_here);
     let (glyph, color) = status_style(&phase.status);
     let next = next_status(&phase.status);
     ui.horizontal_top(|ui| {
@@ -843,6 +922,27 @@ fn phase_row(
                 }
                 if open_comments > 0 && !ctx.reviewers.is_empty() {
                     fix_button(ui, idea.id, index, phase, ctx, cmds);
+                }
+                if learnable > 0 && !learning_here {
+                    let learn = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!(
+                                    "{} {} ({learnable})",
+                                    icon::LIGHTBULB,
+                                    tr!("Aprender")
+                                ))
+                                .size(11.0)
+                                .color(theme::ACCENT),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text(tr!(
+                            "Elige qué errores de esta revisión debe recordar el proyecto"
+                        ));
+                    if learn.clicked() {
+                        cmds.push(UiCmd::LearnOpen(ctx.target, idea.id, index));
+                    }
                 }
                 if !mine.is_empty() {
                     let color = if open_comments > 0 {
@@ -933,7 +1033,92 @@ fn phase_row(
                 for comment in &mine {
                     review_comment_row(ui, comment, ctx.target, cmds);
                 }
+                if learning_here {
+                    learn_box(ui, ctx.learning, ctx.target, cmds);
+                }
             }
+        });
+    });
+}
+
+/// La lista de lo que se propone recordar de una revisión: cada propuesta se marca, se corrige
+/// su título y se elige si es un error o una convención. Nada se guarda hasta pulsar «Guardar».
+fn learn_box(
+    ui: &mut egui::Ui,
+    learning: &std::cell::RefCell<Option<Learning>>,
+    target: IdeasTarget,
+    cmds: &mut Vec<UiCmd>,
+) {
+    let mut guard = learning.borrow_mut();
+    let Some(learning) = guard.as_mut() else {
+        return;
+    };
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(
+            RichText::new(tr!("Qué recordar de esta revisión"))
+                .size(12.0)
+                .strong()
+                .color(theme::TEXT),
+        );
+        ui.label(
+            RichText::new(tr!(
+                "Marca lo que valga la pena que todos los agentes recuerden; lo demás se descarta."
+            ))
+            .size(11.0)
+            .color(theme::TEXT_3),
+        );
+        for item in learning.items.iter_mut() {
+            learn_row(ui, item);
+        }
+        let chosen = learning.items.iter().filter(|i| i.save).count();
+        ui.horizontal(|ui| {
+            let save = ui.add_enabled(
+                chosen > 0,
+                egui::Button::new(
+                    RichText::new(tr!("Guardar lo marcado ({n})", n = chosen)).size(11.5),
+                ),
+            );
+            if save.clicked() {
+                cmds.push(UiCmd::LearnSave(target));
+            }
+            if ui
+                .button(RichText::new(tr!("Descartar todo")).size(11.5))
+                .clicked()
+            {
+                cmds.push(UiCmd::LearnDiscard(target));
+            }
+            if ui.button(RichText::new(tr!("Cerrar")).size(11.5)).clicked() {
+                cmds.push(UiCmd::LearnClose(target));
+            }
+        });
+    });
+}
+
+/// Una propuesta: casilla, título editable y tipo de memoria.
+fn learn_row(ui: &mut egui::Ui, item: &mut LearnItem) {
+    ui.horizontal(|ui| {
+        ui.checkbox(&mut item.save, "");
+        ui.vertical(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut item.lesson.title)
+                    .desired_width(f32::INFINITY)
+                    .font(egui::TextStyle::Small),
+            );
+            egui::ComboBox::from_id_salt(("learn-kind", item.lesson.comment_id))
+                .selected_text(
+                    forge_core::memory::KINDS
+                        .iter()
+                        .find(|(id, _)| *id == item.kind)
+                        .map_or(item.kind, |(_, label)| forge_core::i18n::t(label)),
+                )
+                .show_ui(ui, |ui| {
+                    for (id, label) in forge_core::memory::KINDS
+                        .iter()
+                        .filter(|(id, _)| matches!(*id, "error" | "convention"))
+                    {
+                        ui.selectable_value(&mut item.kind, id, forge_core::i18n::t(label));
+                    }
+                });
         });
     });
 }

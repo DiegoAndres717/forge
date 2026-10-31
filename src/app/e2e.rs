@@ -2338,6 +2338,90 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
     assert!(!text.contains("zzresuelto"), "no el ya resuelto");
 }
 
+/// «Aprender»: de los comentarios resueltos se propone qué recordar; solo se guarda en la
+/// memoria lo que la persona marca, y nada se propone dos veces.
+#[test]
+fn only_the_lessons_the_owner_ticks_reach_the_memory_and_none_is_proposed_twice() {
+    use forge_core::ideas::{NewComment, Phase};
+    let _serial = serial();
+    let dir = project("learn");
+    let mut h = app(dir);
+    let path = ws(h.state()).project.path.clone();
+    let plan = h
+        .state_mut()
+        .db(|s| {
+            s.add_plan(
+                Some(&path),
+                "Recibos",
+                "",
+                &[Phase::new("Webhook")],
+                "claude-code",
+            )
+        })
+        .unwrap();
+    for text in ["Sin tiempo de espera en la llamada", "Nombre confuso"] {
+        let id = h
+            .state_mut()
+            .db(|s| {
+                s.add_review_comment(
+                    Some(&path),
+                    plan,
+                    0,
+                    NewComment {
+                        text,
+                        file: None,
+                        line: None,
+                    },
+                    "codex",
+                )
+            })
+            .unwrap();
+        h.state_mut()
+            .db(|s| s.resolve_review_comment(Some(&path), id, true, "arreglado"))
+            .unwrap();
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "comentarios cargados", |a| {
+        ws(a).ideas.comments.len() == 2 && !ws(a).ideas.items.is_empty()
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 0), area);
+    let learning = ws(h.state()).ideas.learning.as_ref().expect("propuestas");
+    assert_eq!(learning.items.len(), 2);
+    assert!(
+        learning.items.iter().all(|i| !i.save),
+        "nada marcado de salida"
+    );
+    // Se marca solo la primera y se guarda: la segunda se da por vista.
+    ws_mut(h.state_mut()).ideas.learning.as_mut().unwrap().items[0].save = true;
+    h.state_mut().apply(&ctx, UiCmd::LearnSave(Some(0)), area);
+    assert!(ws(h.state()).ideas.learning.is_none());
+    let found = h
+        .state_mut()
+        .db(|s| s.search_memories(&path, "espera", Some("error"), 10))
+        .unwrap();
+    assert_eq!(found.len(), 1, "lo marcado está en la memoria");
+    assert!(
+        h.state_mut()
+            .db(|s| s.search_memories(&path, "confuso", None, 10))
+            .unwrap()
+            .is_empty(),
+        "lo no marcado, no"
+    );
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "comentarios vistos", |a| {
+        ws(a).ideas.comments.iter().all(|c| c.learned)
+    });
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 0), area);
+    assert!(
+        ws(h.state()).ideas.learning.is_none(),
+        "no se propone dos veces"
+    );
+}
+
 /// «Revisar» anota la revisión (agente y hora de inicio) y el panel de planes la recibe, para
 /// poder mostrar cuánto lleva y cuánto falta.
 #[test]
