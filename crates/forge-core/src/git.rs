@@ -96,6 +96,49 @@ pub fn file_diff(repo: &Path, rel: &str, abs: &Path) -> Result<String, String> {
     })
 }
 
+/// Cuáles de estas rutas (relativas al proyecto) ignora Git. Sin repositorio, ninguna.
+pub fn ignored(repo: &Path, paths: &[String]) -> std::collections::HashSet<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let none = std::collections::HashSet::new();
+    if paths.is_empty() {
+        return none;
+    }
+    let Ok(mut child) = Command::new("git")
+        .args(["check-ignore", "-z", "--stdin"])
+        .current_dir(repo)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return none;
+    };
+    // Se escribe en otro hilo para no bloquearse si la lista es larga.
+    let input: Vec<u8> = paths
+        .iter()
+        .flat_map(|p| [p.as_bytes(), b"\0"].concat())
+        .collect();
+    let stdin = child.stdin.take();
+    let writer = std::thread::spawn(move || {
+        if let Some(mut stdin) = stdin {
+            let _ = stdin.write_all(&input);
+        }
+    });
+    // Sale con 1 si no hay nada ignorado: solo importa lo que escribe.
+    let out = child.wait_with_output();
+    let _ = writer.join();
+    out.map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .split('\0')
+            .filter(|p| !p.is_empty())
+            .map(String::from)
+            .collect()
+    })
+    .unwrap_or(none)
+}
+
 /// Identidad estable de un repositorio: el remoto (origin o el primero) normalizado, más la
 /// subcarpeta si el proyecto es parte del repo. `None` si no es un repo o no tiene remoto.
 pub fn remote_identity(repo: &Path) -> Option<String> {
@@ -358,6 +401,28 @@ pub(crate) fn test_repo(name: &str, script: &str) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ignored_tells_which_of_the_given_paths_git_ignores() {
+        let dir = test_repo(
+            "ignored",
+            "printf 'dist/\\n*.log\\n' > .gitignore && mkdir dist src && echo x > dist/a.js \
+             && echo x > src/b.rs && echo x > run.log && git add .gitignore src",
+        );
+        let paths: Vec<String> = ["dist", "src", "src/b.rs", "run.log", "a", "con espacio.log"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let set = ignored(&dir, &paths);
+        let mut found: Vec<&str> = set.iter().map(String::as_str).collect();
+        found.sort();
+        assert_eq!(found, ["con espacio.log", "dist", "run.log"]);
+        // Sin repositorio: nada se da por ignorado.
+        let plain =
+            std::env::temp_dir().join(format!("forge-ignored-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(ignored(&plain, &paths).is_empty());
+    }
 
     #[test]
     fn remotes_normalize_to_the_same_identity() {
