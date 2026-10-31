@@ -1316,6 +1316,74 @@ fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
 }
 
 #[test]
+fn clicking_a_gutter_mark_opens_the_change_and_escape_closes_it() {
+    let _serial = serial();
+    let dir = project("peek");
+    assert!(
+        std::process::Command::new("git")
+            .args(["commit", "-qm", "base"])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(2);
+    wait_until(&mut h, "árbol", |a| ws(a).files.listing.contains_key(""));
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .apply_files(&ctx, UiCmd::FilesOpen("main.ts".into()));
+    h.run_steps(2);
+    // Se cambia la línea y se añade otra, sin guardar: las marcas salen en vivo.
+    ws_mut(h.state_mut())
+        .files
+        .viewer
+        .as_mut()
+        .expect("archivo abierto")
+        .content = "export const x = 2;\nconst y = 3;\n".into();
+    wait_until(&mut h, "marcas en vivo", |a| {
+        ws(a)
+            .files
+            .viewer
+            .as_ref()
+            .is_some_and(|v| !v.marks.is_empty())
+    });
+    assert!(
+        ws(h.state())
+            .files
+            .viewer
+            .as_ref()
+            .unwrap()
+            .peek
+            .first
+            .is_none()
+    );
+    h.get_all_by_label("Ver el cambio")
+        .next()
+        .expect("franja")
+        .click();
+    h.run_steps(2);
+    // Un solo bloque: la línea 1 cambiada y la 2 añadida.
+    assert_eq!(
+        ws(h.state()).files.viewer.as_ref().unwrap().peek.first,
+        Some(1)
+    );
+    h.key_press(Key::Escape);
+    h.run_steps(2);
+    assert!(
+        ws(h.state())
+            .files
+            .viewer
+            .as_ref()
+            .unwrap()
+            .peek
+            .first
+            .is_none()
+    );
+}
+
+#[test]
 fn a_new_file_is_named_in_the_tree_created_and_opened() {
     let _serial = serial();
     let dir = project("newitem");

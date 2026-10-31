@@ -492,6 +492,26 @@ fn ui_preview() {
         settle(&mut harness);
         save(&mut harness, &out, name);
     }
+    // El detalle de un cambio abierto desde el margen.
+    {
+        let v = harness.state_mut().workspaces[0]
+            .files
+            .viewer
+            .as_mut()
+            .expect("README abierto");
+        v.peek.first = forge_core::files::gutter_hunks(&v.marks)
+            .first()
+            .map(|h| h.first);
+    }
+    settle(&mut harness);
+    save(&mut harness, &out, "12f2-editor-cambio");
+    harness.state_mut().workspaces[0]
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .peek
+        .first = None;
     // Código con color de sintaxis y números de línea.
     std::fs::create_dir_all(project.join("src")).unwrap();
     std::fs::write(
