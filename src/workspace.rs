@@ -272,6 +272,24 @@ pub struct GitView {
     pub dirty: bool,
 }
 
+/// Una cosa que se propone recordar de un comentario de revisión ya resuelto.
+#[derive(Clone)]
+pub struct LearnItem {
+    pub lesson: forge_core::ideas::Lesson,
+    /// La persona la ha marcado para guardarla.
+    pub save: bool,
+    /// Tipo de memoria (`error` o `convention`).
+    pub kind: &'static str,
+}
+
+/// Las propuestas de una fase: nada se guarda hasta que la persona lo pide.
+#[derive(Clone)]
+pub struct Learning {
+    pub plan: i64,
+    pub phase_id: String,
+    pub items: Vec<LearnItem>,
+}
+
 /// Lista de ideas (de un proyecto, o la general en Inicio).
 #[derive(Default)]
 pub struct IdeasView {
@@ -299,6 +317,8 @@ pub struct IdeasView {
     pub comments: Vec<forge_core::ideas::ReviewComment>,
     /// Revisiones de fases (en curso y terminadas) del proyecto.
     pub runs: Vec<forge_core::ideas::ReviewRun>,
+    /// Lo que se propone recordar de una revisión, mientras la persona elige.
+    pub learning: Option<Learning>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,

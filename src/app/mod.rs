@@ -288,6 +288,14 @@ enum UiCmd {
     /// Mandar los comentarios abiertos de una fase al agente elegido para que los corrija:
     /// (plan, fase, id del agente).
     FixPhase(i64, usize, String),
+    /// Proponer qué recordar de los comentarios resueltos de una fase: (plan, fase).
+    LearnOpen(IdeasTarget, i64, usize),
+    /// Guardar lo marcado en la memoria (y dar por vistas las demás propuestas).
+    LearnSave(IdeasTarget),
+    /// No recordar nada de estas propuestas (y no volver a proponerlas).
+    LearnDiscard(IdeasTarget),
+    /// Cerrar la lista sin guardar ni descartar.
+    LearnClose(IdeasTarget),
     /// Resolver (true) o reabrir (false) un comentario de revisión.
     CommentSet(IdeasTarget, i64, bool),
     /// Borrar un comentario de revisión.
@@ -1140,7 +1148,11 @@ impl App {
             | UiCmd::TaskToggle(..)
             | UiCmd::PhaseAdd(..)
             | UiCmd::CommentSet(..)
-            | UiCmd::CommentDelete(..) => self.apply_idea(cmd),
+            | UiCmd::CommentDelete(..)
+            | UiCmd::LearnOpen(..)
+            | UiCmd::LearnSave(..)
+            | UiCmd::LearnDiscard(..)
+            | UiCmd::LearnClose(..) => self.apply_idea(cmd),
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
             UiCmd::ReviewPhase(id, phase, agent) => self.review_phase(ctx, id, phase, &agent, area),
             UiCmd::FixPhase(id, phase, agent) => self.fix_phase(ctx, id, phase, &agent, area),

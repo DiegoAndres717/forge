@@ -89,7 +89,7 @@ fn instructions_in(modes: Modes, lang: crate::i18n::Lang) -> String {
         crate::i18n::Lang::En => "English",
     };
     let mut out = String::from(
-        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update; if the new one makes an old one obsolete, pass replaces=<old id>). When the user corrects how you work or tells you something you must not do, save it as a convention in Forge Memory, not only in your own memory: every agent on the project reads it. memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch).",
+        "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update; if the new one makes an old one obsolete, pass replaces=<old id>). When the user corrects how you work or tells you something you must not do, save it as a convention in Forge Memory, not only in your own memory: every agent on the project reads it. memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch). Before you start a phase, run memory_search with the phase title and its main keywords: reviews of earlier phases saved there the repeatable mistakes they caught, so you do not repeat them. If plans_list shows open review comments on a phase you did, check each one and answer it with review_comment_resolve; if you are asked to review a phase, leave one review_comment_add per finding.",
     );
     out.push_str(&format!(
         " Write plans and backlog ideas (titles, notes, phases and tasks) in {language}: the owner reads them in Forge, whose interface is in {language}."
@@ -1670,6 +1670,13 @@ mod tests {
         assert!(instructions_in(Modes::default(), Lang::Es).contains("in Spanish"));
         assert!(!instructions_in(Modes::default(), Lang::En).contains("in Spanish"));
         assert!(instructions_in(Modes::default(), Lang::En).contains("in English"));
+        // Antes de empezar una fase se buscan los errores que ya cazaron las revisiones.
+        let text = instructions_in(Modes::default(), Lang::En);
+        assert!(
+            text.contains("memory_search with the phase title"),
+            "{text}"
+        );
+        assert!(text.contains("review_comment_resolve"), "{text}");
     }
 
     #[test]

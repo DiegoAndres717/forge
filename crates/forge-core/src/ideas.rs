@@ -334,6 +334,16 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS review_runs_plan ON review_runs(project, plan_id);",
     )?;
+    // Comentarios ya vistos al proponer qué recordar (una columna: se comprueba y se añade).
+    if conn
+        .prepare("SELECT learned FROM phase_comments LIMIT 0")
+        .is_err()
+    {
+        let _ = conn.execute(
+            "ALTER TABLE phase_comments ADD COLUMN learned INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+    }
     // Bases anteriores a los planes: las ideas pasan a ser el backlog (sin fases).
     if conn.prepare("SELECT phases FROM ideas LIMIT 0").is_err() {
         conn.execute(
@@ -745,6 +755,124 @@ fn one_line(text: &str, max: usize) -> String {
     }
 }
 
+/// Algo que recordar sacado de un comentario de revisión ya resuelto.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Lesson {
+    pub comment_id: i64,
+    pub title: String,
+    pub body: String,
+}
+
+/// La lección que sale de un comentario resuelto: título corto (su primera frase) y un cuerpo
+/// con quién lo vio, dónde, qué estaba mal y cómo se arregló (texto para agentes, en inglés).
+pub fn lesson_from_comment(idea: &Idea, phase: usize, comment: &ReviewComment) -> Lesson {
+    let first = comment
+        .text
+        .split(['\n', '.'])
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or(&comment.text);
+    let place = match (&comment.file, comment.line) {
+        (Some(f), Some(l)) => format!(" in {}:{l}", one_line(f, 120)),
+        (Some(f), None) => format!(" in {}", one_line(f, 120)),
+        _ => String::new(),
+    };
+    let title = idea.phases.get(phase).map_or("", |p| p.title.as_str());
+    let how = if comment.resolution.trim().is_empty() {
+        "No explanation was given.".to_string()
+    } else {
+        one_line(&comment.resolution, 400)
+    };
+    Lesson {
+        comment_id: comment.id,
+        title: one_line(first, 80),
+        body: format!(
+            "Found by {} reviewing phase {} (\"{}\") of plan #{} (\"{}\"){place}:\n{}\n\nHow it was resolved: {how}\n",
+            one_line(&comment.reviewer, 40),
+            phase + 1,
+            title,
+            idea.id,
+            idea.title,
+            one_line(&comment.text, 600),
+        ),
+    }
+}
+
+impl Store {
+    /// Comentarios ya resueltos de un plan que aún no se han propuesto para recordar.
+    pub fn learnable_comments(
+        &self,
+        project: Option<&Path>,
+        plan_id: i64,
+    ) -> Result<Vec<ReviewComment>, String> {
+        Ok(self
+            .list_review_comments(project, plan_id)?
+            .into_iter()
+            .filter(|c| c.status == "resolved" && !c.learned)
+            .collect())
+    }
+
+    /// Guarda en la memoria del proyecto las lecciones elegidas (cada una con su tipo de
+    /// memoria) y da por vistos esos comentarios y los `skipped` (descartados): no se vuelven a
+    /// proponer. Un tipo que no existe lo rechaza todo, sin guardar ni marcar nada.
+    pub fn save_review_lessons(
+        &self,
+        project: &Path,
+        lessons: &[(Lesson, &str)],
+        skipped: &[i64],
+    ) -> Result<usize, String> {
+        if let Some((_, kind)) = lessons
+            .iter()
+            .find(|(_, k)| !crate::memory::KINDS.iter().any(|(id, _)| id == k))
+        {
+            return Err(tr!("tipo de memoria desconocido: {kind}", kind = *kind));
+        }
+        // Un título vacío rechaza toda la lista antes de guardar nada: no queda a medias.
+        if lessons.iter().any(|(l, _)| l.title.trim().is_empty()) {
+            return Err(tr!("la memoria necesita un título").into());
+        }
+        let key = self.list_key(Some(project));
+        let mark = |id: i64| {
+            self.conn
+                .execute(
+                    "UPDATE phase_comments SET learned = 1 WHERE project = ?1 AND id = ?2",
+                    params![key, id],
+                )
+                .map_err(|e| e.to_string())
+        };
+        let mut saved = 0;
+        for (lesson, kind) in lessons {
+            // Ya visto (una vista vieja, un reintento): no se guarda otra vez.
+            let seen: bool = self
+                .conn
+                .query_row(
+                    "SELECT learned != 0 FROM phase_comments WHERE project = ?1 AND id = ?2",
+                    params![key, lesson.comment_id],
+                    |r| r.get(0),
+                )
+                .unwrap_or(true);
+            if seen {
+                continue;
+            }
+            self.add_memory(
+                project,
+                kind,
+                &lesson.title,
+                &lesson.body,
+                "review",
+                "forge-review",
+            )?;
+            // Se marca justo después de guardarla: si algo falla más adelante, esta no se repite.
+            mark(lesson.comment_id)?;
+            saved += 1;
+        }
+        for id in skipped {
+            mark(*id)?;
+        }
+        Ok(saved)
+    }
+}
+
 /// Una revisión de una fase: quién la hace, cuándo empezó y terminó, y el avance que dice.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewRun {
@@ -951,6 +1079,8 @@ pub struct ReviewComment {
     /// Cómo se resolvió, o por qué no hacía falta.
     pub resolution: String,
     pub created_at: i64,
+    /// Ya se propuso (y se guardó o se descartó) como algo que recordar.
+    pub learned: bool,
 }
 
 impl Store {
@@ -1016,7 +1146,7 @@ impl Store {
             .conn
             .prepare(
                 "SELECT id, plan_id, phase_id, text, file, line, reviewer, status, resolution,
-                        created_at
+                        created_at, learned
                  FROM phase_comments WHERE project = ?1 AND plan_id = ?2 ORDER BY id",
             )
             .map_err(|e| e.to_string())?;
@@ -1033,6 +1163,7 @@ impl Store {
                     status: r.get(7)?,
                     resolution: r.get(8)?,
                     created_at: r.get(9)?,
+                    learned: r.get::<_, i64>(10)? != 0,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1048,7 +1179,7 @@ impl Store {
             .conn
             .prepare(
                 "SELECT id, plan_id, phase_id, text, file, line, reviewer, status, resolution,
-                        created_at
+                        created_at, learned
                  FROM phase_comments WHERE project = ?1 ORDER BY id",
             )
             .map_err(|e| e.to_string())?;
@@ -1065,6 +1196,7 @@ impl Store {
                     status: r.get(7)?,
                     resolution: r.get(8)?,
                     created_at: r.get(9)?,
+                    learned: r.get::<_, i64>(10)? != 0,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1796,6 +1928,188 @@ mod tests {
             .set_phases(p, id, &[other_phase], "claude-code")
             .unwrap();
         assert!(store.list_review_comments(p, id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_resolved_comment_becomes_a_lesson_with_what_was_wrong_and_how_it_was_fixed() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/forge");
+        let id = store
+            .add_plan(
+                Some(p),
+                "Recibos",
+                "",
+                &[Phase::new("Webhook")],
+                "claude-code",
+            )
+            .unwrap();
+        let c = store
+            .add_review_comment(
+                Some(p),
+                id,
+                0,
+                NewComment {
+                    text: "La llamada a Resend no tiene tiempo de espera. Una API lenta bloquea el webhook entero.",
+                    file: Some("src/send.ts"),
+                    line: Some(31),
+                },
+                "codex",
+            )
+            .unwrap();
+        store
+            .resolve_review_comment(Some(p), c, true, "Añadí un timeout de 5 s")
+            .unwrap();
+        let plan = store.get_idea(Some(p), id).unwrap().unwrap();
+        let comment = store.list_review_comments(Some(p), id).unwrap().remove(0);
+        let lesson = lesson_from_comment(&plan, 0, &comment);
+        // Título corto (la primera frase) y cuerpo con lo que estaba mal y cómo se arregló.
+        assert_eq!(
+            lesson.title,
+            "La llamada a Resend no tiene tiempo de espera"
+        );
+        assert!(lesson.body.contains("Webhook"));
+        assert!(lesson.body.contains("src/send.ts:31"));
+        assert!(lesson.body.contains("Añadí un timeout de 5 s"));
+        assert!(lesson.body.contains("codex"));
+        assert_eq!(lesson.comment_id, c);
+    }
+
+    #[test]
+    fn only_the_lessons_the_owner_picks_are_saved_and_nothing_is_proposed_twice() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/forge");
+        let id = store
+            .add_plan(
+                Some(p),
+                "Recibos",
+                "",
+                &[Phase::new("Webhook")],
+                "claude-code",
+            )
+            .unwrap();
+        let mut ids = Vec::new();
+        for text in [
+            "Sin timeout en la llamada",
+            "Test sin aserción",
+            "Nombre confuso",
+        ] {
+            let c = store
+                .add_review_comment(
+                    Some(p),
+                    id,
+                    0,
+                    NewComment {
+                        text,
+                        file: None,
+                        line: None,
+                    },
+                    "codex",
+                )
+                .unwrap();
+            ids.push(c);
+        }
+        // Solo lo resuelto se propone: el primero y el segundo; el tercero sigue abierto.
+        store
+            .resolve_review_comment(Some(p), ids[0], true, "timeout")
+            .unwrap();
+        store
+            .resolve_review_comment(Some(p), ids[1], true, "aserción")
+            .unwrap();
+        let plan = store.get_idea(Some(p), id).unwrap().unwrap();
+        let proposed = store.learnable_comments(Some(p), id).unwrap();
+        assert_eq!(proposed.len(), 2);
+        // El dueño guarda el primero como error y descarta el segundo.
+        let lesson = lesson_from_comment(&plan, 0, &proposed[0]);
+        let saved = store
+            .save_review_lessons(p, &[(lesson, "error")], &[ids[1]])
+            .unwrap();
+        assert_eq!(saved, 1);
+        let found = store
+            .search_memories(p, "timeout", Some("error"), 10)
+            .unwrap();
+        assert_eq!(found.len(), 1);
+        assert!(found[0].body.contains("timeout"));
+        assert!(
+            store
+                .search_memories(p, "aserción", None, 10)
+                .unwrap()
+                .is_empty(),
+            "lo descartado no se guarda"
+        );
+        // Ya vistos (guardado o descartado): no se vuelven a proponer.
+        assert!(store.learnable_comments(Some(p), id).unwrap().is_empty());
+        // Un tipo de memoria que no existe se rechaza y no marca nada.
+        let again = lesson_from_comment(&plan, 0, &proposed[1]);
+        assert!(
+            store
+                .save_review_lessons(p, &[(again, "otra")], &[])
+                .is_err()
+        );
+        // Otro proyecto no ve estas propuestas.
+        assert!(
+            store
+                .learnable_comments(Some(Path::new("/p/otro")), id)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn saving_lessons_never_leaves_half_saved_work_or_duplicates() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/forge");
+        let id = store
+            .add_plan(
+                Some(p),
+                "Recibos",
+                "",
+                &[Phase::new("Webhook")],
+                "claude-code",
+            )
+            .unwrap();
+        let mut lessons = Vec::new();
+        for text in ["Sin timeout en la llamada", "Test sin aserción"] {
+            let c = store
+                .add_review_comment(
+                    Some(p),
+                    id,
+                    0,
+                    NewComment {
+                        text,
+                        file: None,
+                        line: None,
+                    },
+                    "codex",
+                )
+                .unwrap();
+            store
+                .resolve_review_comment(Some(p), c, true, "ok")
+                .unwrap();
+        }
+        let plan = store.get_idea(Some(p), id).unwrap().unwrap();
+        for c in store.learnable_comments(Some(p), id).unwrap() {
+            lessons.push(lesson_from_comment(&plan, 0, &c));
+        }
+        // Un título vacío rechaza todo antes de guardar nada: ni media lista guardada ni marcas.
+        let mut bad = lessons.clone();
+        bad[1].title = "  ".into();
+        let pairs: Vec<(Lesson, &str)> = bad.into_iter().map(|l| (l, "error")).collect();
+        assert!(store.save_review_lessons(p, &pairs, &[]).is_err());
+        assert!(
+            store
+                .search_memories(p, "timeout", None, 10)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(store.learnable_comments(Some(p), id).unwrap().len(), 2);
+        // Guardar dos veces lo mismo (una vista vieja, un reintento) no duplica la memoria.
+        let pairs: Vec<(Lesson, &str)> = lessons.into_iter().map(|l| (l, "error")).collect();
+        assert_eq!(store.save_review_lessons(p, &pairs, &[]).unwrap(), 2);
+        assert_eq!(store.save_review_lessons(p, &pairs, &[]).unwrap(), 0);
+        assert_eq!(
+            store.search_memories(p, "timeout", None, 10).unwrap().len(),
+            1
+        );
     }
 
     #[test]

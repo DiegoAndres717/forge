@@ -527,6 +527,18 @@ fn ui_preview() {
     save(&mut harness, &out, "8c-ideas-corregir");
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
+    // «Aprender»: de los comentarios ya resueltos, la persona elige qué debe recordar el proyecto.
+    harness
+        .get_all_by_label_contains("Learn")
+        .find(|n| {
+            egui_kittest::kittest::NodeT::accesskit_node(n).role() == egui::accesskit::Role::Button
+        })
+        .expect("botón Aprender")
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "8d-ideas-aprender");
+    harness.state_mut().workspaces[0].ideas.learning = None;
+    settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
     std::fs::write(
         project.join("README.md"),
