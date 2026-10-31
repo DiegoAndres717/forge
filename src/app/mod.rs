@@ -285,6 +285,9 @@ enum UiCmd {
     PlanWithAgent(i64),
     /// Revisar una fase con el agente elegido: (plan, fase, id del agente).
     ReviewPhase(i64, usize, String),
+    /// Mandar los comentarios abiertos de una fase al agente elegido para que los corrija:
+    /// (plan, fase, id del agente).
+    FixPhase(i64, usize, String),
     /// Resolver (true) o reabrir (false) un comentario de revisión.
     CommentSet(IdeasTarget, i64, bool),
     /// Borrar un comentario de revisión.
@@ -1140,6 +1143,7 @@ impl App {
             | UiCmd::CommentDelete(..) => self.apply_idea(cmd),
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
             UiCmd::ReviewPhase(id, phase, agent) => self.review_phase(ctx, id, phase, &agent, area),
+            UiCmd::FixPhase(id, phase, agent) => self.fix_phase(ctx, id, phase, &agent, area),
             UiCmd::ToggleMemory
             | UiCmd::NewNote
             | UiCmd::MemorySave

@@ -115,6 +115,7 @@ impl App {
     ) {
         let reviewers = view.reviewers.clone();
         let comments = view.comments.clone();
+        let runs = view.runs.clone();
         let input = ui.add(
             theme::field(egui::TextEdit::singleline(&mut view.input))
                 .hint_text(tr!("Nueva idea para el backlog… (Enter)"))
@@ -164,6 +165,7 @@ impl App {
                 phase_toggled,
                 reviewers: &reviewers,
                 comments: &comments,
+                runs: &runs,
                 highlighted: *highlighted,
                 phase_input: &phase_cell,
             };
@@ -276,9 +278,13 @@ impl App {
                 let comments = self
                     .db(|s| s.list_project_review_comments(Some(&path)))
                     .unwrap_or_default();
+                let runs = self
+                    .db(|s| s.list_review_runs(Some(&path)))
+                    .unwrap_or_default();
                 let ws = &mut self.workspaces[i];
                 let view = &mut ws.ideas;
                 view.comments = comments;
+                view.runs = runs;
                 let new_plan = view
                     .loaded
                     .is_some()
@@ -455,6 +461,31 @@ impl App {
             .collect()
     }
 
+    /// «Corregir»: el agente elegido recibe los comentarios abiertos de la fase (en su terminal
+    /// si ya hay una abierta, o en una nueva) y los comprueba antes de arreglar nada.
+    pub(super) fn fix_phase(
+        &mut self,
+        ctx: &egui::Context,
+        id: i64,
+        phase: usize,
+        agent: &str,
+        area: Rect,
+    ) {
+        let Some(i) = self.active else { return };
+        let ws = &mut self.workspaces[i];
+        let Some(prompt) = ws
+            .ideas
+            .items
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| forge_core::ideas::fix_prompt(p, phase, &ws.ideas.comments))
+        else {
+            return;
+        };
+        ws.ideas.open = false; // que se vea al agente trabajando
+        ws.ask_agent(ctx, agent, &prompt, area);
+    }
+
     /// «Revisar»: abre al agente elegido, de solo lectura, con la fase y su rama por revisar.
     pub(super) fn review_phase(
         &mut self,
@@ -475,8 +506,12 @@ impl App {
         else {
             return;
         };
+        let path = ws.project.path.clone();
         ws.ideas.open = false; // que se vea al revisor trabajando
         ws.review_agent(ctx, agent, &prompt, area);
+        // Queda anotado cuándo empieza: de ahí salen el tiempo y la estimación de la fase.
+        self.db(|s| s.start_review_run(Some(&path), id, phase, agent));
+        self.workspaces[i].ideas.dirty = true;
     }
 
     /// "Planificar con…": el agente por defecto recibe la petición de planificar la idea.
@@ -529,6 +564,8 @@ struct ItemCtx<'a> {
     reviewers: &'a [(String, String, bool)],
     /// Comentarios de revisión de todos los planes del proyecto.
     comments: &'a [forge_core::ideas::ReviewComment],
+    /// Revisiones de fases del proyecto (para el avance de la que está en curso).
+    runs: &'a [forge_core::ideas::ReviewRun],
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
@@ -789,6 +826,12 @@ fn phase_row(
             if response.clicked() && !phase.tasks.is_empty() {
                 toggles.phase = Some(((idea.id, index), !open));
             }
+            if let Some(line) = review_progress_line(idea, phase, &mine, ctx) {
+                ui.label(RichText::new(line).size(11.5).color(theme::ACCENT));
+                // Para que los minutos avancen aunque nada más cambie.
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_secs(5));
+            }
             // Rama (clic: copiar) y tareas hechas, en una línea que se parte si no cabe.
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
@@ -797,6 +840,9 @@ fn phase_row(
                 }
                 if phase.reviewable() && !ctx.reviewers.is_empty() {
                     review_button(ui, idea.id, index, ctx, cmds);
+                }
+                if open_comments > 0 && !ctx.reviewers.is_empty() {
+                    fix_button(ui, idea.id, index, phase, ctx, cmds);
                 }
                 if !mine.is_empty() {
                     let color = if open_comments > 0 {
@@ -957,6 +1003,111 @@ fn review_comment_row(
                 cmds.push(UiCmd::CommentDelete(target, comment.id));
             }
         });
+    });
+}
+
+/// Cuánto lleva y cuánto falta de la revisión en curso de una fase: «Revisando con Codex · 3 min ·
+/// 2 hallazgos · faltan ~4 min». `None` si no hay una en curso (o se quedó abierta hace horas).
+fn review_progress_line(
+    idea: &Idea,
+    phase: &Phase,
+    comments: &[&forge_core::ideas::ReviewComment],
+    ctx: &ItemCtx,
+) -> Option<String> {
+    if phase.id.is_empty() {
+        return None;
+    }
+    let now = forge_core::store::now();
+    let run = ctx
+        .runs
+        .iter()
+        .rev()
+        .find(|r| r.plan_id == idea.id && r.phase_id == phase.id && r.ended_at.is_none())?;
+    // Una revisión que nadie cerró hace horas ya no está en curso.
+    if now - run.started_at > 2 * 3600 {
+        return None;
+    }
+    let name = ctx
+        .reviewers
+        .iter()
+        .find(|(id, _, _)| *id == run.agent)
+        .map_or(run.agent.as_str(), |(_, name, _)| name.as_str());
+    let minutes = |secs: i64| (secs + 59) / 60; // sube al minuto: «0 min» no dice nada
+    let mut parts = vec![
+        tr!("Revisando con {agent}", agent = name).to_string(),
+        tr!("{m} min", m = minutes(now - run.started_at)),
+    ];
+    let found = comments
+        .iter()
+        .filter(|c| c.created_at >= run.started_at)
+        .count();
+    parts.push(tr!("{n} hallazgos", n = found));
+    // Lo que tardaron las revisiones ya terminadas de este proyecto (las 10 últimas).
+    let finished: Vec<i64> = ctx
+        .runs
+        .iter()
+        .rev()
+        .filter_map(|r| r.ended_at.map(|e| e - r.started_at))
+        .filter(|d| *d > 0)
+        .take(10)
+        .collect();
+    if let (Some(step), Some(total)) = (run.step, run.total)
+        && step > 0
+    {
+        parts.push(tr!("paso {s} de {t}", s = step, t = total));
+    }
+    if let Some(left) = forge_core::ideas::review_eta(run, now, &finished) {
+        parts.push(tr!("faltan ~{m} min", m = minutes(left)));
+    }
+    Some(format!("{} {}", icon::MAGNIFYING_GLASS, parts.join(" · ")))
+}
+
+/// «Corregir»: manda los comentarios abiertos al agente que elijas. El que hizo la fase va el
+/// primero y marcado: es quien mejor sabe qué quiso hacer.
+fn fix_button(
+    ui: &mut egui::Ui,
+    plan: i64,
+    index: usize,
+    phase: &Phase,
+    ctx: &ItemCtx,
+    cmds: &mut Vec<UiCmd>,
+) {
+    let button = ui
+        .add(
+            egui::Button::new(
+                RichText::new(format!("{} {}", icon::WRENCH, tr!("Corregir")))
+                    .size(11.0)
+                    .color(theme::ACCENT),
+            )
+            .frame(false),
+        )
+        .on_hover_text(tr!(
+            "Mandar los comentarios abiertos a un agente para que los compruebe y corrija"
+        ));
+    let author = phase
+        .worked_by
+        .as_deref()
+        .and_then(forge_core::ideas::client_agent_id);
+    egui::Popup::menu(&button).show(|ui| {
+        ui.set_min_width(220.0);
+        ui.label(
+            RichText::new(tr!("Corregir con…"))
+                .size(11.0)
+                .color(theme::TEXT_3),
+        );
+        let mut agents: Vec<&(String, String, bool)> = ctx.reviewers.iter().collect();
+        agents.sort_by_key(|(id, _, _)| Some(id.as_str()) != author);
+        for (id, name, _) in agents {
+            let label = if Some(id.as_str()) == author {
+                format!("{name} · {}", tr!("hizo la fase"))
+            } else {
+                name.clone()
+            };
+            if ui.button(label).clicked() {
+                cmds.push(UiCmd::FixPhase(plan, index, id.clone()));
+                ui.close();
+            }
+        }
     });
 }
 

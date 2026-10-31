@@ -297,6 +297,8 @@ pub struct IdeasView {
     pub reviewers: Vec<(String, String, bool)>,
     /// Comentarios de revisión de los planes del proyecto.
     pub comments: Vec<forge_core::ideas::ReviewComment>,
+    /// Revisiones de fases (en curso y terminadas) del proyecto.
+    pub runs: Vec<forge_core::ideas::ReviewRun>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
@@ -399,6 +401,8 @@ pub struct Workspace {
     launch: HashMap<String, (String, String)>,
     /// Terminales de agente cuya cuenta llegó a su límite de uso (muestran el aviso).
     limited: Vec<PanelId>,
+    /// Terminales abiertas como revisor (solo lectura): `ask_agent` no escribe en ellas.
+    reviewing: Vec<PanelId>,
     /// Terminales a las que se ofrece compactar (mucho contexto).
     compacting: Vec<PanelId>,
     /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
@@ -533,6 +537,7 @@ impl Workspace {
             chosen: HashMap::new(),
             launch: HashMap::new(),
             limited: Vec::new(),
+            reviewing: Vec::new(),
             compacting: Vec::new(),
             handoff_request: None,
             agent_handoff_request: None,
@@ -1194,8 +1199,11 @@ impl Workspace {
         let mut panels: Vec<PanelId> = self
             .panels
             .iter()
-            .filter(|(_, p)| {
-                p.agent.as_deref() == Some(id) && matches!(p.content, Content::Shell(_))
+            .filter(|(panel, p)| {
+                p.agent.as_deref() == Some(id)
+                    && matches!(p.content, Content::Shell(_))
+                    // La del revisor es de solo lectura y está revisando otra cosa.
+                    && !self.reviewing.contains(panel)
             })
             .map(|(panel, _)| *panel)
             .collect();
@@ -1253,7 +1261,11 @@ impl Workspace {
             account: None,
         };
         let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
+        let before = self.panels.len();
         self.add_panel(ctx, dir, state);
+        if self.panels.len() > before {
+            self.reviewing.push(self.focus); // el panel nuevo toma el foco
+        }
     }
 
     /// Pone las cuentas y las elegidas en el proyecto (programa → id de cuenta).

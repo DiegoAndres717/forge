@@ -215,6 +215,7 @@ fn hints(name: &str) -> Value {
             (true, false, true)
         }
         "memory_save" | "plan_add" | "review_comment_add" => (false, false, false),
+        "review_progress" => (false, false, true),
         // Editar guarda versiones, y borrar una memoria la archiva: nada se pierde.
         "memory_update" | "memory_delete" | "plan_update" | "review_comment_resolve" => {
             (false, false, true)
@@ -408,6 +409,22 @@ fn raw_tools() -> Value {
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 },
                 "required": ["id"]
+            }
+        },
+        {
+            "name": "review_progress",
+            "description": tr!("Avisa del avance de la revisión que estás haciendo de una fase, para que la persona vea cuánto falta. Llámala al empezar (con el total de pasos que prevés), al acabar cada paso y, al terminar, con done=true."),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "plan": {"type": "integer", "description": tr!("Id del plan")},
+                    "phase": {"type": "integer", "description": tr!("Número de fase (desde 1)")},
+                    "step": {"type": "integer", "description": tr!("Paso en que vas (1, 2, 3…)")},
+                    "total": {"type": "integer", "description": tr!("Total de pasos que prevés")},
+                    "done": {"type": "boolean", "description": tr!("true cuando la revisión ha terminado")},
+                    "scope": {"type": "string", "enum": ["project", "general"]}
+                },
+                "required": ["plan", "phase"]
             }
         },
         {
@@ -741,6 +758,32 @@ impl<'a> Server<'a> {
                             phase = phase,
                             plan = plan
                         )
+                    }),
+                _ => Err(tr!("faltan `plan` y `phase` (la fase se cuenta desde 1)").into()),
+            },
+            "review_progress" => match (
+                args["plan"].as_i64(),
+                args["phase"].as_i64().and_then(|n| usize::try_from(n).ok()),
+            ) {
+                (Some(plan), Some(phase)) if phase >= 1 => self
+                    .store
+                    .review_progress(
+                        list,
+                        plan,
+                        phase - 1,
+                        args["step"].as_i64().filter(|n| *n >= 0),
+                        args["total"].as_i64().filter(|n| *n >= 0),
+                        args["done"].as_bool().unwrap_or(false),
+                    )
+                    .and_then(|ok| {
+                        if ok {
+                            Ok(tr!("Avance de la revisión anotado.").into())
+                        } else {
+                            Err(tr!(
+                                "esa fase no tiene una revisión abierta (la empieza la persona con «Revisar»)"
+                            )
+                            .into())
+                        }
                     }),
                 _ => Err(tr!("faltan `plan` y `phase` (la fase se cuenta desde 1)").into()),
             },
@@ -1412,6 +1455,38 @@ mod tests {
         let (_, plans) = call(&mut server, "plans_list", json!({}));
         assert!(!plans.contains("Falta validar la entrada"), "{plans}");
         assert!(call(&mut server, "review_comment_resolve", json!({"id": 99})).0);
+        // Avance del revisor: sin revisión abierta avisa, con una abierta la actualiza y la cierra.
+        let (err, out) = call(
+            &mut server,
+            "review_progress",
+            json!({"plan": 1, "phase": 1, "step": 1, "total": 4}),
+        );
+        assert!(err, "sin revisión abierta: {out}");
+        store
+            .start_review_run(Some(project), 1, 0, "codex")
+            .unwrap();
+        let (err, out) = call(
+            &mut server,
+            "review_progress",
+            json!({"plan": 1, "phase": 1, "step": 2, "total": 4}),
+        );
+        assert!(!err, "{out}");
+        let run = &store.list_review_runs(Some(project)).unwrap()[0];
+        assert_eq!(
+            (run.step, run.total, run.ended_at),
+            (Some(2), Some(4), None)
+        );
+        let (err, _) = call(
+            &mut server,
+            "review_progress",
+            json!({"plan": 1, "phase": 1, "done": true}),
+        );
+        assert!(!err);
+        assert!(
+            store.list_review_runs(Some(project)).unwrap()[0]
+                .ended_at
+                .is_some()
+        );
     }
 
     #[test]
@@ -1431,7 +1506,7 @@ mod tests {
         let list = server
             .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 13);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 14);
 
         let call = |server: &mut Server, id: i64, name: &str, args: Value| {
             server.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()
@@ -1702,6 +1777,7 @@ mod tests {
             "plan_delete",
             "review_comment_add",
             "review_comment_resolve",
+            "review_progress",
         ] {
             assert_eq!(hint(name, "readOnlyHint"), Some(false), "{name}");
         }

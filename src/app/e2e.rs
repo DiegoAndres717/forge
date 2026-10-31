@@ -2273,6 +2273,144 @@ fn review_comments_reach_the_plans_panel_and_can_be_resolved_reopened_and_delete
     });
 }
 
+/// «Corregir»: el agente elegido recibe los comentarios abiertos de la fase para comprobarlos
+/// y corregirlos; lo ya resuelto no se le pide otra vez.
+#[test]
+fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
+    use forge_core::ideas::{NewComment, Phase};
+    let _serial = serial();
+    let dir = project("fix-phase");
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} corrige:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Webhook");
+    phase.branch = Some("feat/webhook".into());
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&path), "Recibos", "", &[phase], "claude-code"))
+        .unwrap();
+    for (text, resolved) in [("zzabierto", false), ("zzresuelto", true)] {
+        let id = h
+            .state_mut()
+            .db(|s| {
+                s.add_review_comment(
+                    Some(&path),
+                    plan,
+                    0,
+                    NewComment {
+                        text,
+                        file: None,
+                        line: None,
+                    },
+                    "codex",
+                )
+            })
+            .unwrap();
+        if resolved {
+            h.state_mut()
+                .db(|s| s.resolve_review_comment(Some(&path), id, true, "ya"))
+                .unwrap();
+        }
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "comentarios cargados", |a| {
+        ws(a).ideas.comments.len() == 2 && !ws(a).ideas.items.is_empty()
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::FixPhase(plan, 0, "fake".into()), area);
+    wait_until(&mut h, "el agente recibe los comentarios", |a| {
+        ws(a).panel_count() == 2 && ws(a).shell_text().contains("review_comment_resolve")
+    });
+    let text = ws(h.state()).shell_text();
+    assert!(text.contains("zzabierto"), "se le manda el abierto");
+    assert!(!text.contains("zzresuelto"), "no el ya resuelto");
+}
+
+/// «Revisar» anota la revisión (agente y hora de inicio) y el panel de planes la recibe, para
+/// poder mostrar cuánto lleva y cuánto falta.
+#[test]
+fn starting_a_review_records_it_so_the_phase_can_show_its_progress() {
+    use forge_core::ideas::Phase;
+    let _serial = serial();
+    let dir = project("review-run");
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} revisa:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Webhook");
+    phase.branch = Some("feat/webhook".into());
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&path), "Recibos", "", &[phase], "claude-code"))
+        .unwrap();
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "plan cargado", |a| !ws(a).ideas.items.is_empty());
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::ReviewPhase(plan, 0, "fake".into()), area);
+    wait_until(&mut h, "la revisión llega al panel", |a| {
+        ws(a)
+            .ideas
+            .runs
+            .iter()
+            .any(|r| r.agent == "fake" && r.ended_at.is_none())
+    });
+    wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
+}
+
+/// Pedirle algo a un agente nunca escribe en la terminal de su revisión (es de solo lectura y
+/// está revisando otra cosa): abre una propia.
+#[test]
+fn asking_an_agent_never_types_into_its_read_only_review_terminal() {
+    let _serial = serial();
+    let dir = project("review-not-typed");
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} pedido:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    // Solo existe el revisor del agente (enfocado): la petición no entra en él.
+    h.state_mut().workspaces[0].review_agent(&ctx, "fake", "revisa", area);
+    wait_until(&mut h, "el revisor está abierto", |a| {
+        ws(a).panel_count() == 2 && ws(a).shell_text().contains("pedido: revisa")
+    });
+    h.state_mut().workspaces[0].ask_agent(&ctx, "fake", "corrige", area);
+    wait_until(&mut h, "la petición abre su propio panel", |a| {
+        ws(a).panel_count() == 3 && ws(a).shell_text().contains("pedido: corrige")
+    });
+}
+
 /// Una división se gira desde la cabecera del panel: lado a lado ↔ uno encima del otro.
 #[test]
 fn a_split_can_be_rotated_from_the_panel_header() {
