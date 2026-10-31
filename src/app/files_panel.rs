@@ -139,6 +139,18 @@ fn change_code(f: &forge_core::git::FileChange) -> char {
     }
 }
 
+/// El cambio que da color a una carpeta: el más importante de lo que hay dentro, a cualquier
+/// profundidad (conflicto, borrado, modificado, renombrado, añadido, nuevo).
+fn folder_code(changes: &HashMap<String, char>, dir: &str) -> Option<char> {
+    const ORDER: [char; 6] = ['U', 'D', 'M', 'R', 'A', '?'];
+    let rank = |c: char| ORDER.iter().position(|o| *o == c).unwrap_or(ORDER.len());
+    changes
+        .iter()
+        .filter(|(p, _)| p.strip_prefix(dir).is_some_and(|r| r.starts_with('/')))
+        .map(|(_, c)| *c)
+        .min_by_key(|c| rank(*c))
+}
+
 /// Une una carpeta y un nombre en una ruta relativa («» es la raíz).
 fn join(dir: &str, name: &str) -> String {
     if dir.is_empty() {
@@ -303,7 +315,7 @@ impl App {
                         let code = files.changes.get(path).copied();
                         let selected = files.viewer.as_ref().is_some_and(|v| v.path == *path);
                         Self::file_row(
-                            ui, path, name, dir, false, false, 0, code, false, selected, cmds,
+                            ui, path, name, dir, false, false, 0, code, None, selected, cmds,
                         );
                     }
                 } else {
@@ -529,11 +541,11 @@ impl App {
             let open = entry.is_dir && files.expanded.contains(&path);
             let code = files.changes.get(&path).copied();
             // Una carpeta se marca si algo dentro ha cambiado.
-            let inside = entry.is_dir
-                && files.changes.keys().any(|c| {
-                    c.strip_prefix(path.as_str())
-                        .is_some_and(|r| r.starts_with('/'))
-                });
+            let inside = if entry.is_dir {
+                folder_code(&files.changes, &path)
+            } else {
+                None
+            };
             if let Some(r) = renaming.as_mut().filter(|r| r.path == path) {
                 Self::rename_row(ui, r, entry.is_dir, depth, cmds);
             } else {
@@ -645,7 +657,7 @@ impl App {
         open: bool,
         depth: usize,
         code: Option<char>,
-        inside: bool,
+        inside: Option<char>,
         selected: bool,
         cmds: &mut Vec<UiCmd>,
     ) {
@@ -712,9 +724,16 @@ impl App {
             glyph_color,
         );
         x += 24.0;
-        let right = rect.max.x - if code.is_some() || inside { 20.0 } else { 4.0 };
+        let right = rect.max.x
+            - if code.is_some() || inside.is_some() {
+                20.0
+            } else {
+                4.0
+            };
         let name_color = if code.is_some() {
             color
+        } else if let Some(c) = inside {
+            badge(c).1
         } else if selected || response.hovered() {
             theme::TEXT
         } else {
@@ -746,9 +765,9 @@ impl App {
                 FontId::monospace(12.0),
                 color,
             );
-        } else if inside {
+        } else if let Some(c) = inside {
             ui.painter()
-                .circle_filled(egui::pos2(rect.max.x - 10.0, mid), 3.0, theme::YELLOW);
+                .circle_filled(egui::pos2(rect.max.x - 10.0, mid), 3.0, badge(c).1);
         }
         if response.clicked() {
             cmds.push(if is_dir {
@@ -1452,6 +1471,26 @@ fn search_files<'a>(all: &'a [String], query: &str) -> Vec<&'a String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_takes_the_color_of_its_most_important_change() {
+        let changes: HashMap<String, char> = [
+            ("src/a.rs", '?'),
+            ("src/deep/b.rs", 'M'),
+            ("docs/c.md", 'A'),
+            ("srcx/d.rs", 'D'),
+        ]
+        .into_iter()
+        .map(|(p, c)| (p.to_string(), c))
+        .collect();
+        // Lo modificado pesa más que lo nuevo, también varios niveles abajo.
+        assert_eq!(folder_code(&changes, "src"), Some('M'));
+        assert_eq!(folder_code(&changes, "src/deep"), Some('M'));
+        assert_eq!(folder_code(&changes, "docs"), Some('A'));
+        // «src» no incluye «srcx»; sin cambios dentro, nada.
+        assert_eq!(folder_code(&changes, "srcx"), Some('D'));
+        assert_eq!(folder_code(&changes, "other"), None);
+    }
 
     #[test]
     fn the_search_finds_files_by_a_part_of_their_path_best_first() {
