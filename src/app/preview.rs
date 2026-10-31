@@ -274,6 +274,31 @@ fn ui_preview() {
                 "claude-code",
             )
             .unwrap();
+        // Claude Code empezó la fase 2 (queda registrado quién la hizo).
+        store
+            .update_phase(
+                Some(&project),
+                receipt,
+                1,
+                forge_core::ideas::PhaseChange {
+                    status: Some("in_progress"),
+                    ..Default::default()
+                },
+                "claude-code",
+            )
+            .unwrap();
+        // Una revisión anterior de la fase 1 (5 min) y otra de Codex en curso en la fase 2 desde
+        // hace 2 min: de ahí salen el tiempo y la estimación que muestra la fase.
+        let clock = forge_core::store::now();
+        store
+            .start_review_run_at(Some(&project), receipt, 0, "codex", clock - 900)
+            .unwrap();
+        store
+            .review_progress_at(Some(&project), receipt, 0, None, None, true, clock - 600)
+            .unwrap();
+        store
+            .start_review_run_at(Some(&project), receipt, 1, "codex", clock - 120)
+            .unwrap();
         // Una revisión de Codex dejó dos comentarios en la fase 2; uno ya está resuelto.
         use forge_core::ideas::NewComment;
         let first = store
@@ -485,9 +510,21 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "8-ideas");
     // «Revisar» en la fase casi terminada, con su menú de agentes abierto.
-    harness.get_by_label_contains("Review").click();
+    harness
+        .get_all_by_label_contains("Review")
+        .find(|n| {
+            egui_kittest::kittest::NodeT::accesskit_node(n).role() == egui::accesskit::Role::Button
+        })
+        .expect("botón Revisar")
+        .click();
     settle(&mut harness);
     save(&mut harness, &out, "8b-ideas-revisar");
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
+    // «Corregir» manda los comentarios abiertos a un agente; el que hizo la fase va primero.
+    harness.get_by_label_contains("Fix").click();
+    settle(&mut harness);
+    save(&mut harness, &out, "8c-ideas-corregir");
     harness.key_press(egui::Key::Escape);
     settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
