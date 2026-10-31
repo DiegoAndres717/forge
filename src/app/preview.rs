@@ -239,7 +239,7 @@ fn ui_preview() {
                 .collect();
             p
         };
-        store
+        let receipt = store
             .add_plan(
                 Some(&project),
                 "Email a receipt after payment",
@@ -272,6 +272,42 @@ fn ui_preview() {
                     ),
                 ],
                 "claude-code",
+            )
+            .unwrap();
+        // Una revisión de Codex dejó dos comentarios en la fase 2; uno ya está resuelto.
+        use forge_core::ideas::NewComment;
+        let first = store
+            .add_review_comment(
+                Some(&project),
+                receipt,
+                1,
+                NewComment {
+                    text: "The Resend call has no timeout: a slow API blocks the webhook.",
+                    file: Some("src/email/send.ts"),
+                    line: Some(31),
+                },
+                "codex",
+            )
+            .unwrap();
+        store
+            .add_review_comment(
+                Some(&project),
+                receipt,
+                1,
+                NewComment {
+                    text: "The template test never fails: it asserts on the mock.",
+                    file: Some("src/email/template.test.ts"),
+                    line: None,
+                },
+                "codex",
+            )
+            .unwrap();
+        store
+            .resolve_review_comment(
+                Some(&project),
+                first + 1,
+                true,
+                "Asserts on the rendered HTML now",
             )
             .unwrap();
         store

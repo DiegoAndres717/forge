@@ -295,6 +295,8 @@ pub struct IdeasView {
     /// Agentes que pueden revisar una fase: (id, nombre, tiene modo de solo lectura). Los pone
     /// la app antes de dibujar.
     pub reviewers: Vec<(String, String, bool)>,
+    /// Comentarios de revisión de los planes del proyecto.
+    pub comments: Vec<forge_core::ideas::ReviewComment>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
