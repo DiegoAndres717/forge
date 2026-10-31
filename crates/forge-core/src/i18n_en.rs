@@ -1406,6 +1406,50 @@ pub const EN: &[(&str, &str)] = &[
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
     ("Antes", "Before"),
+    (
+        "el comentario no puede estar vacío",
+        "the comment cannot be empty",
+    ),
+    ("no existe el plan #{id}", "there is no plan #{id}"),
+    (
+        "Deja un comentario de revisión en una fase de un plan (tú revisas: no corrijas el código tú mismo). Úsalo una vez por hallazgo, con el archivo y la línea si los hay. El agente que hizo la fase los verá en plans_list y los corregirá.",
+        "Leaves a review comment on a phase of a plan (you review: do not fix the code yourself). Use it once per finding, with the file and line when you have them. The agent that did the phase will see them in plans_list and fix them.",
+    ),
+    ("Id del plan", "Plan id"),
+    ("Número de fase (desde 1)", "Phase number (from 1)"),
+    ("Qué está mal y por qué", "What is wrong and why"),
+    (
+        "Marca un comentario de revisión como resuelto, explicando qué cambiaste o por qué no hacía falta cambiar nada. Primero comprueba que el comentario tiene razón.",
+        "Marks a review comment as resolved, explaining what you changed or why nothing needed changing. First check that the comment is right.",
+    ),
+    (
+        "Id del comentario (el de «comment #N» en plans_list)",
+        "Comment id (the «comment #N» one in plans_list)",
+    ),
+    (
+        "Cómo se resolvió, o por qué no era un error",
+        "How it was resolved, or why it was not a mistake",
+    ),
+    (
+        "Comentario #{id} dejado en la fase {phase} del plan #{plan}.",
+        "Comment #{id} left on phase {phase} of plan #{plan}.",
+    ),
+    (
+        "faltan `plan` y `phase` (la fase se cuenta desde 1)",
+        "`plan` and `phase` are required (phases count from 1)",
+    ),
+    ("Comentario #{id} resuelto.", "Comment #{id} resolved."),
+    (
+        "No existe el comentario #{id}.",
+        "There is no comment #{id}.",
+    ),
+    ("Reabrir", "Reopen"),
+    ("Marcar como resuelto", "Mark as resolved"),
+    ("Borrar comentario", "Delete comment"),
+    (
+        "Comentarios de la revisión: {open} sin resolver de {total}",
+        "Review comments: {open} unresolved of {total}",
+    ),
     ("Revisar", "Review"),
     ("Revisar con…", "Review with…"),
     ("Revisión", "Review"),

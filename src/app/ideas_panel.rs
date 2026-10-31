@@ -114,6 +114,7 @@ impl App {
         cmds: &mut Vec<UiCmd>,
     ) {
         let reviewers = view.reviewers.clone();
+        let comments = view.comments.clone();
         let input = ui.add(
             theme::field(egui::TextEdit::singleline(&mut view.input))
                 .hint_text(tr!("Nueva idea para el backlog… (Enter)"))
@@ -162,6 +163,7 @@ impl App {
                 toggled,
                 phase_toggled,
                 reviewers: &reviewers,
+                comments: &comments,
                 highlighted: *highlighted,
                 phase_input: &phase_cell,
             };
@@ -271,8 +273,12 @@ impl App {
                 let items = self
                     .db(|s| s.list_ideas(Some(&path), true))
                     .unwrap_or_default();
+                let comments = self
+                    .db(|s| s.list_project_review_comments(Some(&path)))
+                    .unwrap_or_default();
                 let ws = &mut self.workspaces[i];
                 let view = &mut ws.ideas;
+                view.comments = comments;
                 let new_plan = view
                     .loaded
                     .is_some()
@@ -325,6 +331,7 @@ impl App {
             UiCmd::IdeaAdd(t) | UiCmd::IdeaSave(t) | UiCmd::IdeaEdit(t, _) => *t,
             UiCmd::IdeaSet(t, ..) | UiCmd::IdeaDelete(t, _) => *t,
             UiCmd::PhaseSet(t, ..) | UiCmd::TaskToggle(t, ..) | UiCmd::PhaseAdd(t, _) => *t,
+            UiCmd::CommentSet(t, ..) | UiCmd::CommentDelete(t, _) => *t,
             _ => return,
         };
         let path = target
@@ -382,6 +389,13 @@ impl App {
                     ..Default::default()
                 };
                 self.db(|s| s.update_phase(project, id, phase, change, "usuario"));
+            }
+            UiCmd::CommentSet(_, id, resolved) => {
+                // Desde el panel no hay explicación: quien resuelve con una es el agente.
+                self.db(|s| s.resolve_review_comment(project, id, resolved, ""));
+            }
+            UiCmd::CommentDelete(_, id) => {
+                self.db(|s| s.delete_review_comment(project, id));
             }
             UiCmd::PhaseAdd(_, id) => {
                 let Some((_, title)) = view.phase_input.take() else {
@@ -513,6 +527,8 @@ struct ItemCtx<'a> {
     phase_toggled: &'a HashMap<(i64, usize), bool>,
     /// Agentes que pueden revisar una fase: (id, nombre, con modo de solo lectura).
     reviewers: &'a [(String, String, bool)],
+    /// Comentarios de revisión de todos los planes del proyecto.
+    comments: &'a [forge_core::ideas::ReviewComment],
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
@@ -731,13 +747,23 @@ fn phase_row(
     toggles: &mut Toggles,
 ) {
     let current = idea.current_phase().map(|(n, _)| n) == Some(index);
-    // Las tareas de la fase en curso se ven; las demás, al pulsar la fase (y lo elegido a
-    // mano se respeta).
+    // Los comentarios de la revisión cuelgan del id de la fase, no de su número.
+    let mine: Vec<&forge_core::ideas::ReviewComment> = if phase.id.is_empty() {
+        Vec::new()
+    } else {
+        ctx.comments
+            .iter()
+            .filter(|c| c.plan_id == idea.id && c.phase_id == phase.id)
+            .collect()
+    };
+    let open_comments = mine.iter().filter(|c| c.status == "open").count();
+    // Las tareas de la fase en curso se ven (y la fase con comentarios sin resolver); las
+    // demás, al pulsar la fase (y lo elegido a mano se respeta).
     let open = ctx
         .phase_toggled
         .get(&(idea.id, index))
         .copied()
-        .unwrap_or(current);
+        .unwrap_or(current || open_comments > 0);
     let (glyph, color) = status_style(&phase.status);
     let next = next_status(&phase.status);
     ui.horizontal_top(|ui| {
@@ -771,6 +797,34 @@ fn phase_row(
                 }
                 if phase.reviewable() && !ctx.reviewers.is_empty() {
                     review_button(ui, idea.id, index, ctx, cmds);
+                }
+                if !mine.is_empty() {
+                    let color = if open_comments > 0 {
+                        theme::YELLOW
+                    } else {
+                        theme::TEXT_3
+                    };
+                    let chip = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!(
+                                    "{} {open_comments}/{}",
+                                    icon::CHAT_TEXT,
+                                    mine.len()
+                                ))
+                                .size(11.0)
+                                .color(color),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text(tr!(
+                            "Comentarios de la revisión: {open} sin resolver de {total}",
+                            open = open_comments,
+                            total = mine.len()
+                        ));
+                    if chip.clicked() {
+                        toggles.phase = Some(((idea.id, index), !open));
+                    }
                 }
                 if !phase.tasks.is_empty() {
                     let done = phase.tasks.iter().filter(|t| t.done).count();
@@ -830,6 +884,77 @@ fn phase_row(
                         ui.add(egui::Label::new(text).wrap());
                     });
                 }
+                for comment in &mine {
+                    review_comment_row(ui, comment, ctx.target, cmds);
+                }
+            }
+        });
+    });
+}
+
+/// Un comentario de la revisión: pendiente o resuelto (con cómo), con su archivo y quién lo
+/// dejó; se puede resolver, reabrir o borrar.
+fn review_comment_row(
+    ui: &mut egui::Ui,
+    comment: &forge_core::ideas::ReviewComment,
+    target: IdeasTarget,
+    cmds: &mut Vec<UiCmd>,
+) {
+    let resolved = comment.status == "resolved";
+    ui.horizontal_top(|ui| {
+        let (glyph, color, tip) = if resolved {
+            (icon::CHECK_CIRCLE, theme::GREEN, tr!("Reabrir"))
+        } else {
+            (icon::CIRCLE, theme::YELLOW, tr!("Marcar como resuelto"))
+        };
+        if theme::icon_button_sized(ui, glyph, tip, 18.0, color).clicked() {
+            cmds.push(UiCmd::CommentSet(target, comment.id, !resolved));
+        }
+        ui.vertical(|ui| {
+            // Deja sitio al icono de borrar, que va a la derecha.
+            ui.set_max_width((ui.available_width() - 26.0).max(80.0));
+            ui.spacing_mut().item_spacing.y = 1.0;
+            let mut text = RichText::new(&comment.text).size(12.0).color(if resolved {
+                theme::TEXT_4
+            } else {
+                theme::TEXT_2
+            });
+            if resolved {
+                text = text.strikethrough();
+            }
+            ui.add(egui::Label::new(text).wrap());
+            let place = match (&comment.file, comment.line) {
+                (Some(file), Some(line)) => format!("{file}:{line} · "),
+                (Some(file), None) => format!("{file} · "),
+                _ => String::new(),
+            };
+            ui.label(
+                RichText::new(format!("{place}{}", comment.reviewer))
+                    .size(10.5)
+                    .color(theme::TEXT_3),
+            );
+            if !comment.resolution.is_empty() {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("→ {}", comment.resolution))
+                            .size(11.0)
+                            .color(theme::TEXT_3),
+                    )
+                    .wrap(),
+                );
+            }
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+            if theme::icon_button_sized(
+                ui,
+                icon::TRASH,
+                tr!("Borrar comentario"),
+                18.0,
+                theme::TEXT_3,
+            )
+            .clicked()
+            {
+                cmds.push(UiCmd::CommentDelete(target, comment.id));
             }
         });
     });

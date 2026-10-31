@@ -67,6 +67,8 @@ fn mcp_server_shares_memory_between_clients() {
             "plan_add",
             "plan_update",
             "plan_delete",
+            "review_comment_add",
+            "review_comment_resolve",
             "project_context"
         ]
     );

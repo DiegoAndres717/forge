@@ -2214,6 +2214,65 @@ fn a_reviewer_opens_in_its_own_panel_next_to_the_agent_that_works() {
     });
 }
 
+/// Los comentarios de una revisión salen en el panel de planes y se resuelven, reabren y
+/// borran desde él.
+#[test]
+fn review_comments_reach_the_plans_panel_and_can_be_resolved_reopened_and_deleted() {
+    use forge_core::ideas::{NewComment, Phase};
+    let _serial = serial();
+    let dir = project("review-comments");
+    let mut h = app(dir);
+    let path = ws(h.state()).project.path.clone();
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&path), "Plan", "", &[Phase::new("Uno")], "claude-code"))
+        .unwrap();
+    let comment = h
+        .state_mut()
+        .db(|s| {
+            s.add_review_comment(
+                Some(&path),
+                plan,
+                0,
+                NewComment {
+                    text: "Falta validar la entrada",
+                    file: Some("src/a.rs"),
+                    line: Some(42),
+                },
+                "codex",
+            )
+        })
+        .unwrap();
+    ws_mut(h.state_mut()).ideas.open = true;
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "el comentario llega al panel", |a| {
+        ws(a)
+            .ideas
+            .comments
+            .iter()
+            .any(|c| c.text.contains("validar"))
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    let status = |a: &App| ws(a).ideas.comments.first().map(|c| c.status.clone());
+    assert_eq!(status(h.state()).as_deref(), Some("open"));
+    h.state_mut()
+        .apply(&ctx, UiCmd::CommentSet(Some(0), comment, true), area);
+    wait_until(&mut h, "comentario resuelto", |a| {
+        status(a).as_deref() == Some("resolved")
+    });
+    h.state_mut()
+        .apply(&ctx, UiCmd::CommentSet(Some(0), comment, false), area);
+    wait_until(&mut h, "comentario reabierto", |a| {
+        status(a).as_deref() == Some("open")
+    });
+    h.state_mut()
+        .apply(&ctx, UiCmd::CommentDelete(Some(0), comment), area);
+    wait_until(&mut h, "comentario borrado", |a| {
+        ws(a).ideas.comments.is_empty()
+    });
+}
+
 /// Una división se gira desde la cabecera del panel: lado a lado ↔ uno encima del otro.
 #[test]
 fn a_split_can_be_rotated_from_the_panel_header() {
