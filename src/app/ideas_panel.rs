@@ -113,6 +113,7 @@ impl App {
         ui: &mut egui::Ui,
         cmds: &mut Vec<UiCmd>,
     ) {
+        let reviewers = view.reviewers.clone();
         let input = ui.add(
             theme::field(egui::TextEdit::singleline(&mut view.input))
                 .hint_text(tr!("Nueva idea para el backlog… (Enter)"))
@@ -160,6 +161,7 @@ impl App {
                 planner,
                 toggled,
                 phase_toggled,
+                reviewers: &reviewers,
                 highlighted: *highlighted,
                 phase_input: &phase_cell,
             };
@@ -415,6 +417,54 @@ impl App {
             .map(|a| (a.id.clone(), a.name.clone()))
     }
 
+    /// Los agentes instalados y activos que pueden revisar una fase: (id, nombre, modo de
+    /// solo lectura).
+    pub(super) fn reviewers(&self, workspace: usize) -> Vec<(String, String, bool)> {
+        let Ok(detected) = self.agents.lock().map(|d| d.clone()) else {
+            return Vec::new();
+        };
+        let Some(ws) = self.workspaces.get(workspace) else {
+            return Vec::new();
+        };
+        ws.project
+            .agents
+            .iter()
+            .filter(|a| a.enabled && detected.get(a.program()).is_some_and(|d| d.path.is_some()))
+            .filter(|a| a.with_prompt(&a.command, "").is_some())
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    a.name.clone(),
+                    a.read_only(&a.command).is_some(),
+                )
+            })
+            .collect()
+    }
+
+    /// «Revisar»: abre al agente elegido, de solo lectura, con la fase y su rama por revisar.
+    pub(super) fn review_phase(
+        &mut self,
+        ctx: &egui::Context,
+        id: i64,
+        phase: usize,
+        agent: &str,
+        area: Rect,
+    ) {
+        let Some(i) = self.active else { return };
+        let ws = &mut self.workspaces[i];
+        let Some(prompt) = ws
+            .ideas
+            .items
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| forge_core::ideas::review_prompt(p, phase))
+        else {
+            return;
+        };
+        ws.ideas.open = false; // que se vea al revisor trabajando
+        ws.review_agent(ctx, agent, &prompt, area);
+    }
+
     /// "Planificar con…": el agente por defecto recibe la petición de planificar la idea.
     pub(super) fn plan_with_agent(&mut self, ctx: &egui::Context, id: i64, area: Rect) {
         let Some(i) = self.active else { return };
@@ -461,6 +511,8 @@ struct ItemCtx<'a> {
     planner: Option<&'a str>,
     toggled: &'a HashMap<i64, bool>,
     phase_toggled: &'a HashMap<(i64, usize), bool>,
+    /// Agentes que pueden revisar una fase: (id, nombre, con modo de solo lectura).
+    reviewers: &'a [(String, String, bool)],
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
@@ -717,6 +769,9 @@ fn phase_row(
                 if let Some(branch) = &phase.branch {
                     branch_chip(ui, branch);
                 }
+                if phase.reviewable() && !ctx.reviewers.is_empty() {
+                    review_button(ui, idea.id, index, ctx, cmds);
+                }
                 if !phase.tasks.is_empty() {
                     let done = phase.tasks.iter().filter(|t| t.done).count();
                     let caret = if open {
@@ -777,6 +832,41 @@ fn phase_row(
                 }
             }
         });
+    });
+}
+
+/// «Revisar»: un menú con los agentes que pueden revisar la fase; el elegido abre su terminal.
+fn review_button(ui: &mut egui::Ui, plan: i64, index: usize, ctx: &ItemCtx, cmds: &mut Vec<UiCmd>) {
+    let button = ui.add(
+        egui::Button::new(
+            RichText::new(format!("{} {}", icon::MAGNIFYING_GLASS, tr!("Revisar")))
+                .size(11.0)
+                .color(theme::ACCENT),
+        )
+        .frame(false),
+    );
+    let button = button.on_hover_text(tr!("Pedirle a otro agente que revise esta fase"));
+    egui::Popup::menu(&button).show(|ui| {
+        ui.set_min_width(220.0);
+        ui.label(
+            RichText::new(tr!("Revisar con…"))
+                .size(11.0)
+                .color(theme::TEXT_3),
+        );
+        for (id, name, read_only) in ctx.reviewers {
+            let item = ui.button(name.as_str());
+            let item = if *read_only {
+                item
+            } else {
+                item.on_hover_text(tr!(
+                    "Este agente no tiene modo de solo lectura: solo el mensaje le pide no editar"
+                ))
+            };
+            if item.clicked() {
+                cmds.push(UiCmd::ReviewPhase(plan, index, id.clone()));
+                ui.close();
+            }
+        }
     });
 }
 

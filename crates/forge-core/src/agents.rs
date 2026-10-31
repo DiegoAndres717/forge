@@ -382,6 +382,62 @@ impl AgentSpec {
         }
     }
 
+    /// El comando para abrir al agente como revisor: en su modo de solo lectura (Claude
+    /// `plan`, Codex `read-only`, Antigravity `plan`), para que no toque el trabajo que revisa.
+    /// Se quitan antes del comando guardado los permisos propios («saltar permisos», otro modo).
+    /// `None` si el agente no tiene ese modo en la línea de comandos (OpenCode…): entonces solo
+    /// el prompt le pide no editar.
+    pub fn read_only(&self, command: &str) -> Option<String> {
+        // (flags de permisos que se quitan sin valor, con valor, los que se ponen)
+        let (bare, valued, flags): (&[&str], &[&str], &str) = match self.program() {
+            "claude" => (
+                &[
+                    "--dangerously-skip-permissions",
+                    "--allow-dangerously-skip-permissions",
+                ],
+                &["--permission-mode"],
+                "--permission-mode plan",
+            ),
+            "codex" => (
+                &["--full-auto", "--dangerously-bypass-approvals-and-sandbox"],
+                &["--sandbox", "-s", "--ask-for-approval", "-a"],
+                "--sandbox read-only --ask-for-approval on-request",
+            ),
+            "agy" => (
+                &["--dangerously-skip-permissions"],
+                &["--mode"],
+                "--mode plan",
+            ),
+            _ => return None,
+        };
+        // Un revisor no hereda «saltar permisos» ni otro modo del comando guardado.
+        let mut kept: Vec<&str> = Vec::new();
+        let mut words = command.split_whitespace();
+        let mut stripped = false;
+        while let Some(word) = words.next() {
+            let name = word.split('=').next().unwrap_or(word);
+            if bare.contains(&word) {
+                stripped = true;
+            } else if valued.contains(&name) {
+                stripped = true;
+                if !word.contains('=') {
+                    words.next();
+                }
+            } else {
+                kept.push(word);
+            }
+        }
+        let command = if stripped {
+            kept.join(" ")
+        } else {
+            command.to_string()
+        };
+        Some(match command.split_once(' ') {
+            Some((program, rest)) => format!("{program} {flags} {rest}"),
+            None => format!("{command} {flags}"),
+        })
+    }
+
     /// El agente avisa él mismo cuando termina o espera (ver `with_events`).
     /// Comando que abre el agente con `prompt` como primer mensaje: argumento suelto
     /// (Claude Code, Codex, agentes propios), `--prompt` en OpenCode (que toma el argumento
@@ -1336,6 +1392,61 @@ mod tests {
         assert_eq!(
             get("opencode").with_permission("opencode", true),
             "opencode"
+        );
+    }
+
+    #[test]
+    fn a_reviewer_is_launched_read_only_when_its_agent_has_such_a_mode() {
+        let get = |id: &str| builtins().into_iter().find(|a| a.id == id).unwrap();
+        assert_eq!(
+            get("claude").read_only("claude").as_deref(),
+            Some("claude --permission-mode plan")
+        );
+        assert_eq!(
+            get("codex").read_only("codex --model x").as_deref(),
+            Some("codex --sandbox read-only --ask-for-approval on-request --model x")
+        );
+        assert_eq!(
+            get("agy").read_only("agy").as_deref(),
+            Some("agy --mode plan")
+        );
+        // Sin modo de solo lectura en la línea de comandos (OpenCode): no se garantiza.
+        assert_eq!(get("opencode").read_only("opencode"), None);
+        // Un revisor nunca hereda «saltar permisos» ni otro modo del comando guardado: se
+        // quitan (con su valor) y se pone el de solo lectura.
+        assert_eq!(
+            get("claude")
+                .read_only("claude --dangerously-skip-permissions --continue")
+                .as_deref(),
+            Some("claude --permission-mode plan --continue")
+        );
+        assert_eq!(
+            get("claude")
+                .read_only("claude --allow-dangerously-skip-permissions")
+                .as_deref(),
+            Some("claude --permission-mode plan")
+        );
+        assert_eq!(
+            get("claude")
+                .read_only("claude --permission-mode acceptEdits")
+                .as_deref(),
+            Some("claude --permission-mode plan")
+        );
+        assert_eq!(
+            get("codex")
+                .read_only("codex --full-auto resume --last")
+                .as_deref(),
+            Some("codex --sandbox read-only --ask-for-approval on-request resume --last")
+        );
+        assert_eq!(
+            get("codex")
+                .read_only("codex -s workspace-write -a never")
+                .as_deref(),
+            Some("codex --sandbox read-only --ask-for-approval on-request")
+        );
+        assert_eq!(
+            get("agy").read_only("agy --mode=accept-edits").as_deref(),
+            Some("agy --mode plan")
         );
     }
 

@@ -261,7 +261,7 @@ fn ui_preview() {
                         &[
                             ("React Email template", true),
                             ("Send through Resend", false),
-                            ("Retry on failure", false),
+                            ("Retry on failure", true),
                         ],
                     ),
                     phase(
@@ -448,6 +448,12 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].ideas.dirty = true;
     settle(&mut harness);
     save(&mut harness, &out, "8-ideas");
+    // «Revisar» en la fase casi terminada, con su menú de agentes abierto.
+    harness.get_by_label_contains("Review").click();
+    settle(&mut harness);
+    save(&mut harness, &out, "8b-ideas-revisar");
+    harness.key_press(egui::Key::Escape);
+    settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
     std::fs::write(
         project.join("README.md"),

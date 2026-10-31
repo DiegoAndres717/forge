@@ -292,6 +292,9 @@ pub struct IdeasView {
     pub phase_toggled: HashMap<(i64, usize), bool>,
     /// Campo "Añadir fase" abierto: (plan, texto).
     pub phase_input: Option<(i64, String)>,
+    /// Agentes que pueden revisar una fase: (id, nombre, tiene modo de solo lectura). Los pone
+    /// la app antes de dibujar.
+    pub reviewers: Vec<(String, String, bool)>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
@@ -1217,6 +1220,30 @@ impl Workspace {
         };
         let state = PanelState {
             name: Some(spec.name.clone()),
+            cwd: self.project.root(),
+            command: Some(command),
+            process: None,
+            agent: Some(spec.id.clone()),
+            account: None,
+        };
+        let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
+        self.add_panel(ctx, dir, state);
+    }
+
+    /// Abre un agente como revisor en un panel nuevo (nunca reutiliza el de quien trabaja): con
+    /// su modo de solo lectura si lo tiene, y `prompt` como primer mensaje.
+    pub fn review_agent(&mut self, ctx: &egui::Context, id: &str, prompt: &str, area: Rect) {
+        let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
+            return;
+        };
+        let launch = spec
+            .read_only(&spec.command)
+            .unwrap_or_else(|| spec.command.clone());
+        let Some(command) = spec.with_prompt(&launch, prompt) else {
+            return;
+        };
+        let state = PanelState {
+            name: Some(format!("{} · {}", spec.name, tr!("Revisión"))),
             cwd: self.project.root(),
             command: Some(command),
             process: None,
