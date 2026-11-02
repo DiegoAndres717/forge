@@ -154,7 +154,7 @@ impl App {
         } = view;
         let mut toggles = Toggles::default();
         let phase_cell = std::cell::RefCell::new(phase_input.take());
-        let learn_cell = std::cell::RefCell::new(learning.take());
+        let learn_cell = std::cell::RefCell::new(std::mem::take(learning));
         let doing: Vec<&Idea> = items.iter().filter(|i| i.status == "doing").collect();
         let backlog: Vec<&Idea> = items.iter().filter(|i| i.status == "pending").collect();
         let done: Vec<&Idea> = items.iter().filter(|i| i.done()).collect();
@@ -343,9 +343,9 @@ impl App {
             UiCmd::PhaseSet(t, ..) | UiCmd::TaskToggle(t, ..) | UiCmd::PhaseAdd(t, _) => *t,
             UiCmd::CommentSet(t, ..) | UiCmd::CommentDelete(t, _) => *t,
             UiCmd::LearnOpen(t, ..)
-            | UiCmd::LearnSave(t)
-            | UiCmd::LearnDiscard(t)
-            | UiCmd::LearnClose(t) => *t,
+            | UiCmd::LearnSave(t, ..)
+            | UiCmd::LearnDiscard(t, ..)
+            | UiCmd::LearnClose(t, ..) => *t,
             _ => return,
         };
         let path = target
@@ -426,22 +426,35 @@ impl App {
                         kind: "error",
                     })
                     .collect();
-                if !items.is_empty() {
-                    view.learning = Some(Learning {
+                // Cada fase tiene su lista: abrir otra no toca lo marcado en las demás.
+                let open = view
+                    .learning
+                    .iter()
+                    .any(|l| l.plan == plan && l.phase_id == phase_id);
+                if !items.is_empty() && !open {
+                    view.learning.push(Learning {
                         plan,
                         phase_id,
                         items,
                     });
                 }
             }
-            UiCmd::LearnClose(_) => view.learning = None,
-            UiCmd::LearnSave(_) | UiCmd::LearnDiscard(_) => {
+            UiCmd::LearnClose(_, plan, ref phase_id) => view
+                .learning
+                .retain(|l| !(l.plan == plan && l.phase_id == *phase_id)),
+            UiCmd::LearnSave(_, plan, ref phase_id)
+            | UiCmd::LearnDiscard(_, plan, ref phase_id) => {
                 // Sin proyecto (la lista general) no hay memoria donde guardar: se conserva lo elegido.
                 let Some(path) = path.as_deref() else { return };
-                let Some(learning) = view.learning.take() else {
+                let Some(at) = view
+                    .learning
+                    .iter()
+                    .position(|l| l.plan == plan && l.phase_id == *phase_id)
+                else {
                     return;
                 };
-                let discard = matches!(cmd, UiCmd::LearnDiscard(_));
+                let learning = view.learning.remove(at);
+                let discard = matches!(cmd, UiCmd::LearnDiscard(..));
                 let chosen: Vec<(forge_core::ideas::Lesson, &str)> = learning
                     .items
                     .iter()
@@ -460,7 +473,8 @@ impl App {
                     .db(|s| s.save_review_lessons(&path, &chosen, &skipped))
                     .is_none()
                 {
-                    self.ideas_view(target).learning = Some(learning); // se conserva lo elegido
+                    // Se conserva lo elegido.
+                    self.ideas_view(target).learning.push(learning);
                 }
             }
             UiCmd::CommentSet(_, id, resolved) => {
@@ -634,7 +648,7 @@ struct ItemCtx<'a> {
     /// Revisiones de fases del proyecto (para el avance de la que está en curso).
     runs: &'a [forge_core::ideas::ReviewRun],
     /// Lo que se propone recordar (lo edita una tarjeta mientras las demás solo leen).
-    learning: &'a std::cell::RefCell<Option<Learning>>,
+    learning: &'a std::cell::RefCell<Vec<Learning>>,
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
@@ -871,8 +885,8 @@ fn phase_row(
     let learning_here = ctx
         .learning
         .borrow()
-        .as_ref()
-        .is_some_and(|l| l.plan == idea.id && l.phase_id == phase.id);
+        .iter()
+        .any(|l| l.plan == idea.id && l.phase_id == phase.id);
     // Las tareas de la fase en curso se ven (y la fase con comentarios sin resolver); las
     // demás, al pulsar la fase (y lo elegido a mano se respeta).
     let open = ctx
@@ -1034,7 +1048,7 @@ fn phase_row(
                     review_comment_row(ui, comment, ctx.target, cmds);
                 }
                 if learning_here {
-                    learn_box(ui, ctx.learning, ctx.target, cmds);
+                    learn_box(ui, ctx.learning, ctx.target, (idea.id, &phase.id), cmds);
                 }
             }
         });
@@ -1045,12 +1059,16 @@ fn phase_row(
 /// su título y se elige si es un error o una convención. Nada se guarda hasta pulsar «Guardar».
 fn learn_box(
     ui: &mut egui::Ui,
-    learning: &std::cell::RefCell<Option<Learning>>,
+    learning: &std::cell::RefCell<Vec<Learning>>,
     target: IdeasTarget,
+    (plan, phase_id): (i64, &str),
     cmds: &mut Vec<UiCmd>,
 ) {
     let mut guard = learning.borrow_mut();
-    let Some(learning) = guard.as_mut() else {
+    let Some(learning) = guard
+        .iter_mut()
+        .find(|l| l.plan == plan && l.phase_id == phase_id)
+    else {
         return;
     };
     egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -1079,16 +1097,16 @@ fn learn_box(
                 ),
             );
             if save.clicked() {
-                cmds.push(UiCmd::LearnSave(target));
+                cmds.push(UiCmd::LearnSave(target, plan, phase_id.into()));
             }
             if ui
                 .button(RichText::new(tr!("Descartar todo")).size(11.5))
                 .clicked()
             {
-                cmds.push(UiCmd::LearnDiscard(target));
+                cmds.push(UiCmd::LearnDiscard(target, plan, phase_id.into()));
             }
             if ui.button(RichText::new(tr!("Cerrar")).size(11.5)).clicked() {
-                cmds.push(UiCmd::LearnClose(target));
+                cmds.push(UiCmd::LearnClose(target, plan, phase_id.into()));
             }
         });
     });
