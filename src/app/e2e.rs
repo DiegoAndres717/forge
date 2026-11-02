@@ -2388,16 +2388,18 @@ fn only_the_lessons_the_owner_ticks_reach_the_memory_and_none_is_proposed_twice(
     let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
     h.state_mut()
         .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 0), area);
-    let learning = ws(h.state()).ideas.learning.as_ref().expect("propuestas");
+    let learning = ws(h.state()).ideas.learning.first().expect("propuestas");
     assert_eq!(learning.items.len(), 2);
     assert!(
         learning.items.iter().all(|i| !i.save),
         "nada marcado de salida"
     );
     // Se marca solo la primera y se guarda: la segunda se da por vista.
-    ws_mut(h.state_mut()).ideas.learning.as_mut().unwrap().items[0].save = true;
-    h.state_mut().apply(&ctx, UiCmd::LearnSave(Some(0)), area);
-    assert!(ws(h.state()).ideas.learning.is_none());
+    ws_mut(h.state_mut()).ideas.learning[0].items[0].save = true;
+    let phase_id = ws(h.state()).ideas.learning[0].phase_id.clone();
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnSave(Some(0), plan, phase_id), area);
+    assert!(ws(h.state()).ideas.learning.is_empty());
     let found = h
         .state_mut()
         .db(|s| s.search_memories(&path, "espera", Some("error"), 10))
@@ -2417,9 +2419,77 @@ fn only_the_lessons_the_owner_ticks_reach_the_memory_and_none_is_proposed_twice(
     h.state_mut()
         .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 0), area);
     assert!(
-        ws(h.state()).ideas.learning.is_none(),
+        ws(h.state()).ideas.learning.is_empty(),
         "no se propone dos veces"
     );
+}
+
+/// Con varias fases abiertas en «Aprender», cada una conserva su lista y sus casillas: abrir
+/// otra no cierra ni desmarca la anterior, y guardar una deja la otra como estaba.
+#[test]
+fn learn_lists_of_two_phases_stay_open_side_by_side() {
+    use forge_core::ideas::{NewComment, Phase};
+    let _serial = serial();
+    let dir = project("learn-two");
+    let mut h = app(dir);
+    let path = ws(h.state()).project.path.clone();
+    let plan = h
+        .state_mut()
+        .db(|s| {
+            s.add_plan(
+                Some(&path),
+                "Recibos",
+                "",
+                &[Phase::new("Webhook"), Phase::new("Cobro")],
+                "claude-code",
+            )
+        })
+        .unwrap();
+    for phase in 0..2 {
+        let id = h
+            .state_mut()
+            .db(|s| {
+                s.add_review_comment(
+                    Some(&path),
+                    plan,
+                    phase,
+                    NewComment {
+                        text: "Falta el tiempo de espera",
+                        file: None,
+                        line: None,
+                    },
+                    "codex",
+                )
+            })
+            .unwrap();
+        h.state_mut()
+            .db(|s| s.resolve_review_comment(Some(&path), id, true, "ya"))
+            .unwrap();
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "comentarios cargados", |a| {
+        ws(a).ideas.comments.len() == 2 && ws(a).ideas.items.iter().any(|i| i.phases.len() == 2)
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 0), area);
+    ws_mut(h.state_mut()).ideas.learning[0].items[0].save = true;
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnOpen(Some(0), plan, 1), area);
+    let lists = &ws(h.state()).ideas.learning;
+    assert_eq!(lists.len(), 2, "las dos listas siguen abiertas");
+    assert!(
+        lists[0].items[0].save,
+        "lo marcado en la primera se conserva"
+    );
+    // Guardar la primera no toca la segunda.
+    let first = lists[0].phase_id.clone();
+    h.state_mut()
+        .apply(&ctx, UiCmd::LearnSave(Some(0), plan, first), area);
+    let lists = &ws(h.state()).ideas.learning;
+    assert_eq!(lists.len(), 1);
+    assert_eq!(lists[0].phase_id, ws(h.state()).ideas.items[0].phases[1].id);
 }
 
 /// «Revisar» anota la revisión (agente y hora de inicio) y el panel de planes la recibe, para

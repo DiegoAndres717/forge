@@ -291,11 +291,12 @@ enum UiCmd {
     /// Proponer qué recordar de los comentarios resueltos de una fase: (plan, fase).
     LearnOpen(IdeasTarget, i64, usize),
     /// Guardar lo marcado en la memoria (y dar por vistas las demás propuestas).
-    LearnSave(IdeasTarget),
-    /// No recordar nada de estas propuestas (y no volver a proponerlas).
-    LearnDiscard(IdeasTarget),
-    /// Cerrar la lista sin guardar ni descartar.
-    LearnClose(IdeasTarget),
+    /// (plan, id de la fase)
+    LearnSave(IdeasTarget, i64, String),
+    /// No recordar nada de estas propuestas (y no volver a proponerlas): (plan, id de la fase).
+    LearnDiscard(IdeasTarget, i64, String),
+    /// Cerrar la lista sin guardar ni descartar: (plan, id de la fase).
+    LearnClose(IdeasTarget, i64, String),
     /// Resolver (true) o reabrir (false) un comentario de revisión.
     CommentSet(IdeasTarget, i64, bool),
     /// Borrar un comentario de revisión.

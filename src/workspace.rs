@@ -317,8 +317,9 @@ pub struct IdeasView {
     pub comments: Vec<forge_core::ideas::ReviewComment>,
     /// Revisiones de fases (en curso y terminadas) del proyecto.
     pub runs: Vec<forge_core::ideas::ReviewRun>,
-    /// Lo que se propone recordar de una revisión, mientras la persona elige.
-    pub learning: Option<Learning>,
+    /// Lo que se propone recordar de cada revisión abierta (una lista por fase), mientras la
+    /// persona elige.
+    pub learning: Vec<Learning>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,

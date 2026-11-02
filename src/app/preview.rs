@@ -537,7 +537,7 @@ fn ui_preview() {
         .click();
     settle(&mut harness);
     save(&mut harness, &out, "8d-ideas-aprender");
-    harness.state_mut().workspaces[0].ideas.learning = None;
+    harness.state_mut().workspaces[0].ideas.learning.clear();
     settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
     std::fs::write(
