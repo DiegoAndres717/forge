@@ -1403,6 +1403,10 @@ pub const EN: &[(&str, &str)] = &[
     ("Copiar ruta", "Copy path"),
     ("Mostrar en el Finder", "Show in Finder"),
     ("Abrir en terminal", "Open in terminal"),
+    (
+        "No encuentro ningún agente instalado y activo para revisar: pulsa para buscarlos otra vez",
+        "No installed, enabled agent found to review: click to look for them again",
+    ),
     ("Marcar como leído", "Mark as read"),
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),
