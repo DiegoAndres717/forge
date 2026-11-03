@@ -894,6 +894,10 @@ impl App {
             } else {
                 path.rsplit_once('/').map_or("", |(d, _)| d).to_string()
             };
+            if ui.button(tr!("Abrir en terminal")).clicked() {
+                cmds.push(UiCmd::FilesOpenTerminal(path.to_string()));
+                ui.close();
+            }
             ui.separator();
             if ui.button(tr!("Renombrar")).clicked() {
                 cmds.push(UiCmd::FilesRenameStart(path.to_string()));
@@ -960,6 +964,27 @@ impl App {
             UiCmd::FilesReveal(path) => {
                 if let Err(e) = forge_core::files::reveal(&ws.project.path, Path::new(&path)) {
                     ws.files.error = Some(e);
+                }
+            }
+            UiCmd::FilesOpenTerminal(path) => {
+                // Solo dentro del proyecto: una ruta que se sale (`..`, enlaces) no abre nada.
+                let root = forge_core::canonical(&ws.project.root());
+                // `canonicalize` resuelve `..` y enlaces; si no existe, falla y no se abre nada.
+                // En Windows trae el prefijo `\\?\`; se quita como en `root` para poder comparar.
+                let target = std::fs::canonicalize(root.join(&path)).ok().map(|t| {
+                    t.to_str()
+                        .and_then(forge_core::strip_verbatim)
+                        .map_or(t, std::path::PathBuf::from)
+                });
+                let folder = target.and_then(|t| {
+                    if t.is_dir() {
+                        Some(t)
+                    } else {
+                        t.parent().map(Path::to_path_buf)
+                    }
+                });
+                if let Some(folder) = folder.filter(|f| f.starts_with(&root)) {
+                    ws.new_tab_in(ctx, folder);
                 }
             }
             UiCmd::FilesNewItem(parent, is_dir) => {

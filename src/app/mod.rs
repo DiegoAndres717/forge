@@ -240,6 +240,8 @@ enum UiCmd {
     ToggleTerminal,
     /// Muestra un archivo del árbol en el Finder.
     FilesReveal(String),
+    /// Abrir una terminal en esa carpeta del proyecto (o en la del archivo): ruta relativa.
+    FilesOpenTerminal(String),
     /// Empieza a nombrar un archivo (`false`) o carpeta (`true`) nuevo dentro de la carpeta.
     FilesNewItem(String, bool),
     /// Crea lo que se está nombrando: carpeta, si es carpeta y nombre.
@@ -1095,6 +1097,7 @@ impl App {
             | UiCmd::FilesMode(_)
             | UiCmd::ToggleTerminal
             | UiCmd::FilesReveal(_)
+            | UiCmd::FilesOpenTerminal(_)
             | UiCmd::FilesNewItem(..)
             | UiCmd::FilesCreate(..)
             | UiCmd::FilesCancelNew

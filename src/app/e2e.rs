@@ -1521,6 +1521,40 @@ fn a_new_file_is_named_in_the_tree_created_and_opened() {
     assert!(ws(h.state()).files.expanded.contains("lib"));
 }
 
+/// «Abrir en terminal» en una carpeta del explorador abre una terminal nueva dentro de ella
+/// (y en un archivo, dentro de su carpeta).
+#[test]
+fn open_in_terminal_starts_a_shell_inside_that_folder() {
+    let _serial = serial();
+    let dir = project("termfolder");
+    std::fs::create_dir_all(dir.join("zzcarpeta/hija")).unwrap();
+    std::fs::write(dir.join("zzcarpeta/hija/a.rs"), "").unwrap();
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    let before = ws(h.state()).panel_count();
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpenTerminal("zzcarpeta".into()), area);
+    assert_eq!(ws(h.state()).panel_count(), before + 1, "una terminal más");
+    wait_until(&mut h, "la terminal en la carpeta", |a| {
+        ws(a).focused_cwd() == Some(dir.join("zzcarpeta"))
+    });
+    // Sobre un archivo se abre en su carpeta.
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::FilesOpenTerminal("zzcarpeta/hija/a.rs".into()),
+        area,
+    );
+    wait_until(&mut h, "la terminal junto al archivo", |a| {
+        ws(a).focused_cwd() == Some(dir.join("zzcarpeta/hija"))
+    });
+    // Una ruta que se sale del proyecto no abre nada.
+    let count = ws(h.state()).panel_count();
+    h.state_mut()
+        .apply(&ctx, UiCmd::FilesOpenTerminal("../fuera".into()), area);
+    assert_eq!(ws(h.state()).panel_count(), count);
+}
+
 #[test]
 fn typing_a_name_in_the_tree_and_pressing_enter_creates_it() {
     let _serial = serial();
