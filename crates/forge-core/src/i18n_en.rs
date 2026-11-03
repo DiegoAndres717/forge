@@ -1402,6 +1402,7 @@ pub const EN: &[(&str, &str)] = &[
     ("Buscar archivos…", "Search files…"),
     ("Copiar ruta", "Copy path"),
     ("Mostrar en el Finder", "Show in Finder"),
+    ("Abrir en terminal", "Open in terminal"),
     ("Marcar como leído", "Mark as read"),
     ("Mostrar terminal", "Show terminal"),
     ("Cambios sin guardar (⌘S)", "Unsaved changes (⌘S)"),

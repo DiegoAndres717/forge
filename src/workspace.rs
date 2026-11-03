@@ -1709,9 +1709,23 @@ impl Workspace {
             Some(Content::Shell(t)) => t.cwd(),
             _ => None,
         };
+        self.new_tab_in(ctx, cwd.unwrap_or_else(|| self.project.root()));
+    }
+
+    /// Directorio actual del shell enfocado (para las pruebas).
+    #[cfg(test)]
+    pub fn focused_cwd(&self) -> Option<PathBuf> {
+        match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) => t.cwd().map(|c| forge_core::canonical(&c)),
+            _ => None,
+        }
+    }
+
+    /// Nueva terminal en `cwd`, en el mismo hueco que la enfocada.
+    pub fn new_tab_in(&mut self, ctx: &egui::Context, cwd: PathBuf) {
         let state = PanelState {
             name: None,
-            cwd: cwd.unwrap_or_else(|| self.project.root()),
+            cwd,
             command: None,
             process: None,
             agent: None,
