@@ -2568,6 +2568,35 @@ fn starting_a_review_records_it_so_the_phase_can_show_its_progress() {
     wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
 }
 
+/// Una fase lista para revisar muestra «Revisar» aunque Forge no encuentre ningún agente: el
+/// botón no desaparece sin explicación (avisa y vuelve a buscarlos al pulsarlo).
+#[test]
+fn the_review_button_stays_when_no_agent_is_found() {
+    use forge_core::ideas::Phase;
+    let _serial = serial();
+    let mut h = app(project("review-no-agents"));
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Webhook");
+    phase.branch = Some("feat/webhook".into());
+    phase.status = "doing".into();
+    h.state_mut()
+        .db(|s| s.add_plan(Some(&path), "Recibos", "", &[phase], "claude-code"))
+        .unwrap();
+    // Ningún agente activo: la lista de revisores queda vacía.
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = false;
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    ws_mut(h.state_mut()).ideas.open = true;
+    wait_until(&mut h, "plan cargado", |a| !ws(a).ideas.items.is_empty());
+    h.run_steps(3);
+    assert!(ws(h.state()).ideas.reviewers.is_empty());
+    assert!(
+        h.query_by_label_contains("Revisar").is_some(),
+        "el botón sigue ahí"
+    );
+}
+
 /// Pedirle algo a un agente nunca escribe en la terminal de su revisión (es de solo lectura y
 /// está revisando otra cosa): abre una propia.
 #[test]

@@ -931,8 +931,12 @@ fn phase_row(
                 if let Some(branch) = &phase.branch {
                     branch_chip(ui, branch);
                 }
-                if phase.reviewable() && !ctx.reviewers.is_empty() {
-                    review_button(ui, idea.id, index, ctx, cmds);
+                if phase.reviewable() {
+                    if ctx.reviewers.is_empty() {
+                        no_reviewer_button(ui, cmds);
+                    } else {
+                        review_button(ui, idea.id, index, ctx, cmds);
+                    }
                 }
                 if open_comments > 0 && !ctx.reviewers.is_empty() {
                     fix_button(ui, idea.id, index, phase, ctx, cmds);
@@ -1315,6 +1319,26 @@ fn fix_button(
 }
 
 /// «Revisar»: un menú con los agentes que pueden revisar la fase; el elegido abre su terminal.
+/// «Revisar» sin agentes a la vista: gris, explica qué falta y al pulsarlo los busca otra vez
+/// (en vez de desaparecer sin decir por qué).
+fn no_reviewer_button(ui: &mut egui::Ui, cmds: &mut Vec<UiCmd>) {
+    let button = ui
+        .add(
+            egui::Button::new(
+                RichText::new(format!("{} {}", icon::MAGNIFYING_GLASS, tr!("Revisar")))
+                    .size(11.0)
+                    .color(theme::TEXT_3),
+            )
+            .frame(false),
+        )
+        .on_hover_text(tr!(
+            "No encuentro ningún agente instalado y activo para revisar: pulsa para buscarlos otra vez"
+        ));
+    if button.clicked() {
+        cmds.push(UiCmd::DetectAgents);
+    }
+}
+
 fn review_button(ui: &mut egui::Ui, plan: i64, index: usize, ctx: &ItemCtx, cmds: &mut Vec<UiCmd>) {
     let button = ui.add(
         egui::Button::new(
