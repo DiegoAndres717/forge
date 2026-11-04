@@ -23,7 +23,11 @@ use forge_core::project::{self, Project, SavedCommand};
 use forge_core::store::{self, Store};
 
 const SIDEBAR: f32 = 240.0;
+/// Ancho del cajón derecho (Guard, Memoria, Planes, Git y Archivos) al empezar; se arrastra.
 const GUARD_WIDTH: f32 = 440.0;
+/// Lo más estrecho que se puede dejar el cajón, y lo mínimo que conserva el workspace.
+const DRAWER_MIN: f32 = 240.0;
+const WORKSPACE_MIN: f32 = 320.0;
 
 mod approvals;
 mod chrome;
@@ -365,6 +369,8 @@ pub struct App {
     store: Option<Store>,
     settings: Settings,
     sidebar: bool,
+    /// Ancho que el usuario dejó al cajón derecho.
+    drawer_width: f32,
     error: Option<String>,
     /// Dónde se guardan las claves de las cuentas con API (el llavero; las pruebas, memoria).
     secrets: Arc<dyn forge_core::secrets::SecretStore>,
@@ -477,6 +483,7 @@ impl App {
             store: None,
             settings,
             sidebar: true,
+            drawer_width: GUARD_WIDTH,
             error,
             secrets: Arc::new(forge_core::secrets::Keychain),
             api_form: None,
@@ -543,6 +550,14 @@ impl App {
             } else {
                 app.db(|s| s.set_closed(&path));
             }
+        }
+        if let Some(w) = app
+            .db(|s| s.setting("drawer_width"))
+            .flatten()
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|w| w.is_finite())
+        {
+            app.drawer_width = w.max(DRAWER_MIN);
         }
         let active = app.db(|s| s.setting("active")).flatten();
         app.active = active.and_then(|a| {
@@ -1755,13 +1770,17 @@ impl eframe::App for App {
         let mut terminals_hidden = false;
         // Con un archivo abierto: el espacio entero (para el divisor, que se pinta al final).
         let mut editor_rest: Option<Rect> = None;
+        let mut save_width = false;
         if let Some(i) = self.active {
             let planner = self.planner(i).map(|(_, name)| name);
             let reviewers = self.reviewers(i);
             let ws = &mut self.workspaces[i];
             ws.ideas.reviewers = reviewers;
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {
-                let (mut rest, drawer) = area.split_left_right_at_x(area.max.x - GUARD_WIDTH);
+                // Nunca más ancho que lo que deja un workspace usable, ni más estrecho que el mínimo.
+                let max = (area.width() - WORKSPACE_MIN).max(DRAWER_MIN);
+                let width = self.drawer_width.clamp(DRAWER_MIN, max);
+                let (mut rest, drawer) = area.split_left_right_at_x(area.max.x - width);
                 if ws.guard.open {
                     Self::guard_ui(ws, ui, drawer, &mut cmds);
                 } else if ws.memory.open {
@@ -1785,8 +1804,33 @@ impl eframe::App for App {
                 } else {
                     Self::git_ui(ws, ui, drawer, &mut cmds);
                 }
+                // (Se registra al final: así queda por encima de lo que toca a ambos lados.)
+                // Borde arrastrable, como el de VS Code.
+                let grab = Rect::from_min_max(
+                    egui::pos2(drawer.min.x - 3.0, drawer.min.y),
+                    egui::pos2(drawer.min.x + 3.0, drawer.max.y),
+                );
+                let edge = ui.interact(grab, egui::Id::new("drawer-edge"), Sense::drag());
+                if edge.hovered() || edge.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
+                if let Some(pos) = edge.interact_pointer_pos().filter(|_| edge.dragged()) {
+                    self.drawer_width = (area.max.x - pos.x).clamp(DRAWER_MIN, max);
+                }
+                save_width |= edge.drag_stopped();
+                if edge.hovered() || edge.dragged() {
+                    ui.painter().vline(
+                        drawer.min.x,
+                        drawer.y_range(),
+                        egui::Stroke::new(1.0, theme::ACCENT),
+                    );
+                }
                 area = rest;
             }
+        }
+        if save_width {
+            let value = self.drawer_width.round().to_string();
+            self.db(|s| s.set_setting("drawer_width", &value));
         }
 
         // Los procesos de todos los proyectos avanzan aunque no estén a la vista

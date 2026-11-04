@@ -3878,3 +3878,60 @@ fn branch_conflict_shows_warning_in_panel_header() {
                 .is_none()
     );
 }
+
+/// El cajón derecho se ensancha y se estrecha arrastrando su borde, con un mínimo, y el
+/// ancho se recuerda para la próxima vez.
+#[test]
+fn dragging_the_drawer_edge_resizes_it_and_remembers_the_width() {
+    let _serial = serial();
+    let dir = project("drawer-width");
+    let store = Store::in_memory().unwrap();
+    let mut h = app_with(store, Some(dir));
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(3);
+    assert_eq!(h.state().drawer_width, GUARD_WIDTH);
+    let edge = egui::pos2(1280.0 - GUARD_WIDTH, 400.0);
+    let button = |pos, pressed| egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let drag = |h: &mut Harness<'_, App>, from: egui::Pos2, to: egui::Pos2| {
+        h.event(egui::Event::PointerMoved(from));
+        h.run_steps(2);
+        h.event(button(from, true));
+        h.run_steps(2);
+        for k in 1..=4 {
+            h.event(egui::Event::PointerMoved(
+                from + (to - from) * k as f32 / 4.0,
+            ));
+            h.run_steps(1);
+        }
+        h.event(button(to, false));
+        h.run_steps(3);
+    };
+    // Hacia la izquierda: más ancho.
+    drag(&mut h, edge, egui::pos2(edge.x - 100.0, 400.0));
+    assert_eq!(h.state().drawer_width, GUARD_WIDTH + 100.0);
+    assert_eq!(
+        h.state_mut()
+            .db(|s| s.setting("drawer_width"))
+            .flatten()
+            .as_deref(),
+        Some("540")
+    );
+    // Hacia la derecha de sobra: se queda en el mínimo.
+    let edge = egui::pos2(1280.0 - h.state().drawer_width, 400.0);
+    drag(&mut h, edge, egui::pos2(1270.0, 400.0));
+    assert_eq!(h.state().drawer_width, DRAWER_MIN);
+}
+
+#[test]
+fn the_saved_drawer_width_is_restored_on_start() {
+    let _serial = serial();
+    let store = Store::in_memory().unwrap();
+    store.set_setting("drawer_width", "500").unwrap();
+    let h = app_with(store, Some(project("drawer-restore")));
+    assert_eq!(h.state().drawer_width, 500.0);
+}
