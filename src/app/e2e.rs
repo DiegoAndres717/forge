@@ -3935,3 +3935,41 @@ fn the_saved_drawer_width_is_restored_on_start() {
     let h = app_with(store, Some(project("drawer-restore")));
     assert_eq!(h.state().drawer_width, 500.0);
 }
+
+/// Con el cajón estrecho, un nombre que no cabe se recorta y el entero sale al pasar el ratón;
+/// uno que cabe no lleva ayuda.
+#[test]
+fn a_long_file_name_shows_in_full_on_hover_when_the_drawer_is_narrow() {
+    let _serial = serial();
+    let dir = project("narrow-tree");
+    let long = "un-nombre-de-archivo-muy-pero-muy-largo-para-un-cajon-estrecho.md";
+    std::fs::write(dir.join(long), "# x\n").unwrap();
+    let mut h = app(dir);
+    h.state_mut().drawer_width = 240.0;
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(3);
+    wait_until(&mut h, "árbol de archivos", |a| {
+        ws(a).files.listing.contains_key("")
+    });
+    h.run_steps(2);
+    assert_eq!(h.query_all_by_label(long).count(), 1, "sin ratón encima");
+    h.get_by_label(long).hover();
+    h.run_steps(8);
+    assert!(
+        h.query_all_by_label(long).count() >= 2,
+        "el nombre entero sale en la ayuda"
+    );
+    h.get_by_label("main.ts").hover();
+    h.run_steps(8);
+    assert_eq!(
+        h.query_all_by_label("main.ts").count(),
+        1,
+        "cabe: sin ayuda"
+    );
+}
+
+#[test]
+fn the_tree_indents_less_when_narrow() {
+    assert_eq!(files_panel::level_indent(500.0), 14.0);
+    assert_eq!(files_panel::level_indent(260.0), 8.0);
+}
