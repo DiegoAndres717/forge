@@ -108,7 +108,7 @@ impl FilesView {
 
     /// Cierra sin preguntar las pestañas de `rel` y de lo que haya dentro (si es una carpeta):
     /// ya no están en disco. Si era la activa, queda la vecina.
-    fn drop_under(&mut self, rel: &str) {
+    pub(super) fn drop_under(&mut self, rel: &str) {
         let inside = |p: &str| p == rel || p.strip_prefix(rel).is_some_and(|r| r.starts_with('/'));
         let gone: Vec<String> = self
             .parked

@@ -4381,7 +4381,9 @@ fn leaving_a_tab_forgets_its_close_prompt() {
     assert!(h.query_by_label("Descartar cambios").is_none());
 }
 
-/// Mandar una carpeta a la papelera cierra las pestañas de lo que había dentro.
+/// Mandar una carpeta a la papelera cierra las pestañas de lo que había dentro. La papelera
+/// solo existe en macOS (`forge_core::files::trash`): en Linux y Windows falla, la carpeta
+/// sigue en disco y sus pestañas siguen abiertas, con el error a la vista.
 #[test]
 fn trashing_a_folder_closes_the_tabs_inside_it() {
     let _serial = serial();
@@ -4397,14 +4399,26 @@ fn trashing_a_folder_closes_the_tabs_inside_it() {
     }
     h.get_by_label("Pestaña main.ts").click();
     h.run_steps(2);
+    let parked = |h: &Harness<'_, App>| {
+        ws(h.state())
+            .files
+            .parked
+            .iter()
+            .map(|v| v.path.clone())
+            .collect::<Vec<_>>()
+    };
     h.state_mut().trash_path(0, "carpeta");
     h.run_steps(2);
     assert_eq!(active_file(&h), "main.ts");
-    let parked: Vec<_> = ws(h.state())
-        .files
-        .parked
-        .iter()
-        .map(|v| v.path.clone())
-        .collect();
-    assert_eq!(parked, ["otro.rs"]);
+    if cfg!(target_os = "macos") {
+        assert!(!dir.join("carpeta").exists(), "a la papelera");
+        assert_eq!(parked(&h), ["otro.rs"]);
+    } else {
+        assert!(ws(h.state()).files.error.is_some(), "sin papelera se dice");
+        assert!(dir.join("carpeta/a.rs").exists());
+        assert_eq!(parked(&h), ["otro.rs", "carpeta/a.rs", "carpeta/b.rs"]);
+        // Lo que hace `trash_path` cuando la papelera sí funciona.
+        ws_mut(h.state_mut()).files.drop_under("carpeta");
+        assert_eq!(parked(&h), ["otro.rs"]);
+    }
 }
