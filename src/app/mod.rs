@@ -236,6 +236,8 @@ enum UiCmd {
     FilesTrash(String, bool),
     FilesOpen(String),
     FilesCloseViewer,
+    /// Cierra la pestaña de esa ruta (si tiene cambios sin guardar, la enseña y pregunta).
+    FilesCloseTab(String),
     FilesDiscard,
     FilesKeepEditing,
     FilesMode(files_panel::ViewMode),
@@ -841,7 +843,7 @@ impl App {
         };
         let focused = ctx.memory(|m| m.focused());
         if !hidden
-            && focused != Some(files_panel::editor_id())
+            && focused != Some(files_panel::editor_id(&v.path))
             && focused != Some(files_panel::find_box_id())
         {
             return false;
@@ -1141,6 +1143,7 @@ impl App {
             | UiCmd::FilesTrash(..)
             | UiCmd::FilesOpen(_)
             | UiCmd::FilesCloseViewer
+            | UiCmd::FilesCloseTab(_)
             | UiCmd::FilesDiscard
             | UiCmd::FilesKeepEditing
             | UiCmd::FilesMode(_)

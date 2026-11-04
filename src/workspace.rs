@@ -31,6 +31,11 @@ pub struct WorkspaceState {
     /// El panel de Guard estaba abierto.
     #[serde(default)]
     pub guard_open: bool,
+    /// Archivos abiertos en pestañas (en su orden) y el activo.
+    #[serde(default)]
+    pub open_files: Vec<String>,
+    #[serde(default)]
+    pub active_file: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -1548,6 +1553,15 @@ impl Workspace {
 
     fn restore(&mut self, ctx: &egui::Context, mut state: WorkspaceState) {
         self.guard.open = state.guard_open;
+        // Los archivos que estaban abiertos vuelven en sus pestañas (solo los que siguen en
+        // disco, y sin abrir el panel por su cuenta); lo no guardado no se guarda en la sesión.
+        let root = self.project.path.clone();
+        for path in state.open_files.iter().filter(|p| root.join(p).is_file()) {
+            crate::app::App::open_file(ctx, self, Some(path.clone()), true);
+        }
+        if let Some(active) = state.active_file.clone().filter(|p| root.join(p).is_file()) {
+            crate::app::App::open_file(ctx, self, Some(active), true);
+        }
         self.layout = state.layout;
         for id in self.layout.ids() {
             let panel = state
@@ -1690,6 +1704,13 @@ impl Workspace {
             running: self.processes.active_ids(),
             tabs: self.tabs.clone(),
             guard_open: self.guard.open,
+            open_files: self
+                .files
+                .tab_paths()
+                .into_iter()
+                .map(|(p, _)| p.to_string())
+                .collect(),
+            active_file: self.files.viewer.as_ref().map(|v| v.path.clone()),
         }
     }
 

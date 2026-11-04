@@ -1303,6 +1303,8 @@ pub const EN: &[(&str, &str)] = &[
     ("Ir al final", "Jump to bottom"),
     ("Buscar en la terminal", "Find in terminal"),
     ("Buscar en el archivo", "Find in file"),
+    ("Pestaña {name}", "Tab {name}"),
+    ("Cerrar {name}", "Close {name}"),
     ("0 de 0", "0 of 0"),
     ("{n} de {total}", "{n} of {total}"),
     ("Anterior (⇧↩)", "Previous (⇧↩)"),

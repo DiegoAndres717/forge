@@ -641,8 +641,27 @@ fn ui_preview() {
         });
         settle(&mut harness);
         save(&mut harness, &out, "12h-editor-buscar");
+        // Pestañas: con otro archivo abierto (y cambios sin guardar en el de fondo).
+        harness.state_mut().workspaces[0]
+            .files
+            .viewer
+            .as_mut()
+            .unwrap()
+            .find = None;
+        harness
+            .state_mut()
+            .apply_files(&ctx, UiCmd::FilesOpen("README.md".into()));
+        harness
+            .state_mut()
+            .apply_files(&ctx, UiCmd::FilesOpen("src/main.rs".into()));
+        harness.state_mut().workspaces[0].files.parked[0]
+            .content
+            .push_str("\nmás\n");
+        settle(&mut harness);
+        save(&mut harness, &out, "12i-editor-pestanas");
     }
     harness.state_mut().workspaces[0].files.viewer = None;
+    harness.state_mut().workspaces[0].files.parked.clear();
     harness.state_mut().workspaces[0].files.open = false;
     harness.state_mut().welcome = Some(0);
     settle(&mut harness);

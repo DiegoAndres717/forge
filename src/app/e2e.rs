@@ -1739,7 +1739,8 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
     h.run_steps(2);
     let diff = &ws(h.state()).files.viewer.as_ref().unwrap().diff;
     assert!(diff.contains("+export const x = 2;"), "{diff}");
-    // Con cambios sin guardar, abrir otro archivo pregunta antes.
+    // Con cambios sin guardar, abrir otro archivo lo abre en otra pestaña: el primero sigue
+    // abierto con lo suyo, y cerrarlo es lo que pregunta.
     h.state_mut().workspaces[0]
         .files
         .viewer
@@ -1753,9 +1754,6 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
         .unwrap()
         .click();
     h.run_steps(2);
-    assert_eq!(ws(h.state()).files.viewer.as_ref().unwrap().path, "main.ts");
-    h.get_by_label("Descartar cambios").click();
-    h.run_steps(3);
     let v = ws(h.state()).files.viewer.as_ref().unwrap();
     assert_eq!(v.path, "notas.md");
     assert_eq!(
@@ -1763,6 +1761,23 @@ fn a_file_opens_beside_the_tree_is_edited_saved_and_its_changes_are_shown() {
         crate::app::files_panel::ViewMode::Preview,
         "un .md se abre en vista previa"
     );
+    assert!(
+        ws(h.state())
+            .files
+            .parked
+            .iter()
+            .any(|p| p.path == "main.ts" && p.unsaved())
+    );
+    h.get_by_label("Cerrar main.ts").click();
+    h.run_steps(2);
+    assert_eq!(ws(h.state()).files.viewer.as_ref().unwrap().path, "main.ts");
+    h.get_by_label("Descartar cambios").click();
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).files.viewer.as_ref().unwrap().path,
+        "notas.md"
+    );
+    assert!(ws(h.state()).files.parked.is_empty());
     assert_eq!(
         std::fs::read_to_string(dir.join("main.ts")).unwrap(),
         "export const x = 2;\n"
@@ -4161,4 +4176,211 @@ fn find_rects_survive_matches_left_behind_by_an_edit() {
     });
     // Las texturas del fotograma no se usan: se sueltan a propósito.
     out.textures_delta.clear();
+}
+
+/// Abre `main.ts` y `otro.rs` en pestañas, con el panel de archivos a la vista.
+fn two_tabs(name: &str) -> (Harness<'static, App>, PathBuf) {
+    let dir = project(name);
+    std::fs::write(dir.join("otro.rs"), "fn otro() {}\n").unwrap();
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(3);
+    let ctx = h.ctx.clone();
+    for path in ["main.ts", "otro.rs"] {
+        h.state_mut()
+            .apply_files(&ctx, UiCmd::FilesOpen(path.into()));
+        h.run_steps(2);
+    }
+    (h, dir)
+}
+
+fn active_file(h: &Harness<'_, App>) -> String {
+    ws(h.state()).files.viewer.as_ref().unwrap().path.clone()
+}
+
+#[test]
+fn open_files_become_tabs_switch_and_close_one() {
+    let _serial = serial();
+    let (mut h, _dir) = two_tabs("tabs");
+    assert_eq!(active_file(&h), "otro.rs", "el último abierto es el activo");
+    use egui_kittest::kittest::NodeT;
+    let tab = |h: &Harness<'_, App>, name: &str| {
+        h.get_by_label(&format!("Pestaña {name}"))
+            .accesskit_node()
+            .toggled()
+            == Some(egui::accesskit::Toggled::True)
+    };
+    assert!(tab(&h, "otro.rs"));
+    assert!(!tab(&h, "main.ts"));
+    // Clic en la pestaña: se cambia de archivo.
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    assert_eq!(active_file(&h), "main.ts");
+    // Abrir otra vez uno que ya está abierto va a su pestaña, sin duplicarla.
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .apply_files(&ctx, UiCmd::FilesOpen("otro.rs".into()));
+    h.run_steps(2);
+    assert_eq!(active_file(&h), "otro.rs");
+    assert_eq!(h.query_all_by_label("Pestaña otro.rs").count(), 1);
+    // Cerrar una pestaña de fondo con cambios sin guardar: se enseña y se pregunta.
+    ws_mut(h.state_mut())
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .content
+        .push_str("// mío\n");
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    h.get_by_label("Cerrar otro.rs").click();
+    h.run_steps(2);
+    assert_eq!(active_file(&h), "otro.rs");
+    h.get_by_label("Seguir editando").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.query_all_by_label("Pestaña otro.rs").count(),
+        1,
+        "sigue abierta"
+    );
+    h.get_by_label("Cerrar otro.rs").click();
+    h.run_steps(2);
+    h.get_by_label("Descartar cambios").click();
+    h.run_steps(2);
+    // Queda la otra; con una sola no hace falta la fila de pestañas.
+    assert_eq!(active_file(&h), "main.ts");
+    assert!(h.query_by_label("Pestaña main.ts").is_none());
+}
+
+/// Cada pestaña tiene su propio historial de deshacer: ⌘Z en una no trae el texto de otra.
+#[test]
+fn undo_in_one_tab_never_brings_the_text_of_another() {
+    let _serial = serial();
+    let (mut h, _dir) = two_tabs("tabs-undo");
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+        .click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("abc".into()));
+    h.run_steps(2);
+    assert!(
+        ws(h.state())
+            .files
+            .viewer
+            .as_ref()
+            .unwrap()
+            .content
+            .contains("abc")
+    );
+    h.get_by_label("Pestaña otro.rs").click();
+    h.run_steps(2);
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+        .click();
+    h.run_steps(2);
+    h.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    h.run_steps(2);
+    assert_eq!(
+        ws(h.state()).files.viewer.as_ref().unwrap().content,
+        "fn otro() {}\n"
+    );
+}
+
+/// Las pestañas abiertas y la activa vuelven al abrir otra vez el proyecto.
+#[test]
+fn open_tabs_come_back_when_the_project_opens_again() {
+    let _serial = serial();
+    let (mut h, dir) = two_tabs("tabs-again");
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    let state = ws(h.state()).state();
+    assert_eq!(state.open_files, ["main.ts", "otro.rs"]);
+    assert_eq!(state.active_file.as_deref(), Some("main.ts"));
+    drop(h);
+    let store = Store::in_memory().unwrap();
+    // Un archivo que ya no existe no vuelve como pestaña.
+    let mut saved = state.clone();
+    saved.open_files.push("borrado.rs".into());
+    store.touch(&dir, "tabs-again").unwrap();
+    store.save_workspace(&dir, &saved, 0).unwrap();
+    let h = app_with(store, Some(dir));
+    assert_eq!(active_file(&h), "main.ts");
+    let parked: Vec<_> = ws(h.state())
+        .files
+        .parked
+        .iter()
+        .map(|v| v.path.clone())
+        .collect();
+    assert_eq!(parked, ["otro.rs"]);
+    assert!(!ws(h.state()).files.open, "no abre el panel por su cuenta");
+}
+
+/// Con el autoguardado puesto, lo que queda en una pestaña de fondo se guarda al cambiar de
+/// pestaña: el autoguardado solo corre en la activa.
+#[test]
+fn autosave_saves_a_tab_when_you_leave_it() {
+    let _serial = serial();
+    let (mut h, dir) = two_tabs("tabs-autosave");
+    h.state_mut().autosave = true;
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    ws_mut(h.state_mut()).files.viewer.as_mut().unwrap().content = "export const x = 9;\n".into();
+    h.get_by_label("Pestaña otro.rs").click();
+    h.run_steps(2);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("main.ts")).unwrap(),
+        "export const x = 9;\n"
+    );
+}
+
+/// El aviso de cerrar con cambios es de esa vez: si te vas a otra pestaña, al volver ya no está.
+#[test]
+fn leaving_a_tab_forgets_its_close_prompt() {
+    let _serial = serial();
+    let (mut h, _dir) = two_tabs("tabs-pending");
+    ws_mut(h.state_mut())
+        .files
+        .viewer
+        .as_mut()
+        .unwrap()
+        .content
+        .push_str("// mío\n");
+    h.run_steps(2);
+    h.get_by_label("Cerrar otro.rs").click();
+    h.run_steps(2);
+    h.get_by_label("Descartar cambios");
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    h.get_by_label("Pestaña otro.rs").click();
+    h.run_steps(2);
+    assert_eq!(active_file(&h), "otro.rs");
+    assert!(h.query_by_label("Descartar cambios").is_none());
+}
+
+/// Mandar una carpeta a la papelera cierra las pestañas de lo que había dentro.
+#[test]
+fn trashing_a_folder_closes_the_tabs_inside_it() {
+    let _serial = serial();
+    let (mut h, dir) = two_tabs("tabs-trash");
+    std::fs::create_dir_all(dir.join("carpeta")).unwrap();
+    std::fs::write(dir.join("carpeta/a.rs"), "a\n").unwrap();
+    std::fs::write(dir.join("carpeta/b.rs"), "b\n").unwrap();
+    let ctx = h.ctx.clone();
+    for path in ["carpeta/a.rs", "carpeta/b.rs"] {
+        h.state_mut()
+            .apply_files(&ctx, UiCmd::FilesOpen(path.into()));
+        h.run_steps(2);
+    }
+    h.get_by_label("Pestaña main.ts").click();
+    h.run_steps(2);
+    h.state_mut().trash_path(0, "carpeta");
+    h.run_steps(2);
+    assert_eq!(active_file(&h), "main.ts");
+    let parked: Vec<_> = ws(h.state())
+        .files
+        .parked
+        .iter()
+        .map(|v| v.path.clone())
+        .collect();
+    assert_eq!(parked, ["otro.rs"]);
 }
