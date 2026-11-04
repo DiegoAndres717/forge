@@ -148,6 +148,13 @@ const FOLDER_ICON: Color32 = Color32::from_rgb(0x90, 0xa4, 0xae);
 /// Alto de cada fila del árbol y sangría a su izquierda.
 const ROW_HEIGHT: f32 = 22.0;
 const ROW_INSET: f32 = 10.0;
+/// Por debajo de este ancho el árbol usa una sangría más corta, para que quepan los nombres.
+const COMPACT_TREE: f32 = 320.0;
+
+/// Lo que se desplaza cada nivel del árbol: menos cuando el cajón está estrecho.
+pub(super) fn level_indent(width: f32) -> f32 {
+    if width < COMPACT_TREE { 8.0 } else { 14.0 }
+}
 
 /// Letra y color del estado de un archivo (`git status`), con los tonos de VS Code.
 fn badge(code: char) -> (char, Color32) {
@@ -773,13 +780,15 @@ impl App {
         } else if response.hovered() {
             painter.rect_filled(rect, 0.0, ROW_HOVER);
         }
+        let step = level_indent(rect.width());
+        let level_pad = step / 2.0;
         // Guías verticales de la sangría, como en VS Code.
         for d in 0..depth {
-            let gx = rect.min.x + ROW_INSET + d as f32 * 14.0 + 7.0;
+            let gx = rect.min.x + ROW_INSET + d as f32 * step + level_pad;
             painter.vline(gx, rect.y_range(), egui::Stroke::new(1.0, ROW_GUIDE));
         }
         let (letter, color) = code.map_or(('\0', theme::TEXT), badge);
-        let mut x = rect.min.x + ROW_INSET + depth as f32 * 14.0;
+        let mut x = rect.min.x + ROW_INSET + depth as f32 * step;
         let mid = rect.center().y;
         if is_dir {
             let caret = if open {
@@ -839,13 +848,28 @@ impl App {
         };
         let clip = Rect::from_min_max(egui::pos2(x, rect.min.y), egui::pos2(right, rect.max.y));
         let painter = ui.painter().with_clip_rect(clip);
-        let shown = painter.text(
-            egui::pos2(x, mid),
-            egui::Align2::LEFT_CENTER,
-            name,
-            FontId::proportional(13.0),
-            name_color,
-        );
+        // Si no cabe, el nombre acaba en «…» y el nombre entero sale al pasar el ratón.
+        let font = FontId::proportional(13.0);
+        let full = painter
+            .layout_no_wrap(name.to_string(), font.clone(), name_color)
+            .size()
+            .x;
+        let room = (right - x).max(0.0);
+        let galley = if full > room {
+            let mut job =
+                egui::text::LayoutJob::simple_singleline(name.to_string(), font, name_color);
+            job.wrap.max_width = room;
+            job.wrap.max_rows = 1;
+            job.wrap.break_anywhere = true;
+            job.wrap.overflow_character = Some('…');
+            response.clone().on_hover_text(name);
+            ui.ctx().fonts_mut(|f| f.layout_job(job))
+        } else {
+            painter.layout_no_wrap(name.to_string(), font, name_color)
+        };
+        let size = galley.size();
+        painter.galley(egui::pos2(x, mid - size.y / 2.0), galley, name_color);
+        let shown = Rect::from_min_size(egui::pos2(x, mid - size.y / 2.0), size);
         if !dir.is_empty() {
             painter.text(
                 egui::pos2(shown.max.x + 8.0, mid),
