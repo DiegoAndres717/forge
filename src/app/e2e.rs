@@ -849,13 +849,13 @@ fn only_the_active_project_starts_and_the_rest_sleep() {
     assert!(!h.state().workspaces[1].is_dormant());
     assert_eq!(h.state().workspaces[1].panel_count(), 1);
 
-    // ⌃Tab vuelve al anterior.
-    h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
+    // ⌃⌥Tab vuelve al anterior (⌃Tab es de las terminales del panel).
+    h.key_press_modifiers(Modifiers::CTRL | Modifiers::ALT, Key::Tab);
     h.run_steps(3);
     assert_eq!(h.state().active, Some(0));
     // Repetido (soltando Ctrl entre medias) alterna siempre, sin pulsaciones perdidas.
     for expected in [1, 0, 1, 0] {
-        h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
+        h.key_press_modifiers(Modifiers::CTRL | Modifiers::ALT, Key::Tab);
         h.run_steps(2);
         assert_eq!(h.state().active, Some(expected));
     }
@@ -4559,4 +4559,36 @@ fn shift_enter_goes_back_in_the_terminal_search() {
     h.key_press(Key::Enter);
     h.run_steps(3);
     assert_eq!(at(&h), (total, total), "Intro: la siguiente");
+}
+
+/// ⌃Tab pasa a la terminal siguiente del panel y ⌃⇧Tab a la anterior (con vuelta al final),
+/// sin tocar el proyecto reciente, que va con ⌃⌥Tab.
+#[test]
+fn ctrl_tab_walks_the_terminals_of_the_panel() {
+    let _serial = serial();
+    let mut h = app(project("ctrl-tab-terminals"));
+    h.run_steps(3);
+    let first = ws(h.state()).focused();
+    h.key_press_modifiers(CMD, Key::T);
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, Key::T);
+    h.run_steps(3);
+    let tabs = ws(h.state()).panel_tabs(first);
+    assert_eq!(tabs.len(), 3);
+    h.get_by_label_contains("Terminal 1 de 3").click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), tabs[0]);
+    h.key_press_modifiers(Modifiers::CTRL, Key::Tab);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), tabs[1], "⌃Tab: la siguiente");
+    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), tabs[0], "⌃⇧Tab: la anterior");
+    h.key_press_modifiers(Modifiers::CTRL | Modifiers::SHIFT, Key::Tab);
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).focused(),
+        tabs[2],
+        "da la vuelta al principio"
+    );
 }

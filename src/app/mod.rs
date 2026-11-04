@@ -99,7 +99,7 @@ pub enum Action {
     ToggleTerminal,
     Palette,
     Settings,
-    /// ⌃Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
+    /// ⌃⌥Tab: proyecto usado antes (repetido rápido, sigue retrocediendo).
     NextRecent,
 }
 
@@ -402,10 +402,10 @@ pub struct App {
     approval_seen: Option<String>,
     /// Ideas generales (sin proyecto), en Inicio.
     general: crate::workspace::IdeasView,
-    /// Proyectos de más a menos recientemente usados (⌃Tab).
+    /// Proyectos de más a menos recientemente usados (⌃⌥Tab).
     mru: Vec<PathBuf>,
-    /// ⌃Tab con Ctrl aún pulsado: (orden de proyectos al empezar, posición actual).
-    /// Al soltar Ctrl se olvida: el siguiente ⌃Tab vuelve a alternar con el anterior.
+    /// ⌃⌥Tab con Ctrl aún pulsado: (orden de proyectos al empezar, posición actual).
+    /// Al soltar Ctrl se olvida: el siguiente ⌃⌥Tab vuelve a alternar con el anterior.
     mru_cycle: Option<(Vec<PathBuf>, usize)>,
     /// Última vez que se buscaron fases ya fusionadas, y si esa búsqueda sigue en marcha
     /// (ver `ideas_tick`).
@@ -1728,7 +1728,13 @@ impl eframe::App for App {
                     ..
                 } if *key == Key::Tab && modifiers.ctrl && !modifiers.mac_cmd => {
                     if *pressed {
-                        actions.push(Action::NextRecent);
+                        // ⌃Tab / ⌃⇧Tab: terminal siguiente / anterior del panel, como las
+                        // pestañas de un navegador; con ⌥ (⌃⌥Tab), el proyecto usado antes.
+                        actions.push(if modifiers.alt {
+                            Action::NextRecent
+                        } else {
+                            Action::Ws(WsAction::CycleTab(if modifiers.shift { -1 } else { 1 }))
+                        });
                     }
                     false
                 }

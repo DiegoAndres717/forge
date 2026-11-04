@@ -116,12 +116,12 @@ pub const EN: &[(&str, &str)] = &[
         "Memory used by this project (terminals, agents and processes)",
     ),
     (
-        "⌘K Acciones    ⌃Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente",
-        "⌘K Actions    ⌃Tab Recent    ⌘T Terminal    ⌘D Split    ⌘⇧D Down    ⌘⌥← → Focus    ⌘G Guard    ⌘⇧M Memory    ⌘⇧A Agent",
+        "⌘K Acciones    ⌃⌥Tab Reciente    ⌘T Terminal    ⌘D Dividir    ⌘⇧D Abajo    ⌘⌥← → Foco    ⌘G Guard    ⌘⇧M Memoria    ⌘⇧A Agente",
+        "⌘K Actions    ⌃⌥Tab Recent    ⌘T Terminal    ⌘D Split    ⌘⇧D Down    ⌘⌥← → Focus    ⌘G Guard    ⌘⇧M Memory    ⌘⇧A Agent",
     ),
     (
-        "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃Tab Reciente    ⌘B Barra lateral",
-        "⌘O Open folder    ⌘1…9 Projects    ⌃Tab Recent    ⌘B Sidebar",
+        "⌘O Abrir carpeta    ⌘1…9 Proyectos    ⌃⌥Tab Reciente    ⌘B Barra lateral",
+        "⌘O Open folder    ⌘1…9 Projects    ⌃⌥Tab Recent    ⌘B Sidebar",
     ),
     ("Clic para cerrar", "Click to close"),
     ("en espera", "waiting"),
@@ -1588,8 +1588,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("⌘K para todo", "⌘K for everything"),
     (
-        "Escribe lo que quieres hacer: abrir un proyecto, dividir la terminal, iniciar un proceso, abrir Claude… ⌘D divide, ⌘T abre una terminal, ⌘F busca en ella y ⌃Tab vuelve al proyecto anterior.",
-        "Type what you want to do: open a project, split the terminal, start a process, open Claude… ⌘D splits, ⌘T opens a terminal, ⌘F searches it and ⌃Tab goes back to the previous project.",
+        "Escribe lo que quieres hacer: abrir un proyecto, dividir la terminal, iniciar un proceso, abrir Claude… ⌘D divide, ⌘T abre una terminal, ⌘F busca en ella y ⌃⌥Tab vuelve al proyecto anterior.",
+        "Type what you want to do: open a project, split the terminal, start a process, open Claude… ⌘D splits, ⌘T opens a terminal, ⌘F searches it and ⌃⌥Tab goes back to the previous project.",
     ),
     ("Agentes con memoria", "Agents with memory"),
     (
