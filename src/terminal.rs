@@ -735,11 +735,12 @@ impl Terminal {
             return;
         };
         let ctx = ui.ctx().clone();
-        let (escape, enter, back) = ctx.input_mut(|i| {
+        // ⇧Intro antes que Intro: `consume_key` sin ⇧ también se come ⇧Intro.
+        let (escape, back, enter) = ctx.input_mut(|i| {
             (
                 i.consume_key(egui::Modifiers::NONE, Key::Escape),
-                i.consume_key(egui::Modifiers::NONE, Key::Enter),
                 i.consume_key(egui::Modifiers::SHIFT, Key::Enter),
+                i.consume_key(egui::Modifiers::NONE, Key::Enter),
             )
         });
         if escape {
