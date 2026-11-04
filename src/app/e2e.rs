@@ -4422,3 +4422,56 @@ fn trashing_a_folder_closes_the_tabs_inside_it() {
         assert_eq!(parked(&h), ["otro.rs"]);
     }
 }
+
+/// En la búsqueda de la terminal, ⇧Intro va a la coincidencia anterior e Intro a la siguiente.
+#[test]
+fn shift_enter_goes_back_in_the_terminal_search() {
+    let _serial = serial();
+    let mut h = app(project("term-search-back"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    // Solo la salida dice «42zzq» (lo tecleado lleva la cuenta sin hacer): así se espera a lo
+    // que imprimió el shell y la búsqueda tiene exactamente tres coincidencias.
+    let command = if cfg!(windows) {
+        "echo \"$(6*7)zzq $(6*7)zzq $(6*7)zzq\""
+    } else {
+        "echo $((6*7))zzq $((6*7))zzq $((6*7))zzq"
+    };
+    h.event(egui::Event::Text(command.into()));
+    h.key_press(Key::Enter);
+    let start = Instant::now();
+    while ws(h.state()).shell_text().matches("42zzq").count() < 3 {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "tiempo agotado: salida\n--- pantalla ---\n{}",
+            ws(h.state()).shell_text()
+        );
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    h.key_press_modifiers(CMD, Key::F);
+    h.run_steps(3);
+    h.event(egui::Event::Text("42zzq".into()));
+    h.run_steps(3);
+    // «n de m»: dónde va la búsqueda (el texto de una etiqueta es su valor).
+    let at = |h: &Harness<'_, App>| -> (usize, usize) {
+        use egui_kittest::kittest::NodeT;
+        h.query_all_by_label_contains(" de ")
+            .filter_map(|n| n.accesskit_node().value())
+            .find_map(|l| {
+                let (n, m) = l.split_once(" de ")?;
+                Some((n.trim().parse().ok()?, m.trim().parse().ok()?))
+            })
+            .expect("contador de la búsqueda")
+    };
+    let (start, total) = at(&h);
+    assert_eq!(total, 3);
+    assert_eq!(start, total, "empieza por la más reciente");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+    h.run_steps(3);
+    assert_eq!(at(&h), (total - 1, total), "⇧Intro: la anterior");
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(at(&h), (total, total), "Intro: la siguiente");
+}
