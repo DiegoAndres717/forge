@@ -3034,4 +3034,13 @@ pub const EN: &[(&str, &str)] = &[
         "Agents edit files without asking for permission at every step, but still ask about everything else (commands, network…): Claude with “accept edits”, Codex with workspace-write and on-request approval, Antigravity with “accept-edits”. Guard keeps watching. It applies to the sessions you open from now on; OpenCode and the others have no equivalent mode and stay as they are.",
     ),
     ("Permisos", "Permissions"),
+    ("Autoguardado", "Autosave"),
+    (
+        "Guarda el archivo que editas cuando pasas un segundo sin escribir, como el autoguardado de VS Code. Apagado, se guarda con ⌘S. Si el archivo cambió por fuera (por ejemplo un agente), no lo pisa.",
+        "Saves the file you are editing after a second without typing, like VS Code's autosave. Off, you save with ⌘S. If the file changed outside the editor (an agent, say), it does not overwrite it.",
+    ),
+    (
+        "Guardar solo al dejar de escribir",
+        "Save when I stop typing",
+    ),
 ];

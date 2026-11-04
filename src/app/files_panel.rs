@@ -57,6 +57,8 @@ pub struct FilesView {
     /// El observador no pudo arrancar (por ejemplo, demasiados archivos vigilados en Linux):
     /// se vuelve a mirar el disco cada pocos segundos, como antes.
     pub watcher_failed: bool,
+    /// Autoguardado del editor (Ajustes): guarda solo tras una pausa sin escribir.
+    pub autosave: bool,
 }
 
 /// Lo nuevo que se está nombrando: dónde va, si es carpeta y el nombre escrito hasta ahora.
@@ -121,6 +123,9 @@ pub struct Viewer {
     /// Última modificación del archivo cuando se abrió o guardó: si cambia por fuera (un agente
     /// lo ha editado), guardar no lo pisa sin avisar.
     pub modified: Option<std::time::SystemTime>,
+    /// Autoguardado: huella del texto que se vio la última vez y desde cuándo, y la huella que
+    /// ya se intentó guardar (si falla, no se reintenta hasta que el texto cambie).
+    pub auto: (u64, Option<std::time::Instant>, u64),
 }
 
 impl Viewer {
@@ -573,6 +578,9 @@ impl App {
         }
         if v.is_text() && v.mode == ViewMode::Edit {
             live_marks(v, &ws.project.path, ui.ctx());
+            if ws.files.autosave {
+                autosave_tick(v, ui.ctx(), cmds);
+            }
         }
         if v.pending.is_some() {
             ui.group(|ui| {
@@ -1164,6 +1172,7 @@ impl App {
             diff: String::new(),
             marks: Vec::new(),
             marks_live: (0, None),
+            auto: (0, None, 0),
             peek: Peek::default(),
             comments: Vec::new(),
             draft: None,
@@ -1557,6 +1566,34 @@ fn follow_disk(root: &Path, v: &mut Viewer) {
             v.draft = None;
             v.diff = forge_core::files::diff(root, rel).unwrap_or_else(|e| e);
         }
+    }
+}
+
+/// Autoguardado: guarda tras una pausa sin escribir (como VS Code). No escribe en cada tecla ni
+/// repite un guardado que falló (por ejemplo, el archivo cambió por fuera) hasta que el texto cambie.
+fn autosave_tick(v: &mut Viewer, ctx: &egui::Context, cmds: &mut Vec<UiCmd>) {
+    use std::hash::{Hash, Hasher};
+    const PAUSE: std::time::Duration = std::time::Duration::from_millis(1000);
+    if v.content == v.saved {
+        v.auto = (0, None, 0);
+        return;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    v.content.hash(&mut hasher);
+    let key = hasher.finish().max(1);
+    if key == v.auto.2 {
+        return;
+    }
+    if v.auto.0 != key {
+        v.auto.0 = key;
+        v.auto.1 = Some(std::time::Instant::now());
+    }
+    let waited = v.auto.1.map_or(PAUSE, |at| at.elapsed());
+    if waited >= PAUSE {
+        v.auto.2 = key;
+        cmds.push(UiCmd::FilesSave);
+    } else {
+        ctx.request_repaint_after(PAUSE - waited);
     }
 }
 

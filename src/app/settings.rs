@@ -398,6 +398,7 @@ impl App {
                     ui.checkbox(&mut ask, tr!("Aclarar antes de planificar"));
                 },
             );
+            self.autosave_ui(ui);
             self.tests_first_ui(ui);
             self.jev_ui(ui);
             self.advisor_ui(ui);
@@ -533,6 +534,25 @@ impl App {
             self.error = Some(e);
         }
         self.sync_accounts();
+    }
+
+    /// Autoguardado del editor de archivos: guarda tras una pausa sin escribir.
+    fn autosave_ui(&mut self, ui: &mut egui::Ui) {
+        let mut on = self.autosave;
+        row(
+            ui,
+            tr!("Autoguardado"),
+            tr!(
+                "Guarda el archivo que editas cuando pasas un segundo sin escribir, como el autoguardado de VS Code. Apagado, se guarda con ⌘S. Si el archivo cambió por fuera (por ejemplo un agente), no lo pisa."
+            ),
+            |ui| {
+                ui.checkbox(&mut on, tr!("Guardar solo al dejar de escribir"));
+            },
+        );
+        if on != self.autosave {
+            self.autosave = on;
+            self.db(|s| s.set_setting("autosave", if on { "1" } else { "" }));
+        }
     }
 
     /// Forge Jev: el modelo más barato que sirva para cada trabajo. Cada parte aparece con su

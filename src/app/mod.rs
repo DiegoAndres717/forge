@@ -371,6 +371,8 @@ pub struct App {
     sidebar: bool,
     /// Ancho que el usuario dejó al cajón derecho.
     drawer_width: f32,
+    /// Autoguardar el archivo que se edita (Ajustes, General).
+    autosave: bool,
     error: Option<String>,
     /// Dónde se guardan las claves de las cuentas con API (el llavero; las pruebas, memoria).
     secrets: Arc<dyn forge_core::secrets::SecretStore>,
@@ -484,6 +486,7 @@ impl App {
             settings,
             sidebar: true,
             drawer_width: GUARD_WIDTH,
+            autosave: false,
             error,
             secrets: Arc::new(forge_core::secrets::Keychain),
             api_form: None,
@@ -559,6 +562,7 @@ impl App {
         {
             app.drawer_width = w.max(DRAWER_MIN);
         }
+        app.autosave = app.db(|s| s.setting("autosave")).flatten().as_deref() == Some("1");
         let active = app.db(|s| s.setting("active")).flatten();
         app.active = active.and_then(|a| {
             app.workspaces
@@ -1776,6 +1780,7 @@ impl eframe::App for App {
             let reviewers = self.reviewers(i);
             let ws = &mut self.workspaces[i];
             ws.ideas.reviewers = reviewers;
+            ws.files.autosave = self.autosave;
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {
                 // Nunca más ancho que lo que deja un workspace usable, ni más estrecho que el mínimo.
                 let max = (area.width() - WORKSPACE_MIN).max(DRAWER_MIN);
