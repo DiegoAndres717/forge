@@ -3973,3 +3973,58 @@ fn the_tree_indents_less_when_narrow() {
     assert_eq!(files_panel::level_indent(500.0), 14.0);
     assert_eq!(files_panel::level_indent(260.0), 8.0);
 }
+
+/// Con el autoguardado encendido, lo escrito se guarda solo tras una pausa; apagado, nunca.
+#[test]
+fn autosave_writes_the_file_after_a_pause_only_when_enabled() {
+    let _serial = serial();
+    let dir = project("autosave");
+    let mut h = app(dir.clone());
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(3);
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .apply_files(&ctx, UiCmd::FilesOpen("main.ts".into()));
+    h.run_steps(2);
+    let edit = |h: &mut Harness<'_, App>, text: &str| {
+        ws_mut(h.state_mut())
+            .files
+            .viewer
+            .as_mut()
+            .expect("archivo abierto")
+            .content = text.into();
+    };
+    // Apagado: pasa el tiempo y el disco sigue igual.
+    edit(&mut h, "export const apagado = 1;\n");
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_millis(1600) {
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        !std::fs::read_to_string(dir.join("main.ts"))
+            .unwrap()
+            .contains("apagado"),
+        "sin autoguardado no se escribe solo"
+    );
+    // Encendido: tras la pausa se guarda sin pulsar nada.
+    h.state_mut().autosave = true;
+    edit(&mut h, "export const encendido = 2;\n");
+    wait_until(&mut h, "autoguardado", |_| {
+        std::fs::read_to_string(dir.join("main.ts")).is_ok_and(|t| t.contains("encendido"))
+    });
+    h.run_steps(2);
+    let v = ws(h.state()).files.viewer.as_ref().unwrap();
+    assert_eq!(v.content, v.saved, "queda como guardado");
+}
+
+#[test]
+fn autosave_is_off_by_default_and_remembered_when_on() {
+    let _serial = serial();
+    let h = app_with(Store::in_memory().unwrap(), Some(project("autosave-off")));
+    assert!(!h.state().autosave);
+    let store = Store::in_memory().unwrap();
+    store.set_setting("autosave", "1").unwrap();
+    let h = app_with(store, Some(project("autosave-on")));
+    assert!(h.state().autosave);
+}
