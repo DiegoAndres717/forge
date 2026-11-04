@@ -372,6 +372,7 @@ impl App {
                         .changed();
                 },
             );
+            self.tabs_position_ui(ui);
             hint(
                 ui,
                 tr!("Fuentes propias y más opciones: ~/.config/forge/config.toml"),
@@ -552,6 +553,28 @@ impl App {
         if on != self.autosave {
             self.autosave = on;
             self.db(|s| s.set_setting("autosave", if on { "1" } else { "" }));
+        }
+    }
+
+    /// Dónde va la lista de las terminales que comparten un panel: a la derecha o abajo.
+    fn tabs_position_ui(&mut self, ui: &mut egui::Ui) {
+        let mut below = self.tabs_below;
+        row(
+            ui,
+            tr!("Lista de terminales"),
+            tr!(
+                "Cuando un panel tiene varias terminales (⌘T), su lista va en una columna a la derecha o en una fila delgada de pestañas abajo, como en VS Code. Abajo, la terminal usa todo el ancho."
+            ),
+            |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut below, false, tr!("A la derecha"));
+                    ui.selectable_value(&mut below, true, tr!("Abajo"));
+                });
+            },
+        );
+        if below != self.tabs_below {
+            self.tabs_below = below;
+            self.db(|s| s.set_setting("terminal_tabs", if below { "bottom" } else { "" }));
         }
     }
 

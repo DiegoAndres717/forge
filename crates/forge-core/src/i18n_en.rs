@@ -1304,6 +1304,13 @@ pub const EN: &[(&str, &str)] = &[
     ("Buscar en la terminal", "Find in terminal"),
     ("Buscar en el archivo", "Find in file"),
     ("Pestaña {name}", "Tab {name}"),
+    ("Lista de terminales", "Terminal list"),
+    (
+        "Cuando un panel tiene varias terminales (⌘T), su lista va en una columna a la derecha o en una fila delgada de pestañas abajo, como en VS Code. Abajo, la terminal usa todo el ancho.",
+        "When a panel has several terminals (⌘T), their list goes in a column on the right or in a thin row of tabs at the bottom, as in VS Code. At the bottom, the terminal uses the full width.",
+    ),
+    ("A la derecha", "On the right"),
+    ("Abajo", "At the bottom"),
     ("Cerrar {name}", "Close {name}"),
     ("0 de 0", "0 of 0"),
     ("{n} de {total}", "{n} of {total}"),

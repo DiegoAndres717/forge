@@ -1369,6 +1369,12 @@ impl Terminal {
         }
     }
 
+    /// Columnas de la terminal (tests).
+    #[cfg(test)]
+    pub fn cols(&self) -> usize {
+        self.size.cols
+    }
+
     /// Líneas desplazadas hacia el historial y texto seleccionado (tests).
     #[cfg(test)]
     pub fn view_state(&self) -> (usize, Option<String>) {

@@ -60,6 +60,13 @@ const HEADER: f32 = 30.0;
 /// desplegable en la cabecera.
 const TAB_LIST_MIN: f32 = 420.0;
 const TAB_ROW: f32 = 28.0;
+/// Ancho mínimo de una pestaña de la fila de abajo: si no caben todas, vuelve el chip «n/m ▾».
+const TAB_MIN: f32 = 110.0;
+
+/// ¿Las `n` pestañas de la fila de abajo caben en `width`?
+fn tabs_fit(n: usize, width: f32) -> bool {
+    n as f32 * TAB_MIN + 8.0 <= width
+}
 
 /// Acciones de teclado que afectan a los paneles del workspace activo.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -427,6 +434,8 @@ pub struct Workspace {
     launch: HashMap<String, (String, String)>,
     /// Terminales de agente cuya cuenta llegó a su límite de uso (muestran el aviso).
     limited: Vec<PanelId>,
+    /// La lista de terminales del panel va abajo, en una fila de pestañas (Ajustes).
+    pub tabs_below: bool,
     /// Terminales abiertas como revisor (solo lectura): `ask_agent` no escribe en ellas.
     reviewing: Vec<PanelId>,
     /// Terminales a las que se ofrece compactar (mucho contexto).
@@ -563,6 +572,7 @@ impl Workspace {
             chosen: HashMap::new(),
             launch: HashMap::new(),
             limited: Vec::new(),
+            tabs_below: false,
             reviewing: Vec::new(),
             compacting: Vec::new(),
             handoff_request: None,
@@ -1838,6 +1848,15 @@ impl Workspace {
         }
     }
 
+    /// Columnas de la terminal enfocada (tests).
+    #[cfg(test)]
+    pub fn focused_cols(&self) -> usize {
+        match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) => t.cols(),
+            _ => 0,
+        }
+    }
+
     /// Desplazamiento y selección de la primera terminal (tests).
     #[cfg(test)]
     pub fn shell_view(&self) -> (usize, Option<String>) {
@@ -2248,9 +2267,15 @@ impl Workspace {
             }
             let (header, body) = rect.split_top_bottom_at_y(rect.min.y + HEADER);
             header_actions.extend(self.header(ui, id, header).into_iter().map(|a| (id, a)));
-            // Varias terminales en este panel y sitio de sobra: lista a la derecha (VS Code).
+            // Varias terminales en este panel: fila de pestañas abajo (si se eligió en Ajustes)
+            // o, con sitio de sobra, lista a la derecha (VS Code).
             let tabs = self.panel_tabs(id);
-            let body = if tabs.len() > 1 && body.width() >= TAB_LIST_MIN {
+            let body = if tabs.len() > 1 && self.tabs_below {
+                let (body, bar) = body.split_top_bottom_at_y(body.max.y - TAB_ROW);
+                let actions = self.tab_list(ui, bar, &tabs, id);
+                header_actions.extend(actions.into_iter().map(|a| (id, a)));
+                body
+            } else if tabs.len() > 1 && body.width() >= TAB_LIST_MIN {
                 let width = (body.width() * 0.24).clamp(150.0, 220.0);
                 let (body, list) = body.split_left_right_at_x(body.max.x - width);
                 let actions = self.tab_list(ui, list, &tabs, id);
@@ -2459,8 +2484,9 @@ impl Workspace {
         }
     }
 
-    /// Lista de las terminales del panel (a la derecha, como VS Code): clic para verla, papelera al
-    /// pasar el ratón; la visible, resaltada.
+    /// Lista de las terminales del panel, como VS Code: a la derecha, una debajo de otra; abajo
+    /// (`tabs_below`), en una fila de pestañas. Clic para verla, arrastrar para reordenar,
+    /// papelera al pasar el ratón; la visible, resaltada.
     fn tab_list(
         &self,
         ui: &mut egui::Ui,
@@ -2472,18 +2498,39 @@ impl Workspace {
         let mut actions = Vec::new();
         let key = self.project.path.clone();
         let painter = ui.painter_at(rect);
+        let below = self.tabs_below;
         painter.rect_filled(rect, 0.0, theme::SIDEBAR);
-        painter.vline(
-            rect.min.x + 0.5,
-            rect.y_range(),
-            egui::Stroke::new(1.0, theme::SEPARATOR),
-        );
-        for (i, tab) in tabs.iter().enumerate() {
-            let row = Rect::from_min_size(
-                egui::pos2(rect.min.x + 1.0, rect.min.y + 6.0 + i as f32 * TAB_ROW),
-                Vec2::new(rect.width() - 1.0, TAB_ROW),
+        if below {
+            painter.hline(
+                rect.x_range(),
+                rect.min.y + 0.5,
+                egui::Stroke::new(1.0, theme::SEPARATOR),
             );
-            if row.max.y > rect.max.y {
+        } else {
+            painter.vline(
+                rect.min.x + 0.5,
+                rect.y_range(),
+                egui::Stroke::new(1.0, theme::SEPARATOR),
+            );
+        }
+        // Abajo, pestañas del mismo ancho (hasta 200 px) que se recortan si no caben todas.
+        let wide = ((rect.width() - 8.0) / tabs.len() as f32).clamp(TAB_MIN, 200.0);
+        let place = |i: usize| {
+            if below {
+                Rect::from_min_size(
+                    egui::pos2(rect.min.x + 4.0 + i as f32 * wide, rect.min.y + 1.0),
+                    Vec2::new(wide, TAB_ROW - 1.0),
+                )
+            } else {
+                Rect::from_min_size(
+                    egui::pos2(rect.min.x + 1.0, rect.min.y + 6.0 + i as f32 * TAB_ROW),
+                    Vec2::new(rect.width() - 1.0, TAB_ROW),
+                )
+            }
+        };
+        for (i, tab) in tabs.iter().enumerate() {
+            let row = place(i);
+            if row.max.y > rect.max.y + 0.5 || row.max.x > rect.max.x + 0.5 {
                 break;
             }
             let label = self.tab_name(*tab);
@@ -2495,24 +2542,31 @@ impl Workspace {
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
             // Arrastrar para reordenar: una línea marca dónde caerá.
-            let slot = |y: f32| {
-                (((y - rect.min.y - 6.0) / TAB_ROW).round().max(0.0) as usize).min(tabs.len())
+            let slot = |p: egui::Pos2| {
+                let at = if below {
+                    (p.x - rect.min.x - 4.0) / wide
+                } else {
+                    (p.y - rect.min.y - 6.0) / TAB_ROW
+                };
+                (at.round().max(0.0) as usize).min(tabs.len())
             };
             if response.dragged() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 if let Some(p) = ui.ctx().pointer_interact_pos() {
-                    let y = rect.min.y + 6.0 + slot(p.y) as f32 * TAB_ROW;
-                    painter.hline(
-                        (rect.min.x + 8.0)..=(rect.max.x - 8.0),
-                        y,
-                        egui::Stroke::new(2.0, theme::ACCENT),
-                    );
+                    let stroke = egui::Stroke::new(2.0, theme::ACCENT);
+                    if below {
+                        let x = rect.min.x + 4.0 + slot(p) as f32 * wide;
+                        painter.vline(x, (rect.min.y + 4.0)..=(rect.max.y - 4.0), stroke);
+                    } else {
+                        let y = rect.min.y + 6.0 + slot(p) as f32 * TAB_ROW;
+                        painter.hline((rect.min.x + 8.0)..=(rect.max.x - 8.0), y, stroke);
+                    }
                 }
             }
             if response.drag_stopped()
                 && let Some(p) = ui.ctx().pointer_interact_pos()
             {
-                let to = slot(p.y);
+                let to = slot(p);
                 // Soltarla después de sí misma la deja una posición antes.
                 let to = if to > i { to - 1 } else { to };
                 if to != i {
@@ -2538,14 +2592,19 @@ impl Workspace {
                 painter.rect_filled(row.shrink2(Vec2::new(4.0, 1.0)), 5.0, theme::SURFACE_HOVER);
             }
             if current {
-                painter.rect_filled(
+                // La marca azul: a la izquierda en la lista, debajo en la fila de pestañas.
+                let mark = if below {
+                    Rect::from_min_size(
+                        egui::pos2(row.min.x + 8.0, row.max.y - 3.0),
+                        Vec2::new(row.width() - 16.0, 2.0),
+                    )
+                } else {
                     Rect::from_min_size(
                         row.min + Vec2::new(4.0, 6.0),
                         Vec2::new(2.0, row.height() - 12.0),
-                    ),
-                    1.0,
-                    theme::ACCENT,
-                );
+                    )
+                };
+                painter.rect_filled(mark, 1.0, theme::ACCENT);
             }
             let color = if current { theme::TEXT } else { theme::TEXT_3 };
             painter.text(
@@ -2827,8 +2886,14 @@ impl Workspace {
             });
         }
 
-        // Varias terminales y panel estrecho: "2/3 ▾" con la lista (ancho: a la derecha).
-        if tabs.len() > 1 && rect.width() < TAB_LIST_MIN {
+        // Varias terminales y panel estrecho: "2/3 ▾" con la lista (ancho: a la derecha o abajo).
+        // Abajo, el chip vuelve si la fila no cabe: las que no se ven siguen a un clic.
+        let narrow = if self.tabs_below {
+            !tabs_fit(tabs.len(), rect.width())
+        } else {
+            rect.width() < TAB_LIST_MIN
+        };
+        if tabs.len() > 1 && narrow {
             let at = tabs.iter().position(|p| *p == id).unwrap_or(0) + 1;
             let text = format!("{at}/{}  {}", tabs.len(), icon::CARET_DOWN);
             let galley =
