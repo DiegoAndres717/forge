@@ -17,7 +17,7 @@ fn steps() -> [(&'static str, &'static str, &'static str); 5] {
             icon::MAGNIFYING_GLASS,
             tr!("⌘K para todo"),
             tr!(
-                "Escribe lo que quieres hacer: abrir un proyecto, dividir la terminal, iniciar un proceso, abrir Claude… ⌘D divide, ⌘T abre una terminal, ⌘F busca en ella y ⌃Tab vuelve al proyecto anterior."
+                "Escribe lo que quieres hacer: abrir un proyecto, dividir la terminal, iniciar un proceso, abrir Claude… ⌘D divide, ⌘T abre una terminal, ⌘F busca en ella y ⌃⌥Tab vuelve al proyecto anterior."
             ),
         ),
         (
