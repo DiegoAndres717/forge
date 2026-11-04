@@ -4422,3 +4422,88 @@ fn trashing_a_folder_closes_the_tabs_inside_it() {
         assert_eq!(parked(&h), ["otro.rs"]);
     }
 }
+
+/// La lista de terminales de un panel puede ir abajo, en una fila delgada de pestañas (como VS
+/// Code), y la terminal gana el ancho que ocupaba la lista. La opción se recuerda.
+#[test]
+fn the_terminal_list_can_go_below_as_a_row_of_tabs_and_is_remembered() {
+    let _serial = serial();
+    let mut h = app(project("tabs-below"));
+    for _ in 0..2 {
+        h.key_press_modifiers(CMD, Key::T);
+        h.run_steps(3);
+    }
+    let row = |h: &Harness<'_, App>, n: usize| {
+        h.get_by_label_contains(&format!("Terminal {n} de 3"))
+            .rect()
+    };
+    // De serie, a la derecha: una debajo de otra.
+    assert!(!h.state().tabs_below);
+    let (one, two) = (row(&h, 1), row(&h, 2));
+    assert_eq!(one.min.x, two.min.x);
+    assert!(two.min.y > one.min.y);
+    let cols_right = ws(h.state()).focused_cols();
+    // Ajustes › General › Lista de terminales: abajo.
+    h.key_press_modifiers(CMD, Key::Comma);
+    h.run_steps(3);
+    // Bajar hasta la sección «Terminal».
+    for _ in 0..10 {
+        if h.query_by_label("Abajo").is_some() {
+            break;
+        }
+        h.hover_at(egui::pos2(640.0, 400.0));
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: Vec2::new(0.0, -300.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        });
+        h.run_steps(3);
+    }
+    h.get_by_label("Abajo").click();
+    h.run_steps(3);
+    h.key_press(Key::Escape);
+    h.run_steps(4);
+    assert!(h.state().tabs_below);
+    let (one, two) = (row(&h, 1), row(&h, 2));
+    assert_eq!(one.min.y, two.min.y, "en fila");
+    assert!(two.min.x > one.min.x);
+    assert!(one.height() <= 30.0, "fila delgada");
+    // Se cierra igual que en la lista.
+    assert_eq!(h.query_all_by_label_contains("Cerrar «").count(), 3);
+    assert!(
+        ws(h.state()).focused_cols() > cols_right,
+        "la terminal usa el ancho de la lista"
+    );
+    assert_eq!(
+        h.state_mut()
+            .db(|s| s.setting("terminal_tabs"))
+            .flatten()
+            .as_deref(),
+        Some("bottom")
+    );
+    // Se recuerda al volver a abrir Forge.
+    let store = Store::in_memory().unwrap();
+    store.set_setting("terminal_tabs", "bottom").unwrap();
+    let h = app_with(store, Some(project("tabs-below-again")));
+    assert!(h.state().tabs_below);
+}
+
+/// Abajo, si las pestañas no caben en el panel, vuelve el chip «n/m ▾» con todas: ninguna
+/// terminal se queda sin forma de llegar a ella.
+#[test]
+fn bottom_tabs_that_do_not_fit_keep_the_chip() {
+    let _serial = serial();
+    let mut h = app(project("tabs-below-narrow"));
+    h.state_mut().tabs_below = true;
+    // Dos paneles lado a lado y siete terminales en el enfocado.
+    h.key_press_modifiers(CMD, Key::D);
+    h.run_steps(3);
+    for _ in 0..6 {
+        h.key_press_modifiers(CMD, Key::T);
+        h.run_steps(3);
+    }
+    h.get_by_label("Terminales de este panel (7)");
+    // Las que sí caben siguen en la fila.
+    h.get_by_label_contains("Terminal 1 de 7");
+}

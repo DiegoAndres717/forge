@@ -848,6 +848,11 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].new_tab(&ctx);
     settle(&mut harness);
     save(&mut harness, &out, "17-terminales");
+    // La misma lista abajo, en una fila delgada de pestañas (Ajustes › Terminal).
+    harness.state_mut().tabs_below = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "17a-terminales-abajo");
+    harness.state_mut().tabs_below = false;
     // Ventana pequeña: el panel es estrecho y la lista pasa a ser el chip "n/3 ▾".
     harness.set_size(Vec2::new(900.0, 620.0));
     settle(&mut harness);
