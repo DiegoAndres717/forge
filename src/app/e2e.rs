@@ -4028,3 +4028,137 @@ fn autosave_is_off_by_default_and_remembered_when_on() {
     let h = app_with(store, Some(project("autosave-on")));
     assert!(h.state().autosave);
 }
+
+/// ⌘F abre la búsqueda en el archivo si el foco está en el editor (si no, sigue siendo la de la
+/// terminal): cuenta las coincidencias sin distinguir mayúsculas, Intro salta a la siguiente,
+/// ⇧Intro a la anterior y Esc la cierra.
+#[test]
+fn cmd_f_searches_inside_the_open_file() {
+    let _serial = serial();
+    let mut h = app(project("find-in-file"));
+    h.get_by_label("Archivos del proyecto").click();
+    h.run_steps(3);
+    let ctx = h.ctx.clone();
+    h.state_mut()
+        .apply_files(&ctx, UiCmd::FilesOpen("main.ts".into()));
+    h.run_steps(2);
+    let text = "alfa beta alfa\nGAMMA ALFA\n";
+    {
+        let v = ws_mut(h.state_mut()).files.viewer.as_mut().unwrap();
+        v.content = text.into();
+        v.saved = text.into();
+    }
+    h.run_steps(2);
+    let find_open =
+        |h: &Harness<'_, App>| ws(h.state()).files.viewer.as_ref().unwrap().find.is_some();
+    let terminal_search = |h: &Harness<'_, App>| {
+        h.query_by(|n| n.placeholder() == Some("Buscar en la terminal"))
+            .is_some()
+    };
+    // Con el foco en la terminal, ⌘F sigue buscando en la terminal.
+    h.key_press_modifiers(CMD, Key::F);
+    h.run_steps(3);
+    assert!(
+        terminal_search(&h),
+        "⌘F en la terminal busca en la terminal"
+    );
+    assert!(!find_open(&h));
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(!terminal_search(&h));
+    // Con el foco en el editor, busca en el archivo.
+    h.get_by_role(egui::accesskit::Role::MultilineTextInput)
+        .click();
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, Key::F);
+    h.run_steps(3);
+    assert!(
+        find_open(&h),
+        "⌘F en el editor abre la búsqueda en el archivo"
+    );
+    assert!(!terminal_search(&h));
+    h.event(egui::Event::Text("alfa".into()));
+    h.run_steps(3);
+    h.get_by_label("1 de 3");
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    h.get_by_label("2 de 3");
+    h.key_press(Key::Enter);
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    h.get_by_label("1 de 3");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+    h.run_steps(3);
+    h.get_by_label("3 de 3");
+    // Buscar no toca el texto.
+    assert_eq!(ws(h.state()).files.viewer.as_ref().unwrap().content, text);
+    // Sin coincidencias se dice.
+    h.event(egui::Event::Text("zzz".into()));
+    h.run_steps(3);
+    h.get_by_label("0 de 0");
+    h.key_press(Key::Escape);
+    h.run_steps(3);
+    assert!(!find_open(&h), "Esc cierra la búsqueda");
+}
+
+#[test]
+fn find_matches_ignores_case_and_returns_char_ranges() {
+    assert_eq!(
+        files_panel::find_matches("Año ALFA alfa", "alfa"),
+        vec![(4, 8), (9, 13)]
+    );
+    assert!(files_panel::find_matches("abc", "").is_empty());
+}
+
+/// Las coincidencias se calculan antes de que el editor aplique la tecla del fotograma: si una
+/// edición deja una vieja empezando en un salto de línea, pintarla no puede romper nada.
+#[test]
+fn find_rects_survive_matches_left_behind_by_an_edit() {
+    let ctx = egui::Context::default();
+    let mut out = ctx.run_ui(Default::default(), |ui| {
+        let galley = ui.ctx().fonts_mut(|f| {
+            f.layout_no_wrap(
+                "foo \nbar".into(),
+                egui::FontId::monospace(13.0),
+                egui::Color32::WHITE,
+            )
+        });
+        let all = egui::Rangef::new(f32::NEG_INFINITY, f32::INFINITY);
+        let rects = files_panel::find_rects(&galley, egui::Pos2::ZERO, &[(4, 7)], all, 0);
+        assert!(rects.len() <= 1);
+        // Fuera de la vista solo se calcula la actual.
+        let row = galley.rows[0].height();
+        let first = egui::Rangef::new(0.0, row - 1.0);
+        let galley = ui.ctx().fonts_mut(|f| {
+            f.layout_no_wrap(
+                "ab\nab\nab".into(),
+                egui::FontId::monospace(13.0),
+                egui::Color32::WHITE,
+            )
+        });
+        let matches = [(0, 2), (3, 5), (6, 8)];
+        let ks = |r: Vec<(usize, egui::Rect)>| r.into_iter().map(|(k, _)| k).collect::<Vec<_>>();
+        assert_eq!(
+            ks(files_panel::find_rects(
+                &galley,
+                egui::Pos2::ZERO,
+                &matches,
+                all,
+                0
+            )),
+            [0, 1, 2]
+        );
+        assert_eq!(
+            ks(files_panel::find_rects(
+                &galley,
+                egui::Pos2::ZERO,
+                &matches,
+                first,
+                2
+            )),
+            [0, 2]
+        );
+    });
+    // Las texturas del fotograma no se usan: se sueltan a propósito.
+    out.textures_delta.clear();
+}

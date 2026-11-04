@@ -824,13 +824,43 @@ impl App {
         });
         self.picker = Some(rx);
     }
+    /// Abre la búsqueda del archivo abierto si ⌘F le toca a él: está en modo edición y tiene el
+    /// foco (el editor o su cuadro), o las terminales están escondidas. Si no, ⌘F es de la terminal.
+    fn editor_find(&mut self, ctx: &egui::Context) -> bool {
+        let Some(ws) = self.active.and_then(|i| self.workspaces.get_mut(i)) else {
+            return false;
+        };
+        let hidden = ws.files.terminal_hidden;
+        let Some(v) = ws.files.viewer.as_mut().filter(|v| {
+            ws.files.open
+                && v.is_text()
+                && v.message.is_none()
+                && v.mode == files_panel::ViewMode::Edit
+        }) else {
+            return false;
+        };
+        let focused = ctx.memory(|m| m.focused());
+        if !hidden
+            && focused != Some(files_panel::editor_id())
+            && focused != Some(files_panel::find_box_id())
+        {
+            return false;
+        }
+        v.find.get_or_insert_with(Default::default).focus = true;
+        true
+    }
     /// Aplica una acción de atajo (o elegida en la paleta).
     fn handle_action(
         &mut self,
+        ctx: &egui::Context,
         action: Action,
         cmds: &mut Vec<UiCmd>,
         ws_actions: &mut Vec<WsAction>,
     ) {
+        // ⌘F con el foco en el archivo abierto (o con la terminal escondida) busca en él.
+        if action == Action::Ws(WsAction::Find) && self.editor_find(ctx) {
+            return;
+        }
         let font_size = &mut self.settings.font_size;
         match action {
             Action::Ws(a) => ws_actions.push(a),
@@ -1716,7 +1746,7 @@ impl eframe::App for App {
         }
         let mut ws_actions = Vec::new();
         for action in actions {
-            self.handle_action(action, &mut cmds, &mut ws_actions);
+            self.handle_action(&ctx, action, &mut cmds, &mut ws_actions);
         }
         // Barra de menús de macOS (o botón ☰): sus opciones hacen lo mismo que el teclado.
         let chosen = self
@@ -1730,7 +1760,7 @@ impl eframe::App for App {
         for cmd in chosen {
             match cmd {
                 menu::MenuCmd::Action(action) => {
-                    self.handle_action(action, &mut cmds, &mut ws_actions)
+                    self.handle_action(&ctx, action, &mut cmds, &mut ws_actions)
                 }
                 menu::MenuCmd::CheckUpdates => cmds.push(UiCmd::CheckUpdates),
                 menu::MenuCmd::Welcome => cmds.push(UiCmd::ShowWelcome),
@@ -1740,7 +1770,7 @@ impl eframe::App for App {
         let full = ui.max_rect();
         match self.palette_ui(&ctx, full) {
             Some(palette::Run::Action(action)) => {
-                self.handle_action(action, &mut cmds, &mut ws_actions)
+                self.handle_action(&ctx, action, &mut cmds, &mut ws_actions)
             }
             Some(palette::Run::Cmds(list)) => cmds.extend(list),
             None => {}

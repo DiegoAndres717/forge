@@ -1302,6 +1302,7 @@ pub const EN: &[(&str, &str)] = &[
     ("{p0}  Repetir", "{p0}  Repeat"),
     ("Ir al final", "Jump to bottom"),
     ("Buscar en la terminal", "Find in terminal"),
+    ("Buscar en el archivo", "Find in file"),
     ("0 de 0", "0 of 0"),
     ("{n} de {total}", "{n} of {total}"),
     ("Anterior (⇧↩)", "Previous (⇧↩)"),

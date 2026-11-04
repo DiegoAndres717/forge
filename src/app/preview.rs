@@ -628,6 +628,19 @@ fn ui_preview() {
             .apply_files(&ctx, UiCmd::FilesOpen("src/main.rs".into()));
         settle(&mut harness);
         save(&mut harness, &out, "12g-editor-codigo");
+        // ⌘F: la barra de búsqueda con las coincidencias resaltadas (la actual, en otro color).
+        harness.state_mut().workspaces[0]
+            .files
+            .viewer
+            .as_mut()
+            .unwrap()
+            .find = Some(files_panel::Find {
+            query: "map".into(),
+            current: 1,
+            ..Default::default()
+        });
+        settle(&mut harness);
+        save(&mut harness, &out, "12h-editor-buscar");
     }
     harness.state_mut().workspaces[0].files.viewer = None;
     harness.state_mut().workspaces[0].files.open = false;

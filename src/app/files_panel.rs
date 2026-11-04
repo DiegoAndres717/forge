@@ -94,6 +94,20 @@ pub struct Peek {
     pub goto: bool,
 }
 
+/// La búsqueda dentro del archivo (⌘F): lo que se busca y por cuál coincidencia va.
+#[derive(Default)]
+pub struct Find {
+    pub query: String,
+    pub current: usize,
+    /// Coincidencias (rangos en caracteres) y la huella del texto y la búsqueda que las dio.
+    pub matches: Vec<(usize, usize)>,
+    pub key: u64,
+    /// Pedir el foco del cuadro (al abrir con ⌘F).
+    pub focus: bool,
+    /// Llevar la vista hasta la coincidencia actual.
+    pub jump: bool,
+}
+
 /// Un archivo abierto: su texto editable, o una imagen, o el motivo de no poder mostrarlo.
 pub struct Viewer {
     pub path: String,
@@ -126,10 +140,12 @@ pub struct Viewer {
     /// Autoguardado: huella del texto que se vio la última vez y desde cuándo, y la huella que
     /// ya se intentó guardar (si falla, no se reintenta hasta que el texto cambie).
     pub auto: (u64, Option<std::time::Instant>, u64),
+    /// Búsqueda abierta en el editor (⌘F).
+    pub find: Option<Find>,
 }
 
 impl Viewer {
-    fn is_text(&self) -> bool {
+    pub(super) fn is_text(&self) -> bool {
         self.image.is_none() && self.message.is_none()
     }
 
@@ -582,6 +598,9 @@ impl App {
                 autosave_tick(v, ui.ctx(), cmds);
             }
         }
+        if v.is_text() && v.mode == ViewMode::Edit && v.find.is_some() {
+            find_bar(&mut ui, v);
+        }
         if v.pending.is_some() {
             ui.group(|ui| {
                 ui.label(RichText::new(tr!("Hay cambios sin guardar.")).size(12.5));
@@ -614,9 +633,10 @@ impl App {
                                 highlight,
                                 marks,
                                 peek,
+                                find,
                                 ..
                             } = v;
-                            code_editor(ui, content, path, highlight, marks, peek);
+                            code_editor(ui, content, path, highlight, marks, peek, find);
                         }
                         ViewMode::Preview => markdown(ui, &v.content),
                         ViewMode::Diff => {
@@ -1173,6 +1193,7 @@ impl App {
             marks: Vec::new(),
             marks_live: (0, None),
             auto: (0, None, 0),
+            find: None,
             peek: Peek::default(),
             comments: Vec::new(),
             draft: None,
@@ -1425,6 +1446,7 @@ fn code_editor(
     cache: &mut Option<(u64, Arc<egui::Galley>)>,
     marks: &[forge_core::files::GutterMark],
     peek: &mut Peek,
+    find: &mut Option<Find>,
 ) {
     use std::hash::{Hash, Hasher};
     let hunks = forge_core::files::gutter_hunks(marks);
@@ -1465,7 +1487,10 @@ fn code_editor(
         ui.add_space(gutter);
         // Hueco para la línea del cursor: se rellena después, pero queda detrás del texto.
         let line_slot = ui.painter().add(egui::Shape::Noop);
+        // Y para las coincidencias de ⌘F, encima de la línea del cursor y detrás del texto.
+        let find_slot = ui.painter().add(egui::Shape::Noop);
         let out = egui::TextEdit::multiline(content)
+            .id(editor_id())
             .font(FontId::monospace(13.0))
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY)
@@ -1487,6 +1512,28 @@ fn code_editor(
             );
         }
         let visible = ui.clip_rect().y_range();
+        if let Some(find) = find.as_mut() {
+            let rects = find_rects(&out.galley, origin, &find.matches, visible, find.current);
+            if find.jump
+                && let Some((_, rect)) = rects.iter().find(|(k, _)| *k == find.current)
+            {
+                ui.scroll_to_rect(rect.expand(24.0), Some(egui::Align::Center));
+            }
+            find.jump = false;
+            let shapes = rects
+                .into_iter()
+                .filter(|(_, r)| r.max.y >= visible.min && r.min.y <= visible.max)
+                .map(|(k, r)| {
+                    let color = if k == find.current {
+                        theme::ORANGE.gamma_multiply(0.55)
+                    } else {
+                        theme::YELLOW.gamma_multiply(0.22)
+                    };
+                    egui::Shape::rect_filled(r, 2.0, color)
+                })
+                .collect::<Vec<_>>();
+            painter.set(find_slot, egui::Shape::Vec(shapes));
+        }
         // Un número por línea de verdad (no por fila: el código no se parte).
         let mut n = 1;
         let mut new_line = true;
@@ -1813,6 +1860,175 @@ fn search_files<'a>(all: &'a [String], query: &str) -> Vec<&'a String> {
         .collect();
     found.sort_by_key(|(s, p)| (-s, p.len()));
     found.into_iter().take(100).map(|(_, p)| p).collect()
+}
+
+/// Coincidencias de `query` en `content` sin distinguir mayúsculas, como rangos en caracteres
+/// (no en bytes: el editor de egui cuenta caracteres). Se compara carácter a carácter: pasar
+/// todo a minúsculas antes movería los rangos (hay letras que cambian de longitud).
+pub fn find_matches(content: &str, query: &str) -> Vec<(usize, usize)> {
+    let query: Vec<char> = query.chars().collect();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let text: Vec<char> = content.chars().collect();
+    let same = |a: char, b: char| a == b || a.to_lowercase().eq(b.to_lowercase());
+    let mut found = Vec::new();
+    let mut at = 0;
+    while at + query.len() <= text.len() {
+        if text[at..at + query.len()]
+            .iter()
+            .zip(&query)
+            .all(|(a, b)| same(*a, *b))
+        {
+            found.push((at, at + query.len()));
+            at += query.len();
+        } else {
+            at += 1;
+        }
+    }
+    found
+}
+
+/// Id fijo del editor, para saber si ⌘F se pulsó con el foco en él.
+pub(super) fn editor_id() -> egui::Id {
+    egui::Id::new("forge-code-editor")
+}
+
+/// Id del cuadro de la búsqueda en el archivo.
+pub(super) fn find_box_id() -> egui::Id {
+    egui::Id::new("forge-editor-find")
+}
+
+/// El rectángulo (con su número) de las coincidencias en las filas `visible` y de la `current`
+/// esté donde esté, para poder saltar a ella. Recorre las filas una sola vez: el código no se
+/// parte, así que una coincidencia cabe en su fila. Las coincidencias son del texto de antes
+/// de la tecla de este fotograma: las que la edición dejó atrás se saltan.
+pub(super) fn find_rects(
+    galley: &egui::Galley,
+    origin: egui::Pos2,
+    matches: &[(usize, usize)],
+    visible: egui::Rangef,
+    current: usize,
+) -> Vec<(usize, Rect)> {
+    let mut rects = Vec::new();
+    let mut next = 0;
+    let mut row_start = 0;
+    for placed in &galley.rows {
+        let len = placed.row.char_count_excluding_newline().0;
+        let row_end = row_start + len;
+        let y = origin.y + placed.pos.y;
+        let shown = y + placed.height() >= visible.min && y <= visible.max;
+        while let Some(&(start, end)) = matches.get(next) {
+            if start > row_end || (start == row_end && placed.ends_with_newline) {
+                break;
+            }
+            next += 1;
+            if start < row_start || !(shown || next - 1 == current) {
+                continue;
+            }
+            let x = |c: usize| placed.row.x_offset(egui::text::CharIndex(c - row_start));
+            let min = origin + placed.pos.to_vec2() + Vec2::new(x(start), 0.0);
+            let width = (x(end.min(row_end)) - x(start)).max(2.0);
+            rects.push((
+                next - 1,
+                Rect::from_min_size(min, Vec2::new(width, placed.height())),
+            ));
+        }
+        row_start += placed.char_count_including_newline().0;
+    }
+    rects
+}
+
+/// La barra de ⌘F encima del editor: cuadro, contador, anterior/siguiente y cerrar. Intro y
+/// ⇧Intro y Esc solo se las queda mientras se escribe en el cuadro: en el editor siguen siendo
+/// del editor (y Esc, del cuadro de cambios).
+fn find_bar(ui: &mut egui::Ui, v: &mut Viewer) {
+    use std::hash::{Hash, Hasher};
+    let ctx = ui.ctx().clone();
+    let typing = ctx.memory(|m| m.has_focus(find_box_id()));
+    // ⇧Intro antes que Intro: `consume_key` sin ⇧ también se come ⇧Intro.
+    let (escape, back, enter) = ctx.input_mut(|i| {
+        (
+            typing && i.consume_key(egui::Modifiers::NONE, Key::Escape),
+            typing && i.consume_key(egui::Modifiers::SHIFT, Key::Enter),
+            typing && i.consume_key(egui::Modifiers::NONE, Key::Enter),
+        )
+    });
+    let Viewer { content, find, .. } = v;
+    let Some(f) = find.as_mut() else {
+        return;
+    };
+    if escape {
+        *find = None;
+        ctx.memory_mut(|m| m.request_focus(editor_id()));
+        return;
+    }
+    let mut step: isize = if enter {
+        1
+    } else if back {
+        -1
+    } else {
+        0
+    };
+    let mut close = false;
+    ui.horizontal(|ui| {
+        let edit = ui.add(
+            egui::TextEdit::singleline(&mut f.query)
+                .id(find_box_id())
+                // Con Esc egui suelta el foco antes de dibujar: así sigue aquí y cierra la barra.
+                .event_filter(egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    escape: true,
+                    tab: false,
+                })
+                .hint_text(tr!("Buscar en el archivo"))
+                .desired_width((ui.available_width() - 150.0).max(80.0)),
+        );
+        if std::mem::take(&mut f.focus) || enter || back {
+            edit.request_focus();
+        }
+        // Se busca de nuevo solo si cambió el texto o lo buscado.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (content.as_str(), f.query.as_str()).hash(&mut hasher);
+        let key = hasher.finish();
+        if key != f.key {
+            f.key = key;
+            f.matches = find_matches(content, &f.query);
+            if edit.changed() {
+                f.current = 0;
+                f.jump = true;
+            }
+            f.current = f.current.min(f.matches.len().saturating_sub(1));
+        }
+        let count = if f.matches.is_empty() {
+            tr!("0 de 0").to_string()
+        } else {
+            tr!("{n} de {total}", n = f.current + 1, total = f.matches.len())
+        };
+        ui.label(RichText::new(count).size(11.0).color(theme::TEXT_3));
+        let small = |ui: &mut egui::Ui, glyph: &str, tip: &str| {
+            theme::icon_button_sized(ui, glyph, tip, 20.0, theme::TEXT_2).clicked()
+        };
+        if small(ui, icon::CARET_UP, tr!("Anterior (⇧↩)")) {
+            step = -1;
+        }
+        if small(ui, icon::CARET_DOWN, tr!("Siguiente (↩)")) {
+            step = 1;
+        }
+        if small(ui, icon::X, tr!("Cerrar (Esc)")) {
+            close = true;
+        }
+    });
+    if close {
+        *find = None;
+        return;
+    }
+    if step != 0 && !f.matches.is_empty() {
+        let len = f.matches.len() as isize;
+        f.current = (f.current as isize + step).rem_euclid(len) as usize;
+        f.jump = true;
+    }
 }
 
 #[cfg(test)]
