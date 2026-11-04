@@ -68,6 +68,14 @@ fn quote(s: &str) -> String {
     match powershell() {
         // Vacío: sin comillas dobles, PowerShell 5.1 no pasaría nada.
         true if s.is_empty() => "'\"\"'".into(),
+        // Varias líneas: los saltos van como `n dentro de una expresión. Escritos tal cual en
+        // la terminal, PSReadLine toma cada uno como Ctrl+Intro (línea nueva encima): el
+        // comando queda desordenado y no llega al agente.
+        true if s.contains(['\n', '\r']) => {
+            let escaped = argv_escape(&s.replace("\r\n", "\n").replace('\r', "\n"));
+            let parts: Vec<String> = escaped.split('\n').map(ps_quote).collect();
+            format!("({})", parts.join(" + \"`n\" + "))
+        }
         true => ps_quote(&argv_escape(s)),
         false => posix_quote(s),
     }
@@ -1584,6 +1592,17 @@ mod tests {
         PS.with(|c| c.set(false));
     }
 
+    /// Un texto de varias líneas (los prompts de «Corregir» y «Revisar») va en una sola línea:
+    /// PSReadLine toma cada salto como Ctrl+Intro (línea nueva encima) y desordena el comando.
+    #[test]
+    fn powershell_types_multiline_text_on_one_line() {
+        PS.with(|c| c.set(true));
+        let line = quote("uno\ndos\r\nit's");
+        PS.with(|c| c.set(false));
+        assert!(!line.contains(['\n', '\r']), "{line}");
+        assert_eq!(line, r#"('uno' + "`n" + 'dos' + "`n" + 'it''s')"#);
+    }
+
     /// En Windows, con PowerShell de verdad: el programa recibe el texto tal cual.
     #[cfg(windows)]
     #[test]
@@ -1594,6 +1613,7 @@ mod tests {
             r#"di "hola" y it’s"#,
             r"C:\a b\",
             "",
+            "uno\ndos \"tres\"",
         ] {
             let line = powershell_line(&format!("git rev-parse --sq-quote {}", quote(text)));
             let out = Command::new("powershell.exe")
