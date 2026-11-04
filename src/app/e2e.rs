@@ -4422,3 +4422,42 @@ fn trashing_a_folder_closes_the_tabs_inside_it() {
         assert_eq!(parked(&h), ["otro.rs"]);
     }
 }
+
+/// En la búsqueda de la terminal, ⇧Intro va a la coincidencia anterior e Intro a la siguiente.
+#[test]
+fn shift_enter_goes_back_in_the_terminal_search() {
+    let _serial = serial();
+    let mut h = app(project("term-search-back"));
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.event(egui::Event::Text("echo zzq-zzq-zzq".into()));
+    h.key_press(Key::Enter);
+    wait_until(&mut h, "salida", |a| {
+        ws(a).shell_text().matches("zzq").count() >= 6
+    });
+    h.key_press_modifiers(CMD, Key::F);
+    h.run_steps(3);
+    h.event(egui::Event::Text("zzq".into()));
+    h.run_steps(3);
+    // «n de m»: dónde va la búsqueda (el texto de una etiqueta es su valor).
+    let at = |h: &Harness<'_, App>| -> (usize, usize) {
+        use egui_kittest::kittest::NodeT;
+        h.query_all_by_label_contains(" de ")
+            .filter_map(|n| n.accesskit_node().value())
+            .find_map(|l| {
+                let (n, m) = l.split_once(" de ")?;
+                Some((n.trim().parse().ok()?, m.trim().parse().ok()?))
+            })
+            .expect("contador de la búsqueda")
+    };
+    let (start, total) = at(&h);
+    assert!(total >= 6, "{total}");
+    assert_eq!(start, total, "empieza por la más reciente");
+    h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
+    h.run_steps(3);
+    assert_eq!(at(&h), (total - 1, total), "⇧Intro: la anterior");
+    h.key_press(Key::Enter);
+    h.run_steps(3);
+    assert_eq!(at(&h), (total, total), "Intro: la siguiente");
+}
