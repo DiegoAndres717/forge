@@ -2364,12 +2364,26 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
     let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
     h.state_mut()
         .apply(&ctx, UiCmd::FixPhase(plan, 0, "fake".into()), area);
+    // Lo que imprime el agente (no el eco del comando, que lleva una comilla tras «corrige:»),
+    // sin los saltos que mete el ancho de la terminal al partir las líneas largas.
+    let said = |a: &App| {
+        let text = ws(a).shell_text().replace('\n', "");
+        text.rfind("corrige: A reviewer")
+            .map(|at| text[at..].to_string())
+    };
     wait_until(&mut h, "el agente recibe los comentarios", |a| {
-        ws(a).panel_count() == 2 && ws(a).shell_text().contains("review_comment_resolve")
+        ws(a).panel_count() == 2 && said(a).is_some_and(|s| s.contains("review_comment_resolve"))
     });
-    let text = ws(h.state()).shell_text();
-    assert!(text.contains("zzabierto"), "se le manda el abierto");
-    assert!(!text.contains("zzresuelto"), "no el ya resuelto");
+    let said = said(h.state()).unwrap();
+    let screen = ws(h.state()).shell_text();
+    assert!(
+        said.contains("zzabierto"),
+        "se le manda el abierto: {said}\n--- pantalla ---\n{screen}"
+    );
+    assert!(
+        !said.contains("zzresuelto"),
+        "no el ya resuelto: {said}\n--- pantalla ---\n{screen}"
+    );
 }
 
 /// «Aprender»: de los comentarios resueltos se propone qué recordar; solo se guarda en la
