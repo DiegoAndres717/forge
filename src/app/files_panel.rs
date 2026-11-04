@@ -49,8 +49,11 @@ pub struct FilesView {
     pub new_item: Option<NewItem>,
     /// Archivo o carpeta del árbol cuyo nombre se está cambiando.
     pub renaming: Option<Renaming>,
-    /// Archivo abierto al lado del árbol.
+    /// Archivo abierto al lado del árbol (la pestaña activa).
     pub viewer: Option<Viewer>,
+    /// Las demás pestañas, en el orden de la fila sin la activa, y dónde va la activa en ella.
+    pub parked: Vec<Viewer>,
+    pub at: usize,
     /// Observador de la carpeta del proyecto: avisa de lo que cambia en disco (solo vive mientras
     /// el panel o un archivo están abiertos).
     pub watcher: Option<super::files_watch::ProjectWatcher>,
@@ -59,6 +62,69 @@ pub struct FilesView {
     pub watcher_failed: bool,
     /// Autoguardado del editor (Ajustes): guarda solo tras una pausa sin escribir.
     pub autosave: bool,
+}
+
+impl FilesView {
+    /// Las pestañas en su orden: ruta y si tiene cambios sin guardar.
+    pub fn tab_paths(&self) -> Vec<(&str, bool)> {
+        let mut row: Vec<(&str, bool)> = self
+            .parked
+            .iter()
+            .map(|v| (v.path.as_str(), v.unsaved()))
+            .collect();
+        if let Some(v) = &self.viewer {
+            row.insert(self.at.min(row.len()), (v.path.as_str(), v.unsaved()));
+        }
+        row
+    }
+
+    /// La activa vuelve a su sitio en la fila: `parked` queda con todas las pestañas.
+    fn park(&mut self) {
+        if let Some(mut v) = self.viewer.take() {
+            // El aviso de cerrar era de esa vez: al volver a la pestaña no sigue ahí.
+            v.pending = None;
+            let at = self.at.min(self.parked.len());
+            self.parked.insert(at, v);
+        }
+    }
+
+    /// Activa la pestaña `k` de `parked` (si existe).
+    fn unpark(&mut self, k: usize) {
+        if k < self.parked.len() {
+            self.viewer = Some(self.parked.remove(k));
+            self.at = k;
+        }
+    }
+
+    /// Quita de las pestañas de fondo la de `path` (la activa sigue en su sitio).
+    fn drop_parked(&mut self, path: &str) {
+        if let Some(k) = self.parked.iter().position(|v| v.path == path) {
+            self.parked.remove(k);
+            if k < self.at {
+                self.at -= 1;
+            }
+        }
+    }
+
+    /// Cierra sin preguntar las pestañas de `rel` y de lo que haya dentro (si es una carpeta):
+    /// ya no están en disco. Si era la activa, queda la vecina.
+    fn drop_under(&mut self, rel: &str) {
+        let inside = |p: &str| p == rel || p.strip_prefix(rel).is_some_and(|r| r.starts_with('/'));
+        let gone: Vec<String> = self
+            .parked
+            .iter()
+            .filter(|v| inside(&v.path))
+            .map(|v| v.path.clone())
+            .collect();
+        for path in gone {
+            self.drop_parked(&path);
+        }
+        if self.viewer.as_ref().is_some_and(|v| inside(&v.path)) {
+            self.viewer = None;
+            let k = self.at.min(self.parked.len().saturating_sub(1));
+            self.unpark(k);
+        }
+    }
 }
 
 /// Lo nuevo que se está nombrando: dónde va, si es carpeta y el nombre escrito hasta ahora.
@@ -153,7 +219,7 @@ impl Viewer {
         self.path.to_lowercase().ends_with(".md")
     }
 
-    fn unsaved(&self) -> bool {
+    pub(super) fn unsaved(&self) -> bool {
         self.is_text() && self.content != self.saved
     }
 }
@@ -547,12 +613,16 @@ impl App {
             rect.y_range(),
             egui::Stroke::new(1.0, theme::SEPARATOR),
         );
-        let Some(v) = ws.files.viewer.as_mut() else {
+        if ws.files.viewer.is_none() {
             return;
-        };
+        }
         let mut ui =
             ui.new_child(egui::UiBuilder::new().max_rect(rect.shrink2(Vec2::new(16.0, 14.0))));
         ui.spacing_mut().item_spacing.y = 8.0;
+        tab_row(&mut ui, &ws.files, cmds);
+        let Some(v) = ws.files.viewer.as_mut() else {
+            return;
+        };
         let name = v.path.rsplit('/').next().unwrap_or(&v.path).to_string();
         let unsaved = v.unsaved();
         ui.horizontal(|ui| {
@@ -614,8 +684,9 @@ impl App {
                 });
             });
         }
+        // Cada archivo con su propio desplazamiento.
         egui::ScrollArea::both()
-            .id_salt("file-viewer")
+            .id_salt(("file-viewer", &v.path))
             .auto_shrink([false, false])
             .show(&mut ui, |ui| {
                 if let Some(why) = &v.message {
@@ -1109,6 +1180,21 @@ impl App {
             }
             UiCmd::FilesCancelRename => ws.files.renaming = None,
             UiCmd::FilesCloseViewer => Self::open_file(ctx, ws, None, false),
+            UiCmd::FilesCloseTab(path) => {
+                let background = ws.files.viewer.as_ref().is_none_or(|v| v.path != path);
+                let unsaved = ws
+                    .files
+                    .parked
+                    .iter()
+                    .any(|v| v.path == path && v.unsaved());
+                if background && !unsaved {
+                    ws.files.drop_parked(&path);
+                } else {
+                    // La que se cierra se enseña: si tiene cambios, se pregunta delante de ella.
+                    Self::open_file(ctx, ws, Some(path), false);
+                    Self::open_file(ctx, ws, None, false);
+                }
+            }
             UiCmd::FilesDiscard => {
                 let next = ws.files.viewer.as_mut().and_then(|v| v.pending.take());
                 if let Some(next) = next {
@@ -1136,31 +1222,7 @@ impl App {
             UiCmd::FilesSave => {
                 let root = ws.project.path.clone();
                 if let Some(v) = ws.files.viewer.as_mut().filter(|v| v.is_text()) {
-                    let rel = Path::new(&v.path);
-                    let on_disk = std::fs::metadata(root.join(rel))
-                        .and_then(|m| m.modified())
-                        .ok();
-                    if on_disk != v.modified {
-                        ws.files.error = Some(tr!(
-                            "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios."
-                        ).to_string());
-                    } else {
-                        match forge_core::files::save(&root, rel, &v.content) {
-                            Ok(()) => {
-                                v.saved = v.content.clone();
-                                v.modified = std::fs::metadata(root.join(rel))
-                                    .and_then(|m| m.modified())
-                                    .ok();
-                                v.marks = gutter(&root, rel);
-                                if v.mode == ViewMode::Diff {
-                                    v.diff =
-                                        forge_core::files::diff(&root, rel).unwrap_or_else(|e| e);
-                                }
-                                ws.files.error = None;
-                            }
-                            Err(e) => ws.files.error = Some(e),
-                        }
-                    }
+                    ws.files.error = save_viewer(&root, v).err();
                 }
             }
             _ => {}
@@ -1171,16 +1233,56 @@ impl App {
     /// guardar y no se fuerza, antes pregunta.
     // ponytail: se lee en el hilo de la interfaz (el texto tiene tope de 2 MB); el PDF tarda
     // algo más porque lo dibuja la vista rápida de macOS.
-    fn open_file(ctx: &egui::Context, ws: &mut Workspace, next: Option<String>, force: bool) {
-        if !force && let Some(v) = ws.files.viewer.as_mut().filter(|v| v.unsaved()) {
-            v.pending = Some(next);
-            return;
-        }
+    pub(crate) fn open_file(
+        ctx: &egui::Context,
+        ws: &mut Workspace,
+        next: Option<String>,
+        force: bool,
+    ) {
+        let root = ws.project.path.clone();
         let Some(path) = next else {
+            // Cerrar la activa: con cambios sin guardar y sin forzar, antes pregunta.
+            if !force && let Some(v) = ws.files.viewer.as_mut().filter(|v| v.unsaved()) {
+                v.pending = Some(None);
+                return;
+            }
             ws.files.viewer = None;
+            // Queda la vecina: la de su derecha (que ocupa su sitio) o, si no hay, la de la izquierda.
+            let k = ws.files.at.min(ws.files.parked.len().saturating_sub(1));
+            ws.files.unpark(k);
+            if let Some(v) = ws.files.viewer.as_mut().filter(|v| v.is_text()) {
+                follow_disk(&root, v);
+            }
             return;
         };
-        let root = ws.project.path.clone();
+        if ws.files.viewer.as_ref().is_some_and(|v| v.path == path) {
+            return;
+        }
+        // Lo que se deja de fondo con el autoguardado puesto se guarda ya: de fondo no corre.
+        if ws.files.autosave
+            && let Some(v) = ws
+                .files
+                .viewer
+                .as_mut()
+                .filter(|v| v.is_text() && v.unsaved())
+            && let Err(e) = save_viewer(&root, v)
+        {
+            ws.files.error = Some(e);
+        }
+        // Si ya está abierto en otra pestaña, se va a ella (lo de disco se mira al volver).
+        if ws.files.parked.iter().any(|v| v.path == path) {
+            ws.files.park();
+            if let Some(k) = ws.files.parked.iter().position(|v| v.path == path) {
+                ws.files.unpark(k);
+            }
+            // De fondo no se miraba el disco ni Git: se pone al día al volver.
+            if let Some(v) = ws.files.viewer.as_mut().filter(|v| v.is_text()) {
+                follow_disk(&root, v);
+                v.marks = gutter(&root, Path::new(&v.path));
+                v.marks_live = (0, None);
+            }
+            return;
+        }
         let rel = Path::new(&path);
         let mut viewer = Viewer {
             path: path.clone(),
@@ -1236,6 +1338,13 @@ impl App {
             Ok(forge_core::files::Loaded::Unsupported(why)) => viewer.message = Some(why),
             Err(e) => viewer.message = Some(e),
         }
+        // La nueva va a la derecha de la que estaba activa.
+        if ws.files.viewer.is_some() {
+            ws.files.park();
+            ws.files.at += 1;
+        } else {
+            ws.files.at = ws.files.parked.len();
+        }
         ws.files.viewer = Some(viewer);
     }
 
@@ -1255,7 +1364,7 @@ impl App {
             .drain()
             .map(|p| remap(&p).unwrap_or(p))
             .collect();
-        if let Some(v) = files.viewer.as_mut() {
+        for v in files.viewer.iter_mut().chain(files.parked.iter_mut()) {
             if let Some(path) = remap(&v.path) {
                 v.path = path;
                 // El color depende de la extensión: con otro nombre hay que recalcularlo, y
@@ -1283,12 +1392,12 @@ impl App {
         }
     }
 
-    fn trash_path(&mut self, i: usize, rel: &str) {
+    pub(super) fn trash_path(&mut self, i: usize, rel: &str) {
         let ws = &mut self.workspaces[i];
         ws.files.confirm_trash = None;
         ws.files.error = forge_core::files::trash(&ws.project.path, Path::new(rel)).err();
-        if ws.files.error.is_none() && ws.files.viewer.as_ref().is_some_and(|v| v.path == rel) {
-            ws.files.viewer = None;
+        if ws.files.error.is_none() {
+            ws.files.drop_under(rel);
         }
     }
 }
@@ -1490,7 +1599,7 @@ fn code_editor(
         // Y para las coincidencias de ⌘F, encima de la línea del cursor y detrás del texto.
         let find_slot = ui.painter().add(egui::Shape::Noop);
         let out = egui::TextEdit::multiline(content)
-            .id(editor_id())
+            .id(editor_id(path))
             .font(FontId::monospace(13.0))
             .frame(egui::Frame::NONE)
             .desired_width(f32::INFINITY)
@@ -1889,9 +1998,11 @@ pub fn find_matches(content: &str, query: &str) -> Vec<(usize, usize)> {
     found
 }
 
-/// Id fijo del editor, para saber si ⌘F se pulsó con el foco en él.
-pub(super) fn editor_id() -> egui::Id {
-    egui::Id::new("forge-code-editor")
+/// Id del editor de cada archivo: con él se sabe si ⌘F se pulsó con el foco en el editor, y
+/// cada pestaña guarda su propio historial de deshacer (con uno compartido, ⌘Z en una pestaña
+/// traería el texto de otra).
+pub(super) fn editor_id(path: &str) -> egui::Id {
+    egui::Id::new(("forge-code-editor", path))
 }
 
 /// Id del cuadro de la búsqueda en el archivo.
@@ -1954,13 +2065,18 @@ fn find_bar(ui: &mut egui::Ui, v: &mut Viewer) {
             typing && i.consume_key(egui::Modifiers::NONE, Key::Enter),
         )
     });
-    let Viewer { content, find, .. } = v;
+    let Viewer {
+        content,
+        find,
+        path,
+        ..
+    } = v;
     let Some(f) = find.as_mut() else {
         return;
     };
     if escape {
         *find = None;
-        ctx.memory_mut(|m| m.request_focus(editor_id()));
+        ctx.memory_mut(|m| m.request_focus(editor_id(path)));
         return;
     }
     let mut step: isize = if enter {
@@ -2029,6 +2145,118 @@ fn find_bar(ui: &mut egui::Ui, v: &mut Viewer) {
         f.current = (f.current as isize + step).rem_euclid(len) as usize;
         f.jump = true;
     }
+}
+
+/// Guarda el archivo, salvo que haya cambiado en disco desde que se leyó (un agente): así no
+/// se pisa lo suyo.
+fn save_viewer(root: &Path, v: &mut Viewer) -> Result<(), String> {
+    let rel = Path::new(&v.path);
+    let on_disk = std::fs::metadata(root.join(rel))
+        .and_then(|m| m.modified())
+        .ok();
+    if on_disk != v.modified {
+        return Err(tr!(
+            "El archivo cambió fuera del editor (¿un agente?). Ciérralo y ábrelo otra vez para no pisar esos cambios."
+        )
+        .to_string());
+    }
+    forge_core::files::save(root, rel, &v.content)?;
+    v.saved = v.content.clone();
+    v.modified = std::fs::metadata(root.join(rel))
+        .and_then(|m| m.modified())
+        .ok();
+    v.marks = gutter(root, rel);
+    if v.mode == ViewMode::Diff {
+        v.diff = forge_core::files::diff(root, rel).unwrap_or_else(|e| e);
+    }
+    Ok(())
+}
+
+/// La fila de pestañas sobre el archivo abierto (solo con dos o más). Cada pestaña es un
+/// clic para ir a ella, con su punto si tiene cambios y su ✕ para cerrarla.
+fn tab_row(ui: &mut egui::Ui, files: &FilesView, cmds: &mut Vec<UiCmd>) {
+    let row = files.tab_paths();
+    if row.len() < 2 {
+        return;
+    }
+    let active = files.viewer.as_ref().map(|v| v.path.as_str());
+    egui::ScrollArea::horizontal()
+        .id_salt("file-tabs")
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for (path, unsaved) in row {
+                    let selected = active == Some(path);
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    // Los nombres muy largos se recortan (el completo, al pasar por encima).
+                    let shown = if name.chars().count() > 28 {
+                        format!("{}…", name.chars().take(26).collect::<String>())
+                    } else {
+                        name.to_string()
+                    };
+                    let font = FontId::proportional(12.5);
+                    let color = if selected { theme::TEXT } else { theme::TEXT_3 };
+                    let galley = ui.painter().layout_no_wrap(shown, font, color);
+                    let dot = if unsaved { 12.0 } else { 0.0 };
+                    let size = Vec2::new(galley.size().x + dot + 40.0, 26.0);
+                    // La pestaña se registra antes que su ✕: el ✕ queda encima y recibe su clic.
+                    let (rect, tab) = ui.allocate_exact_size(size, Sense::click());
+                    // Cuando cambia la activa, la fila se desplaza hasta ella.
+                    let seen = egui::Id::new("file-tabs-active");
+                    if selected && ui.data(|d| d.get_temp::<String>(seen)).as_deref() != Some(path)
+                    {
+                        ui.scroll_to_rect(rect, None);
+                        ui.data_mut(|d| d.insert_temp(seen, path.to_string()));
+                    }
+                    tab.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::SelectableLabel,
+                            true,
+                            selected,
+                            tr!("Pestaña {name}", name = name),
+                        )
+                    });
+                    let fill = if selected {
+                        theme::SURFACE
+                    } else if tab.hovered() {
+                        theme::SURFACE_HOVER.gamma_multiply(0.5)
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    };
+                    ui.painter().rect_filled(rect, 6.0, fill);
+                    let text_at =
+                        egui::pos2(rect.min.x + 10.0, rect.center().y - galley.size().y / 2.0);
+                    ui.painter().galley(text_at, galley, color);
+                    if unsaved {
+                        ui.painter().circle_filled(
+                            egui::pos2(rect.max.x - 34.0, rect.center().y),
+                            3.0,
+                            theme::YELLOW,
+                        );
+                    }
+                    let close = Rect::from_center_size(
+                        egui::pos2(rect.max.x - 15.0, rect.center().y),
+                        Vec2::splat(18.0),
+                    );
+                    let closed = ui
+                        .put(close, |ui: &mut egui::Ui| {
+                            theme::icon_button_sized(
+                                ui,
+                                icon::X,
+                                &tr!("Cerrar {name}", name = name),
+                                16.0,
+                                theme::TEXT_3,
+                            )
+                        })
+                        .clicked();
+                    if closed {
+                        cmds.push(UiCmd::FilesCloseTab(path.to_string()));
+                    } else if tab.on_hover_text(path).clicked() && !selected {
+                        cmds.push(UiCmd::FilesOpen(path.to_string()));
+                    }
+                }
+            });
+        });
 }
 
 #[cfg(test)]
