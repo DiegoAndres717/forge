@@ -4431,14 +4431,28 @@ fn shift_enter_goes_back_in_the_terminal_search() {
     wait_until(&mut h, "shell listo", |a| {
         ws(a).is_quiet(Duration::from_millis(500))
     });
-    h.event(egui::Event::Text("echo zzq-zzq-zzq".into()));
+    // Solo la salida dice «42zzq» (lo tecleado lleva la cuenta sin hacer): así se espera a lo
+    // que imprimió el shell y la búsqueda tiene exactamente tres coincidencias.
+    let command = if cfg!(windows) {
+        "echo \"$(6*7)zzq $(6*7)zzq $(6*7)zzq\""
+    } else {
+        "echo $((6*7))zzq $((6*7))zzq $((6*7))zzq"
+    };
+    h.event(egui::Event::Text(command.into()));
     h.key_press(Key::Enter);
-    wait_until(&mut h, "salida", |a| {
-        ws(a).shell_text().matches("zzq").count() >= 6
-    });
+    let start = Instant::now();
+    while ws(h.state()).shell_text().matches("42zzq").count() < 3 {
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "tiempo agotado: salida\n--- pantalla ---\n{}",
+            ws(h.state()).shell_text()
+        );
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
     h.key_press_modifiers(CMD, Key::F);
     h.run_steps(3);
-    h.event(egui::Event::Text("zzq".into()));
+    h.event(egui::Event::Text("42zzq".into()));
     h.run_steps(3);
     // «n de m»: dónde va la búsqueda (el texto de una etiqueta es su valor).
     let at = |h: &Harness<'_, App>| -> (usize, usize) {
@@ -4452,7 +4466,7 @@ fn shift_enter_goes_back_in_the_terminal_search() {
             .expect("contador de la búsqueda")
     };
     let (start, total) = at(&h);
-    assert!(total >= 6, "{total}");
+    assert_eq!(total, 3);
     assert_eq!(start, total, "empieza por la más reciente");
     h.key_press_modifiers(Modifiers::SHIFT, Key::Enter);
     h.run_steps(3);
