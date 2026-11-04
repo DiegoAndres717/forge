@@ -373,6 +373,7 @@ impl App {
                 },
             );
             self.tabs_position_ui(ui);
+            self.autosave_ui(ui);
             hint(
                 ui,
                 tr!("Fuentes propias y más opciones: ~/.config/forge/config.toml"),
@@ -399,7 +400,6 @@ impl App {
                     ui.checkbox(&mut ask, tr!("Aclarar antes de planificar"));
                 },
             );
-            self.autosave_ui(ui);
             self.tests_first_ui(ui);
             self.jev_ui(ui);
             self.advisor_ui(ui);

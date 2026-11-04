@@ -4561,6 +4561,27 @@ fn shift_enter_goes_back_in_the_terminal_search() {
     assert_eq!(at(&h), (total, total), "Intro: la siguiente");
 }
 
+/// El autoguardado se elige en Ajustes > General (no en Agentes, donde se coló).
+#[test]
+fn the_autosave_option_is_in_the_general_settings_tab() {
+    let _serial = serial();
+    let mut h = app(project("autosave-tab"));
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::General);
+    h.state_mut().settings_open = true;
+    h.run_steps(4);
+    assert!(
+        h.query_by_label("Autoguardado").is_some(),
+        "General trae el autoguardado"
+    );
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Agents);
+    h.run_steps(4);
+    assert!(
+        h.query_by_label("Autoguardado").is_none(),
+        "Agentes no lo trae"
+    );
+}
+
 /// ⌃Tab pasa a la terminal siguiente del panel y ⌃⇧Tab a la anterior (con vuelta al final),
 /// sin tocar el proyecto reciente, que va con ⌃⌥Tab.
 #[test]
