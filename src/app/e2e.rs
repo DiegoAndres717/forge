@@ -4906,16 +4906,28 @@ fn the_plans_panel_launches_phases_in_parallel_each_in_its_own_worktree() {
             .iter()
             .all(|r| cwds.contains(&forge_core::canonical(&r.path)))
     });
-    // Cada agente recibió el mensaje de su fase (sin espacios: la terminal parte las líneas).
-    wait_until(&mut h, "el mensaje de cada fase", |a| {
-        let text: String = ws(a)
+    // Cada agente recibió el mensaje de su fase. Sin espacios (la terminal parte las líneas) y
+    // sin comillas: en Windows el agente falso es un cmdlet (Write-Host), que muestra las `"`
+    // escapadas para un ejecutable (`\"`, ver `quote` en agents.rs); un agente de verdad las
+    // recibe bien.
+    let start = Instant::now();
+    loop {
+        let text: String = ws(h.state())
             .shell_text()
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect();
-        text.contains("Youareworkingonphase1(\"Webhook\")")
-            && text.contains("Youareworkingonphase2(\"Panel\")")
-    });
+        if text.contains("Goal:Webhook") && text.contains("Goal:Panel") {
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "tiempo agotado: el mensaje de cada fase; en pantalla:\n{}",
+            ws(h.state()).shell_text()
+        );
+        h.run_steps(2);
+        std::thread::sleep(Duration::from_millis(50));
+    }
     let idea = h
         .state_mut()
         .db(|s| s.get_idea(Some(&dir), plan))
