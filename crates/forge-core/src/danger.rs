@@ -385,7 +385,7 @@ pub struct Request {
     pub pid: u32,
 }
 
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         // SAFETY: kill con señal 0 solo comprueba que el proceso existe.

@@ -69,7 +69,7 @@ const DANGER_HINT = /\b(git|rm|docker|psql|mysql|mariadb|dropdb)(\.exe)?\b/i
 // A stray worktree or clone of the project: the shims stop it too, but denying it here
 // tells the model to use `forge worktree new` before anything runs. Forge decides.
 const STRAY_HINT = /\bgit\b[\s\S]*\b(worktree\s+add|clone)\b/
-const SECRET_HINT =/\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
+const SECRET_HINT = /\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
  * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */

@@ -532,6 +532,10 @@ pub fn create(
     if branch.starts_with('-') || git(repo, &["check-ref-format", "--branch", branch]).is_err() {
         return Err(tr!("nombre de rama no válido: {b}", b = branch).to_string());
     }
+    // Un `--from` con guion lo leería git como una opción.
+    if let Some(f) = from.filter(|f| f.starts_with('-')) {
+        return Err(tr!("nombre de rama no válido: {b}", b = f).to_string());
+    }
     let project = main_root(repo)?;
     let path = project_dir(&project, root).join(folder_name(branch));
     if path.exists() {
@@ -549,7 +553,13 @@ pub fn create(
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     }
     let target = path.to_string_lossy().into_owned();
-    let exists = crate::git::resolve_commit(&project, branch).is_some();
+    // Solo una rama (local o en origin): una etiqueta o un hash darían un HEAD separado.
+    let exists = [
+        format!("refs/heads/{branch}"),
+        format!("refs/remotes/origin/{branch}"),
+    ]
+    .iter()
+    .any(|r| git(&project, &["rev-parse", "--verify", "-q", r]).is_ok());
     let args: Vec<String> = match from {
         // La rama ya existe (local o en origin): git la saca tal cual.
         None if exists => vec!["worktree".into(), "add".into(), target, branch.into()],
@@ -590,8 +600,9 @@ pub fn create(
         created_at: crate::store::now(),
         ..who
     };
+    // El worktree ya está: sin el registro solo se pierde quién lo pidió, no se falla.
     if let (Some(file), Ok(json)) = (record_file(&path), serde_json::to_string_pretty(&record)) {
-        std::fs::write(file, json).map_err(|e| e.to_string())?;
+        let _ = std::fs::write(file, json);
     }
     Ok(path)
 }
@@ -651,11 +662,24 @@ pub fn offers(plan: &[Cleanup], records: &[Record], open: &[String]) -> Vec<Clea
         .filter(|c| {
             record_of(&c.worktree, records).is_some_and(|r| {
                 c.worktree.merged == Some(true)
-                    || r.session.as_ref().is_some_and(|s| !open.contains(s))
+                    || r.session.as_deref().is_some_and(|s| closed(s, open))
             })
         })
         .cloned()
         .collect()
+}
+
+/// ¿Se cerró la terminal de `session` («pid de la app:terminal»)? De esta app, si no está
+/// en `open`; de otra (otra ventana, o antes de reiniciar), solo si esa app ya no corre.
+fn closed(session: &str, open: &[String]) -> bool {
+    match session
+        .split(':')
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+    {
+        Some(pid) if pid != std::process::id() => !crate::danger::alive(pid),
+        _ => !open.iter().any(|s| s == session),
+    }
 }
 
 /// La carpeta `.git` común del repositorio en `dir` (la misma desde cualquier worktree).
@@ -739,11 +763,16 @@ pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String>
     let mut i = 0;
     while let Some(a) = args.get(i).filter(|a| a.starts_with('-')) {
         match a.as_str() {
-            "-C" => {
+            // `--git-dir` también dice de qué repositorio es (rev-parse vale dentro de `.git`).
+            "-C" | "--git-dir" => {
                 dir = dir.join(args.get(i + 1)?);
                 i += 2;
             }
-            "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => i += 2,
+            _ if a.starts_with("--git-dir=") => {
+                dir = dir.join(&a["--git-dir=".len()..]);
+                i += 1;
+            }
+            "-c" | "--work-tree" | "--namespace" | "--config-env" => i += 2,
             _ => i += 1,
         }
     }
@@ -767,6 +796,39 @@ pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String>
     ))
 }
 
+/// Dónde está `git` si es el comando del segmento: tras prefijos (`A=1`, `sudo`, `env`…) y
+/// envoltorios de shell (`bash -lc`, `cmd /c`, `pwsh -Command`). Un `git` dentro de un texto
+/// (`gh pr create --body "… git clone …"`, `echo git …`) no cuenta.
+fn command_start(words: &[String]) -> Option<usize> {
+    const PREFIXES: &[&str] = &["sudo", "env", "command", "exec", "time", "nohup", "xargs"];
+    const SHELLS: &[&str] = &["sh", "bash", "zsh", "cmd", "powershell", "pwsh"];
+    let mut i = 0;
+    while let Some(w) = words.get(i) {
+        let file = w
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(w)
+            .to_ascii_lowercase();
+        let name = file.strip_suffix(".exe").unwrap_or(&file);
+        if name == "git" {
+            return Some(i);
+        }
+        let prefix = (w.contains('=') && !w.starts_with('-')) || PREFIXES.contains(&name);
+        if !prefix && !SHELLS.contains(&name) {
+            return None;
+        }
+        i += 1;
+        // Las opciones del envoltorio (`-lc`, `/c`, `-Command`).
+        while words
+            .get(i)
+            .is_some_and(|o| o.starts_with('-') || (o.starts_with('/') && o.len() == 2))
+        {
+            i += 1;
+        }
+    }
+    None
+}
+
 /// Como `stray_copy`, en una línea de shell (para los hooks previos de los agentes).
 // ponytail: palabras sueltas, sin un parser de shell (como `danger::dangerous_in_command`);
 // el `git` puede ir tras `bash -lc '…'`, `sudo` o `env`. Los enlaces de Guard son el respaldo.
@@ -785,14 +847,15 @@ pub fn stray_copy_in_command(command: &str, cwd: &Path, project: &Path) -> Optio
                 .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
                 .collect();
             if words.first().is_some_and(|w| w == "cd") {
-                if let Some(dir) = words.get(1) {
-                    cwd = cwd.join(dir);
-                }
+                // Una carpeta que no se puede seguir (con espacios, `~`, `$(…)`): se supone el
+                // proyecto, para no dejar pasar lo que sí sería una copia.
+                cwd = match words.get(1).map(|d| cwd.join(d)) {
+                    Some(dir) if words.len() == 2 && dir.is_dir() => dir,
+                    _ => project.to_path_buf(),
+                };
                 return None;
             }
-            let at = words
-                .iter()
-                .position(|w| crate::danger::shim_name(w).as_deref() == Some("git"))?;
+            let at = command_start(&words)?;
             stray_copy(&words[at + 1..], &cwd, project)
         })
 }
@@ -851,6 +914,17 @@ mod tests {
         let reused = create(&dir, "ya-existe", None, &root, Record::default()).unwrap();
         assert!(reused.join("a").is_file() && !reused.join("b").exists());
         assert!(create(&dir, "-mal", None, &root, Record::default()).is_err());
+        assert!(create(&dir, "feat/y", Some("-mal"), &root, Record::default()).is_err());
+        // Una etiqueta con el nombre no es la rama: se crea la rama, no un HEAD separado.
+        let dir_tag = test_repo("wt-from-tag", "git tag v1");
+        let tag = create(&dir_tag, "v1", None, &root, Record::default()).unwrap();
+        let wt = list(&dir_tag)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.main)
+            .unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("v1"), "{tag:?}");
+        std::fs::remove_dir_all(dir_tag).unwrap();
         std::fs::remove_dir_all(dir).unwrap();
     }
 
@@ -896,8 +970,18 @@ mod tests {
         assert!(line("git status && git worktree add ../x", &dir).is_some());
         assert!(line(&format!("cd {} && git worktree add x", dir.display()), &tmp).is_some());
         assert!(line("bash -lc 'git worktree add ../x'", &dir).is_some());
+        assert!(line("sudo env A=1 git worktree add ../x", &dir).is_some());
+        // Solo `git` como comando: un texto que lo menciona no es una copia.
+        assert_eq!(
+            line("gh pr create --body \"never run git worktree add\"", &dir),
+            None
+        );
+        assert_eq!(line("echo git clone .", &dir), None);
+        // Una carpeta que no se puede seguir (`cd "/a b"`, `cd ~/x`): se mira el proyecto.
+        assert!(line("cd \"/no existe/x\" && git worktree add y", &dir).is_some());
         assert_eq!(line("git worktree list", &dir), None);
-        assert_eq!(line("cd /tmp && git worktree add x", &dir), None);
+        let away = format!("cd {} && git worktree add x", tmp.display());
+        assert_eq!(line(&away, &dir), None);
         assert_eq!(
             line(&format!("{ALLOW}=1 git worktree add ../x"), &dir),
             None
@@ -933,20 +1017,43 @@ mod tests {
             session: Some(session.into()),
             ..Default::default()
         };
+        // Sesiones de esta app («pid:terminal»), de otra ya cerrada y de otra que sigue viva.
+        let me = std::process::id();
+        let session = |panel: u32| format!("{me}:{panel}");
+        let mut alive = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
+            .args(if cfg!(windows) {
+                &["/c", "ping -n 30 127.0.0.1 >nul"][..]
+            } else {
+                &["30"][..]
+            })
+            .spawn()
+            .unwrap();
         let records = [
-            record("/w/merged", "1:1"),
-            record("/w/closed", "1:2"),
-            record("/w/open", "1:3"),
-            record("/w/dirty", "1:4"),
+            record("/w/merged", &session(1)),
+            record("/w/closed", &session(2)),
+            record("/w/open", &session(3)),
+            record("/w/dirty", &session(4)),
+            record("/w/other-app-closed", "999999:1"),
+            record("/w/other-app-open", &format!("{}:1", alive.id())),
         ];
-        let open = ["1:1".to_string(), "1:3".to_string()];
+        let plan = [
+            &plan[..],
+            &[
+                cleanup(wt("/w/other-app-closed", false), remove),
+                cleanup(wt("/w/other-app-open", false), remove),
+            ][..],
+        ]
+        .concat();
+        let open = [session(1), session(3)];
         let offered: Vec<_> = offers(&plan, &records, &open)
             .into_iter()
             .map(|c| c.worktree.path)
             .collect();
+        let _ = alive.kill();
+        let _ = alive.wait();
         assert_eq!(
             offered,
-            [PathBuf::from("/w/merged"), PathBuf::from("/w/closed")]
+            ["/w/merged", "/w/closed", "/w/other-app-closed"].map(PathBuf::from)
         );
     }
 

@@ -158,8 +158,14 @@ impl App {
             };
         }
         view.poll();
-        let open: Vec<String> = workspaces.iter().flat_map(|w| w.sessions()).collect();
-        view.check_offer(ui.ctx(), project.clone(), open, in_use());
+        // Las sesiones y carpetas solo cuando toca mirar (no en cada fotograma).
+        let due = view
+            .offer_checked
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(60));
+        if due || view.offer_rx.is_some() {
+            let open: Vec<String> = workspaces.iter().flat_map(|w| w.sessions()).collect();
+            view.check_offer(ui.ctx(), project.clone(), open, in_use());
+        }
         let others = view
             .list
             .as_ref()
