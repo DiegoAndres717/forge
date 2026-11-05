@@ -328,6 +328,30 @@ async function stopAdvisor($: EngineInterface) {
   await update($, active, ({ advisor: _gone, ...rest }) => rest).catch(() => undefined)
 }
 
+/** A string argument of a tool call (`file_path`, `command`…), if it has one. */
+const arg = (e: object, key: string) => {
+  const value = (e as Record<string, unknown>)[key]
+  return typeof value === 'string' ? value : undefined
+}
+
+/** Tells Forge's live board what a loop is doing (main: agent_id ''). Fire and forget. */
+function activity($: EngineInterface, event: { kind: string; agent_id: string; name?: string; tool?: string; target?: string; result?: string }) {
+  void forge($, ['agent-activity'], JSON.stringify({ ...event, origin: 'Claude Code' }), 5_000)
+}
+
+// After an edit, Forge looks whether main changed the files this loop is touching (it
+// says so once per change). At most once a minute per loop: each look runs git.
+const MAIN_CHECK_EVERY_MS = 60_000
+const mainChecked: Record<string, number> = {}
+async function mainCheck($: EngineInterface, key: string) {
+  const now = Date.now()
+  if (now - (mainChecked[key] ?? 0) < MAIN_CHECK_EVERY_MS) return null
+  mainChecked[key] = now
+  const out = await forge($, ['work-status', '--main-check'], undefined, 3_000)
+  const text = out && out.exitCode === 0 ? out.stdout.trim() : ''
+  return text || null
+}
+
 /** A command answered by Forge's CLI output (no model call). */
 async function run($: EngineInterface, args: string[]) {
   const out = await forge($, args)
@@ -522,10 +546,10 @@ export const register: Register = on => {
     const id = result.agentId
     if (id) {
       const name = e.subagentType.replace(/^forge:/, '').toLowerCase()
+      const task = e.description ? `${name}: ${e.description}` : name
       // Only cosmetic: a failure here must not spawn the subagent a second time.
-      await update($, tasks, all => ({ ...all, [id]: e.description ? `${name}: ${e.description}` : name })).catch(
-        () => undefined,
-      )
+      await update($, tasks, all => ({ ...all, [id]: task })).catch(() => undefined)
+      activity($, { kind: 'start', agent_id: id, name: task })
     }
     return result
   }).catch(($, e, next) => next(e))
@@ -564,7 +588,17 @@ export const register: Register = on => {
   // The main loop searching and reading file after file itself: one reminder (that only
   // the model reads) to hand the rest to forge:explorer. Counted per message of yours.
   on('tool.call', async ($, e, next) => {
+    // Forge's live board: what this loop is doing right now.
+    const target = arg(e, 'file_path') ?? arg(e, 'notebook_path') ?? arg(e, 'command') ?? arg(e, 'path') ?? arg(e, 'pattern')
+    activity($, { kind: 'tool', agent_id: e.agentId ?? '', tool: e.tool, target })
     const result = await next(e)
+    const warning = !('deny' in result) && EDIT_TOOLS.has(e.tool) ? await mainCheck($, e.agentId ?? 'main') : null
+    const answer = await nudge(result)
+    if (!warning || 'deny' in answer) return answer
+    return { ...answer, context: [...(answer.context ?? []), warning] }
+
+    // The reminders only the model reads (delegate, advisor), as before.
+    async function nudge(result: Awaited<ReturnType<typeof next>>) {
     if (!('deny' in result) && explores(e)) {
       // Only the band depends on this: a failure never touches the call.
       await countRead($, Boolean(e.agentId))
@@ -598,6 +632,7 @@ export const register: Register = on => {
         'Forge: you have searched or read several files yourself in a row. Delegate the rest of this exploration to forge:explorer (cheaper, and it keeps your context clean); keep doing the editing yourself.',
       ],
     }
+    }
   })
 
   // Before ending a turn that edited code, the model is sent once to the advisor. The
@@ -615,6 +650,12 @@ export const register: Register = on => {
     const result = await next(e)
     const key = e.agentId ?? 'main'
     await update($, active, ({ [key]: _done, ...rest }) => rest)
+    // A subagent finished: the board keeps it a while with its answer. (The main loop's
+    // end reaches it through `agent-event stop`.)
+    if (e.agentId) {
+      const answer = e.answer.split('\n').find(line => line.trim())?.trim().slice(0, 140) ?? e.reason
+      activity($, { kind: 'stop', agent_id: e.agentId, result: answer })
+    }
     if (e.usage) {
       // Cache reads cost a fraction of new tokens: counted apart so the band is honest.
       const fresh = e.usage.input_tokens + e.usage.output_tokens + e.usage.cache_creation_input_tokens
