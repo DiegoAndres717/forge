@@ -643,6 +643,21 @@ pub fn record_of<'a>(wt: &Worktree, records: &'a [Record]) -> Option<&'a Record>
     records.iter().find(|r| same_path(&r.path, &wt.path))
 }
 
+/// Lo que Forge propone limpiar: worktrees registrados que la limpieza quitaría y cuya rama
+/// ya está fusionada o cuya terminal (`open`: las sesiones abiertas) ya se cerró.
+pub fn offers(plan: &[Cleanup], records: &[Record], open: &[String]) -> Vec<Cleanup> {
+    plan.iter()
+        .filter(|c| !matches!(c.action, Action::Keep(_)))
+        .filter(|c| {
+            record_of(&c.worktree, records).is_some_and(|r| {
+                c.worktree.merged == Some(true)
+                    || r.session.as_ref().is_some_and(|s| !open.contains(s))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
 /// La carpeta `.git` común del repositorio en `dir` (la misma desde cualquier worktree).
 fn common_dir(dir: &Path) -> Option<PathBuf> {
     let out = git(
@@ -888,6 +903,51 @@ mod tests {
             None
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn forge_offers_to_clean_registered_worktrees_once_merged_or_orphaned() {
+        let wt = |path: &str, merged| Worktree {
+            path: PathBuf::from(path),
+            branch: Some(path.into()),
+            merged: Some(merged),
+            ..Default::default()
+        };
+        let cleanup = |w: Worktree, action| Cleanup {
+            worktree: w,
+            action,
+            result: None,
+        };
+        let remove = Action::Remove {
+            delete_branch: false,
+        };
+        let plan = [
+            cleanup(wt("/w/merged", true), remove),
+            cleanup(wt("/w/closed", false), remove),
+            cleanup(wt("/w/open", false), remove),
+            cleanup(wt("/w/dirty", true), Action::Keep(Keep::Dirty)),
+            cleanup(wt("/w/unregistered", true), remove),
+        ];
+        let record = |path: &str, session: &str| Record {
+            path: PathBuf::from(path),
+            session: Some(session.into()),
+            ..Default::default()
+        };
+        let records = [
+            record("/w/merged", "1:1"),
+            record("/w/closed", "1:2"),
+            record("/w/open", "1:3"),
+            record("/w/dirty", "1:4"),
+        ];
+        let open = ["1:1".to_string(), "1:3".to_string()];
+        let offered: Vec<_> = offers(&plan, &records, &open)
+            .into_iter()
+            .map(|c| c.worktree.path)
+            .collect();
+        assert_eq!(
+            offered,
+            [PathBuf::from("/w/merged"), PathBuf::from("/w/closed")]
+        );
     }
 
     #[test]

@@ -20,6 +20,13 @@ pub(super) struct WorktreesView {
     pub(super) applied: Option<Vec<Cleanup>>,
     error: Option<String>,
     pub(super) loading: Option<Receiver<Loaded>>,
+    /// Worktrees de `forge worktree new` que Forge propone limpiar (rama fusionada o sin la
+    /// terminal que los pidió): solo lo propone; la limpieza pasa por la vista previa.
+    pub(super) offer: Vec<Cleanup>,
+    offer_rx: Option<Receiver<Vec<Cleanup>>>,
+    pub(super) offer_checked: Option<Instant>,
+    /// Carpeta de los worktrees de Forge (`None`: la de siempre; las pruebas usan otra).
+    pub(super) root: Option<PathBuf>,
 }
 
 /// ¿La limpieza hace algo con él?
@@ -57,12 +64,80 @@ impl WorktreesView {
             let error = match loaded {
                 Loaded::List(r) => r.map(|l| self.list = Some(l)).err(),
                 Loaded::Preview(r) => r.map(|p| self.preview = Some(p)).err(),
-                Loaded::Applied(r) => r.map(|p| self.applied = Some(p)).err(),
+                Loaded::Applied(r) => {
+                    // Lo propuesto se vuelve a mirar ya (lo que se estuviera mirando es de antes).
+                    self.offer_rx = None;
+                    self.offer_checked = None;
+                    r.map(|p| self.applied = Some(p)).err()
+                }
             };
             if error.is_some() {
                 self.error = error;
             }
         }
+    }
+
+    /// La vista previa de la limpieza (y la lista, si aún no está).
+    fn start_preview(&mut self, ctx: &egui::Context, repo: PathBuf, in_use: Vec<PathBuf>) {
+        self.applied = None;
+        let list = self.list.is_none();
+        self.spawn(ctx, move |send| {
+            if list {
+                send(Loaded::List(worktrees::list(&repo)));
+            }
+            let in_use = [in_use, worktrees::process_cwds()].concat();
+            send(Loaded::Preview(worktrees::plan(
+                &repo,
+                std::slice::from_ref(&repo),
+                &in_use,
+            )));
+        });
+    }
+
+    /// Cada minuto, en otro hilo: los registrados que la limpieza ya quitaría y cuya rama
+    /// está fusionada o cuya terminal se cerró (`open`: las sesiones abiertas).
+    fn check_offer(
+        &mut self,
+        ctx: &egui::Context,
+        repo: PathBuf,
+        open: Vec<String>,
+        in_use: Vec<PathBuf>,
+    ) {
+        if let Some(rx) = &self.offer_rx {
+            match rx.try_recv() {
+                Ok(offer) => self.offer = offer,
+                Err(std::sync::mpsc::TryRecvError::Empty) => return,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {}
+            }
+            self.offer_rx = None;
+        }
+        if self
+            .offer_checked
+            .is_some_and(|t| t.elapsed() < Duration::from_secs(60))
+        {
+            return;
+        }
+        self.offer_checked = Some(Instant::now());
+        let root = self.root.clone().or_else(worktrees::root);
+        let (tx, rx) = channel();
+        self.offer_rx = Some(rx);
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            let records = root
+                .map(|r| worktrees::records(&repo, &r))
+                .unwrap_or_default();
+            // Sin registrados no hace falta mirar nada más (ni los procesos).
+            let offer = if records.is_empty() {
+                Vec::new()
+            } else {
+                let in_use = [in_use, worktrees::process_cwds()].concat();
+                worktrees::plan(&repo, std::slice::from_ref(&repo), &in_use)
+                    .map(|plan| worktrees::offers(&plan, &records, &open))
+                    .unwrap_or_default()
+            };
+            let _ = tx.send(offer);
+            ctx.request_repaint();
+        });
     }
 }
 
@@ -83,6 +158,8 @@ impl App {
             };
         }
         view.poll();
+        let open: Vec<String> = workspaces.iter().flat_map(|w| w.sessions()).collect();
+        view.check_offer(ui.ctx(), project.clone(), open, in_use());
         let others = view
             .list
             .as_ref()
@@ -108,12 +185,26 @@ impl App {
                 });
             }
         }
+        let small = |ui: &mut egui::Ui, text: String, color| {
+            ui.add(egui::Label::new(RichText::new(text).size(11.0).color(color)).wrap())
+        };
+        // Lo propone, no lo borra: el clic lleva a la vista previa de siempre.
+        if !view.offer.is_empty() && view.preview.is_none() && view.loading.is_none() {
+            let names: Vec<String> = view.offer.iter().map(|c| c.worktree.label()).collect();
+            let text = tr!("Forge propone limpiar: {p}", p = names.join(", "));
+            let offer = small(ui, text.to_string(), theme::ORANGE)
+                .interact(egui::Sense::click())
+                .on_hover_text(tr!(
+                    "Worktrees creados con forge worktree new cuya rama ya está fusionada o cuya terminal se cerró. Clic: vista previa de la limpieza (no borra nada)"
+                ));
+            if offer.clicked() {
+                view.open = true;
+                view.start_preview(ui.ctx(), project.clone(), in_use());
+            }
+        }
         if !view.open {
             return;
         }
-        let small = |ui: &mut egui::Ui, text: String, color| {
-            ui.add(egui::Label::new(RichText::new(text).size(11.0).color(color)).wrap());
-        };
         if let Some(e) = &view.error {
             small(ui, e.clone(), theme::RED);
         }
@@ -145,16 +236,7 @@ impl App {
         if view.loading.is_some() {
             ui.spinner();
         } else if theme::secondary(ui, tr!("Vista previa de limpieza")).clicked() {
-            let (repo, in_use) = (project.clone(), in_use());
-            view.applied = None;
-            view.spawn(ui.ctx(), move |send| {
-                let in_use = [in_use, worktrees::process_cwds()].concat();
-                send(Loaded::Preview(worktrees::plan(
-                    &repo,
-                    std::slice::from_ref(&repo),
-                    &in_use,
-                )));
-            });
+            view.start_preview(ui.ctx(), project.clone(), in_use());
         }
         if let Some(plan) = &view.preview {
             for c in plan.iter().filter(|c| !c.worktree.main) {
@@ -176,6 +258,7 @@ impl App {
                 && theme::secondary(ui, tr!("Aplicar limpieza")).clicked()
             {
                 view.preview = None;
+                view.offer.clear();
                 let (repo, in_use) = (project.clone(), in_use());
                 view.spawn(ui.ctx(), move |send| {
                     // Se vuelve a mirar todo: solo se hace lo que la vista previa mostró y

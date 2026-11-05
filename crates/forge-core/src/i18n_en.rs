@@ -3133,4 +3133,12 @@ pub const EN: &[(&str, &str)] = &[
         "Worktree de {b} listo. Al terminar: git worktree remove {p} (o la limpieza de Forge).",
         "Worktree for {b} ready. When done: git worktree remove {p} (or Forge's cleanup).",
     ),
+    (
+        "Forge propone limpiar: {p}",
+        "Forge suggests cleaning up: {p}",
+    ),
+    (
+        "Worktrees creados con forge worktree new cuya rama ya está fusionada o cuya terminal se cerró. Clic: vista previa de la limpieza (no borra nada)",
+        "Worktrees made with forge worktree new whose branch is merged or whose terminal was closed. Click: cleanup preview (deletes nothing)",
+    ),
 ];

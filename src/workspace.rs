@@ -1752,6 +1752,13 @@ impl Workspace {
         }
     }
 
+    /// Las sesiones de sus terminales, como `FORGE_SESSION_ID` («pid de la app:terminal»).
+    pub fn sessions(&self) -> impl Iterator<Item = String> + '_ {
+        self.panels
+            .keys()
+            .map(|id| forge_core::store::session_id_for_panel(std::process::id(), *id))
+    }
+
     /// La carpeta del proyecto y las de sus terminales (un worktree en uso no se quita).
     pub fn working_dirs(&self) -> Vec<PathBuf> {
         let shells = self.panels.values().filter_map(|p| match &p.content {
