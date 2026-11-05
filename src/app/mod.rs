@@ -43,6 +43,7 @@ mod memory_panel;
 mod menu;
 mod notify;
 mod palette;
+mod parallel_launch;
 mod project_forms;
 mod semantic;
 mod settings;
@@ -298,6 +299,9 @@ enum UiCmd {
     /// Mandar los comentarios abiertos de una fase al agente elegido para que los corrija:
     /// (plan, fase, id del agente).
     FixPhase(i64, usize, String),
+    /// Lanzar fases de un plan en paralelo, una terminal y un worktree por fase:
+    /// (plan, fases desde 0, id del agente).
+    LaunchParallel(i64, Vec<usize>, String),
     /// Proponer qué recordar de los comentarios resueltos de una fase: (plan, fase).
     LearnOpen(IdeasTarget, i64, usize),
     /// Guardar lo marcado en la memoria (y dar por vistas las demás propuestas).
@@ -1224,6 +1228,9 @@ impl App {
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
             UiCmd::ReviewPhase(id, phase, agent) => self.review_phase(ctx, id, phase, &agent, area),
             UiCmd::FixPhase(id, phase, agent) => self.fix_phase(ctx, id, phase, &agent, area),
+            UiCmd::LaunchParallel(id, phases, agent) => {
+                self.launch_parallel(ctx, id, &phases, &agent, area)
+            }
             UiCmd::ToggleMemory
             | UiCmd::NewNote
             | UiCmd::MemorySave
@@ -1829,8 +1836,10 @@ impl eframe::App for App {
         if let Some(i) = self.active {
             let planner = self.planner(i).map(|(_, name)| name);
             let reviewers = self.reviewers(i);
+            let launchers = self.launchers(i);
             let ws = &mut self.workspaces[i];
             ws.ideas.reviewers = reviewers;
+            ws.ideas.launchers = launchers;
             ws.files.autosave = self.autosave;
             ws.tabs_below = self.tabs_below;
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {

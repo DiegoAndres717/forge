@@ -4788,3 +4788,196 @@ fn running_agents_show_what_they_do_their_overlaps_and_honest_gaps() {
     h.get_by_label("sin datos en vivo para este agente");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Un plan con fases para lanzar en paralelo, en un repositorio con un commit y su carpeta
+/// de worktrees dentro (ignorada): todo se borra con el repositorio al terminar.
+fn parallel_plan(name: &str) -> (PathBuf, PathBuf) {
+    let dir = project(name);
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} fase:\"\n"
+        ),
+    )
+    .unwrap();
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git add -A && git commit -qm inicio && echo .forge-wt/ >> .git/info/exclude",
+        ])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let root = dir.join(".forge-wt");
+    (dir, root)
+}
+
+/// Plan #194, fase 4: «Lanzar fases en paralelo» desde el panel de planes abre un agente por
+/// fase, cada uno en su worktree (registrado con quién lo pidió, la fase y su terminal), con
+/// el mensaje de su fase, y deja cada fase en curso con su rama. Avisa (sin bloquear) de las
+/// fases que nombran los mismos archivos, y dice por qué una fase sin rama no puede ir.
+#[test]
+fn the_plans_panel_launches_phases_in_parallel_each_in_its_own_worktree() {
+    use forge_core::ideas::{Phase, Task};
+    let _serial = serial();
+    let (dir, root) = parallel_plan("parallel");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
+    // Tras la detección de fondo (si no, pisa lo simulado con «no instalado»).
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let fake = if cfg!(windows) { "Write-Host" } else { "echo" };
+    for program in [fake, "gemini"] {
+        h.state().agents.lock().unwrap().insert(
+            program.into(),
+            forge_core::agents::Detection {
+                path: Some(format!("/bin/{program}").into()),
+                version: None,
+            },
+        );
+    }
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let phase = |title: &str, branch: Option<&str>, task: &str| Phase {
+        title: title.into(),
+        branch: branch.map(String::from),
+        tasks: vec![Task {
+            text: task.into(),
+            done: false,
+        }],
+        ..Default::default()
+    };
+    let plan = h
+        .state_mut()
+        .db(|s| {
+            s.add_plan(
+                Some(&dir),
+                "Recibos",
+                "",
+                &[
+                    phase("Webhook", Some("feat/webhook"), "Recibir en src/hook.rs"),
+                    phase("Panel", Some("feat/panel"), "Mostrar lo de src/hook.rs"),
+                    phase("Docs", None, "Escribir la guía"),
+                ],
+                "x",
+            )
+        })
+        .unwrap();
+    h.key_press_modifiers(CMD_SHIFT, Key::I);
+    wait_until(&mut h, "plan cargado", |a| !ws(a).ideas.items.is_empty());
+    h.run_steps(3);
+    h.get_by_label_contains("Lanzar fases en paralelo").click();
+    h.run_steps(3);
+    // La fase sin rama no se puede elegir y dice por qué; las otras dos, elegidas de entrada.
+    h.get_by_label_contains("La fase 3 no tiene rama");
+    h.get_by_label_contains("Las fases 1 y 2 nombran los mismos archivos (src/hook.rs)");
+    // Un agente sin mensaje inicial lo dice en vez de no aparecer sin más.
+    h.get_by_label_contains("Gemini CLI no admite empezar con un mensaje");
+    h.get_by_label_contains("Lanzar con Agente de prueba")
+        .click();
+    wait_until(&mut h, "un agente por fase", |a| ws(a).panel_count() == 3);
+
+    let records = forge_core::worktrees::records(&dir, &root);
+    let branches: Vec<&str> = records.iter().map(|r| r.branch.as_str()).collect();
+    assert_eq!(branches, ["feat/panel", "feat/webhook"]);
+    let sessions: Vec<String> = ws(h.state()).sessions().collect();
+    for (r, n) in records.iter().zip([2, 1]) {
+        assert!(r.path.join("main.ts").is_file(), "worktree de {}", r.branch);
+        assert_eq!(r.origin.as_deref(), Some("Agente de prueba"));
+        assert_eq!(r.phase, Some(format!("plan #{plan}, fase {n}")));
+        let session = r.session.as_deref().unwrap();
+        assert!(sessions.iter().any(|s| s == session), "{session}");
+    }
+    // Cada terminal, en su worktree.
+    wait_until(&mut h, "cada terminal en su worktree", |a| {
+        let cwds: Vec<PathBuf> = ws(a)
+            .state()
+            .panels
+            .values()
+            .filter(|p| p.agent.as_deref() == Some("fake"))
+            .map(|p| forge_core::canonical(&p.cwd))
+            .collect();
+        records
+            .iter()
+            .all(|r| cwds.contains(&forge_core::canonical(&r.path)))
+    });
+    // Cada agente recibió el mensaje de su fase.
+    wait_until(&mut h, "el mensaje de la fase", |a| {
+        ws(a).shell_text().contains("You are working on phase")
+    });
+    let idea = h
+        .state_mut()
+        .db(|s| s.get_idea(Some(&dir), plan))
+        .flatten()
+        .unwrap();
+    for (n, branch) in [(0, "feat/webhook"), (1, "feat/panel")] {
+        assert_eq!(idea.phases[n].status, "doing");
+        assert_eq!(idea.phases[n].branch.as_deref(), Some(branch));
+        assert_eq!(idea.phases[n].worked_by.as_deref(), Some("fake"));
+    }
+    assert_eq!(
+        idea.phases[2].status, "pending",
+        "la fase sin rama no se toca"
+    );
+    drop(h); // cierra las terminales antes de borrar sus carpetas
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Lo que no se puede lanzar se dice y no crea nada: una fase sin rama, y un agente que no
+/// admite empezar con un mensaje (no recibiría su fase).
+#[test]
+fn launching_in_parallel_refuses_a_phase_without_a_branch_or_an_agent_without_a_prompt() {
+    use forge_core::ideas::Phase;
+    let _serial = serial();
+    let (dir, root) = parallel_plan("parallel-refused");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
+    let mut uno = Phase::new("Uno");
+    uno.branch = Some("feat/uno".into());
+    let mut dos = Phase::new("Dos");
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&dir), "P", "", &[uno.clone(), dos.clone()], "x"))
+        .unwrap();
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::LaunchParallel(plan, vec![0, 1], "fake".into()),
+        area,
+    );
+    let error = h.state_mut().error.take().unwrap_or_default();
+    assert!(error.contains("La fase 2 no tiene rama"), "{error}");
+
+    dos.branch = Some("feat/dos".into());
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&dir), "Q", "", &[uno, dos], "x"))
+        .unwrap();
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::LaunchParallel(plan, vec![0, 1], "gemini".into()),
+        area,
+    );
+    let error = h.state_mut().error.take().unwrap_or_default();
+    assert!(
+        error.contains("Gemini CLI no admite empezar con un mensaje"),
+        "{error}"
+    );
+    assert!(forge_core::worktrees::records(&dir, &root).is_empty());
+    assert!(!root.exists(), "no se creó ningún worktree");
+    assert_eq!(ws(h.state()).panel_count(), 1);
+    let idea = h
+        .state_mut()
+        .db(|s| s.get_idea(Some(&dir), plan))
+        .flatten()
+        .unwrap();
+    assert!(idea.phases.iter().all(|p| p.status == "pending"));
+    drop(h);
+    let _ = std::fs::remove_dir_all(dir);
+}
