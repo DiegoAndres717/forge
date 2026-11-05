@@ -385,7 +385,7 @@ pub struct Request {
     pub pid: u32,
 }
 
-fn alive(pid: u32) -> bool {
+pub(crate) fn alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         // SAFETY: kill con señal 0 solo comprueba que el proceso existe.
@@ -594,10 +594,40 @@ pub fn guard_check_main(name: &str, args: Vec<String>) -> ! {
     std::process::exit(0)
 }
 
+/// ¿Lo lanza un agente, sin la salida `FORGE_ALLOW_WORKTREE=1`? Lo que escribe la persona
+/// en su terminal no se frena.
+fn agent_without_escape() -> bool {
+    std::env::var_os("FORGE_ORIGIN").is_some()
+        && std::env::var(crate::worktrees::ALLOW).as_deref() != Ok("1")
+}
+
+/// `git <args>` de un agente que crea un worktree o un clon suelto del proyecto: el aviso.
+fn stray_copy_by_agent(args: &[String], cwd: &Path, project: &Path) -> Option<String> {
+    agent_without_escape()
+        .then(|| crate::worktrees::stray_copy(args, cwd, project))
+        .flatten()
+}
+
+/// Como `stray_copy_by_agent`, en una línea de shell (hooks previos y mod de Claude Code).
+pub fn stray_copy_in_agent_command(command: &str, cwd: &Path, project: &Path) -> Option<String> {
+    agent_without_escape()
+        .then(|| crate::worktrees::stray_copy_in_command(command, cwd, project))
+        .flatten()
+}
+
 /// Si el comando es peligroso, pide autorización (y sale con 126 si se deniega).
 fn guard(name: &str, args: &[String]) {
     let cwd = std::env::current_dir().unwrap_or_default();
     let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+    // Un agente no crea worktrees ni clones sueltos del proyecto: se le dice cómo hacerlo.
+    if name == "git"
+        && let Some(why) = project
+            .as_deref()
+            .and_then(|p| stray_copy_by_agent(args, &cwd, p))
+    {
+        eprintln!("{why}");
+        std::process::exit(126);
+    }
     let dangerous = classify(name, args, &cwd, project.as_deref()).is_some();
     // Solo en este camino poco frecuente se lee el idioma (`git status` no paga la base) y
     // se vuelve a clasificar para que el motivo salga en ese idioma.
@@ -729,7 +759,8 @@ fn ask_person(
 /// Hook previo de un agente (`forge secret --agent-hook <formato>`, stdin con la llamada): si va
 /// a tocar un archivo con secretos, pregunta a la persona como los lectores de Unix, y si
 /// no lo permite contesta «deny» en el formato del agente (`codex`: el de Claude Code;
-/// `agy` y `gemini`: `{"decision": …}`). Siempre sale con 0: con otro código, Codex y
+/// `agy` y `gemini`: `{"decision": …}`). Un worktree o un clon suelto del proyecto se
+/// deniega sin preguntar (ver `worktrees::stray_copy`). Siempre sale con 0: con otro código, Codex y
 /// Gemini lo tomarían por un fallo del hook y dejarían seguir la llamada.
 pub fn secret_hook_main(format: &str) -> ! {
     let mut input = String::new();
@@ -742,33 +773,54 @@ pub fn secret_hook_main(format: &str) -> ! {
         .map(PathBuf::from)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_default();
+    // Un worktree o un clon suelto del proyecto se deniega sin preguntar: el motivo le dice
+    // al agente cómo hacerlo (`forge worktree new`).
+    let args = call
+        .get("tool_input")
+        .or_else(|| call.pointer("/toolCall/args"));
+    let shell = ["command", "CommandLine", "cmd"]
+        .iter()
+        .find_map(|k| match args?.get(*k)? {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Array(words) => Some(
+                words
+                    .iter()
+                    .filter_map(|w| w.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        });
+    let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+    let stray = shell
+        .zip(project)
+        .and_then(|(c, p)| stray_copy_in_agent_command(&c, &cwd, &p));
     // Los hooks de agy y Gemini son globales: fuera de una terminal de agente de Forge no hacen nada.
     let found = std::env::var_os("FORGE_ORIGIN").and_then(|_| secret_in_tool_call(&call, &cwd));
-    let denied = found.and_then(|reason| {
-        crate::i18n::init_from_store();
-        // En la ventana de Forge, el comando si lo hay; si no, la herramienta.
-        let args = call
-            .get("tool_input")
-            .or_else(|| call.pointer("/toolCall/args"));
-        let command = ["command", "CommandLine", "cmd"]
-            .iter()
-            .find_map(|k| args?.get(*k)?.as_str())
-            .or_else(|| call["toolCall"]["name"].as_str())
-            .or_else(|| call["tool_name"].as_str())
-            .unwrap_or("tool")
-            .to_string();
-        // Sin la app no se pregunta en la terminal: es la del agente, y le quitaría la entrada.
-        if std::env::var_os("FORGE_APPROVALS").is_none() {
-            return Some(format!(
-                "Forge: blocked ({reason}): Forge is not open to authorize it"
-            ));
-        }
-        let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
-        match ask_person(&command, reason.clone(), cwd, project) {
-            Ok(true) => None,
-            Ok(false) => Some(format!("Forge: the user denied it ({reason})")),
-            Err(e) => Some(format!("Forge: blocked ({reason}): {e}")),
-        }
+    let denied = stray.or_else(|| {
+        found.and_then(|reason| {
+            crate::i18n::init_from_store();
+            // En la ventana de Forge, el comando si lo hay; si no, la herramienta.
+            let command = ["command", "CommandLine", "cmd"]
+                .iter()
+                .find_map(|k| args?.get(*k)?.as_str())
+                .or_else(|| call["toolCall"]["name"].as_str())
+                .or_else(|| call["tool_name"].as_str())
+                .unwrap_or("tool")
+                .to_string();
+            // Sin la app no se pregunta en la terminal: es la del agente, y le quitaría la entrada.
+            if std::env::var_os("FORGE_APPROVALS").is_none() {
+                return Some(format!(
+                    "Forge: blocked ({reason}): Forge is not open to authorize it"
+                ));
+            }
+            let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+            match ask_person(&command, reason.clone(), cwd, project) {
+                Ok(true) => None,
+                Ok(false) => Some(format!("Forge: the user denied it ({reason})")),
+                Err(e) => Some(format!("Forge: blocked ({reason}): {e}")),
+            }
+        })
     });
     let reply = match (format, denied) {
         ("codex", Some(why)) => serde_json::json!({"hookSpecificOutput": {

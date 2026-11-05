@@ -409,6 +409,9 @@ pub fn apply(repo: &Path, plan: &mut [Cleanup]) {
             }
             Action::Keep(_) => continue,
         };
+        if removed.is_ok() {
+            forget(&c.worktree.path);
+        }
         c.result = Some(removed.and_then(|()| {
             match (&c.worktree.branch, &c.worktree.head) {
                 // Como `branch -d`, pero vale con squash (ya comprobado): solo si la rama
@@ -424,10 +427,650 @@ pub fn apply(repo: &Path, plan: &mut [Cleanup]) {
     }
 }
 
+// ------------------------------------------------------------------ worktrees de Forge
+//
+// Varios agentes en paralelo creaban worktrees y clones sueltos (en /tmp, .claude/worktrees,
+// carpetas hermanas) que quedaban como basura. `forge worktree new` los pone todos en un
+// mismo sitio, `<datos de Forge>/worktrees/<proyecto>/<rama>`, y apunta quién lo pidió en
+// `<rama>.json` al lado (fuera del worktree: dentro lo dejaría con cambios). Guard frena
+// los `git worktree add` y `git clone` a mano del propio proyecto.
+
+/// Con `FORGE_ALLOW_WORKTREE=1` un agente puede crear a mano un worktree o un clon del
+/// proyecto (casos legítimos: probar un clon limpio, un bisect…).
+pub const ALLOW: &str = "FORGE_ALLOW_WORKTREE";
+
+/// Un worktree creado con `forge worktree new` y quién lo pidió (lo que hubiera en el
+/// entorno; vacío si no se sabe).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Record {
+    pub path: PathBuf,
+    pub branch: String,
+    /// Raíz del worktree principal del repositorio.
+    pub project: PathBuf,
+    /// El agente (`FORGE_ORIGIN`).
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// La terminal (`FORGE_SESSION_ID`: «pid de la app:terminal»).
+    #[serde(default)]
+    pub session: Option<String>,
+    /// La fase del plan cuya rama es esta («plan #194, fase 2»).
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+impl Record {
+    /// «Claude Code · plan #194, fase 2», o vacío si no se sabe quién lo pidió.
+    pub fn requester(&self) -> String {
+        [&self.origin, &self.phase]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+/// `<datos de Forge>/worktrees`, junto a la base de datos (`FORGE_DB` la mueve).
+pub fn root() -> Option<PathBuf> {
+    Some(
+        crate::store::Store::default_path()?
+            .parent()?
+            .join("worktrees"),
+    )
+}
+
+/// `feat/x` → `feat-x`: un nombre de carpeta válido en cualquier sistema.
+fn folder_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Raíz del worktree principal (la carpeta del proyecto, aunque se pida desde otro worktree).
+pub fn main_root(repo: &Path) -> Result<PathBuf, String> {
+    let out = git(repo, &["worktree", "list", "--porcelain", "-z"])?;
+    parse(&out)
+        .into_iter()
+        .next()
+        .map(|w| w.path)
+        .ok_or_else(|| tr!("no es un repositorio Git").to_string())
+}
+
+/// Carpeta de los worktrees de `project` (raíz del principal) dentro de `root`.
+fn project_dir(project: &Path, root: &Path) -> PathBuf {
+    let name = project.file_name().unwrap_or_default().to_string_lossy();
+    root.join(folder_name(&name))
+}
+
+/// El registro de un worktree, al lado de su carpeta (`feat-x` → `feat-x.json`).
+fn record_file(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy();
+    Some(path.with_file_name(format!("{name}.json")))
+}
+
+fn read_record(file: &Path) -> Option<Record> {
+    serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
+}
+
+/// Crea el worktree de `branch` en `root/<proyecto>/<rama>` (y la rama, desde `from` o la
+/// principal, si no existe) y lo registra. Devuelve su carpeta.
+pub fn create(
+    repo: &Path,
+    branch: &str,
+    from: Option<&str>,
+    root: &Path,
+    who: Record,
+) -> Result<PathBuf, String> {
+    if branch.starts_with('-') || git(repo, &["check-ref-format", "--branch", branch]).is_err() {
+        return Err(tr!("nombre de rama no válido: {b}", b = branch).to_string());
+    }
+    // Un `--from` con guion lo leería git como una opción.
+    if let Some(f) = from.filter(|f| f.starts_with('-')) {
+        return Err(tr!("nombre de rama no válido: {b}", b = f).to_string());
+    }
+    let project = main_root(repo)?;
+    let path = project_dir(&project, root).join(folder_name(branch));
+    if path.exists() {
+        // Un agente que lo vuelve a pedir: el mismo, sin error.
+        let same = record_file(&path)
+            .and_then(|f| read_record(&f))
+            .is_some_and(|r| r.branch == branch);
+        return if same {
+            Ok(path)
+        } else {
+            Err(tr!("ya existe {p}", p = path.display()).to_string())
+        };
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let target = path.to_string_lossy().into_owned();
+    // Solo una rama (local o en origin): una etiqueta o un hash darían un HEAD separado.
+    let exists = [
+        format!("refs/heads/{branch}"),
+        format!("refs/remotes/origin/{branch}"),
+    ]
+    .iter()
+    .any(|r| git(&project, &["rev-parse", "--verify", "-q", r]).is_ok());
+    let args: Vec<String> = match from {
+        // La rama ya existe (local o en origin): git la saca tal cual.
+        None if exists => vec!["worktree".into(), "add".into(), target, branch.into()],
+        _ => {
+            let base = match from {
+                Some(f) => f.to_string(),
+                None => crate::git::main_branch(&project)
+                    .ok_or_else(|| tr!("no se encontró la rama principal").to_string())?,
+            };
+            // Sin seguir a la base (origin/main): la limpieza la tomaría por ya subida.
+            [
+                "worktree",
+                "add",
+                "--no-track",
+                "-b",
+                branch,
+                &target,
+                &base,
+            ]
+            .map(String::from)
+            .to_vec()
+        }
+    };
+    let out = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(&project)
+        // Los enlaces de Guard dejan pasar este: lo crea Forge, en su sitio.
+        .env(ALLOW, "1")
+        .output()
+        .map_err(|e| tr!("no se pudo ejecutar git: {e}", e = e).to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let record = Record {
+        path: path.clone(),
+        branch: branch.to_string(),
+        project,
+        created_at: crate::store::now(),
+        ..who
+    };
+    // El worktree ya está: sin el registro solo se pierde quién lo pidió, no se falla.
+    if let (Some(file), Ok(json)) = (record_file(&path), serde_json::to_string_pretty(&record)) {
+        let _ = std::fs::write(file, json);
+    }
+    Ok(path)
+}
+
+/// Los worktrees de `repo` creados con `forge worktree new`.
+pub fn records(repo: &Path, root: &Path) -> Vec<Record> {
+    let Ok(project) = main_root(repo) else {
+        return Vec::new();
+    };
+    let project = crate::canonical(&project);
+    let Ok(entries) = std::fs::read_dir(project_dir(&project, root)) else {
+        return Vec::new();
+    };
+    let mut list: Vec<Record> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter_map(|p| read_record(&p))
+        .filter(|r| crate::canonical(&r.project) == project)
+        .collect();
+    list.sort_by(|a, b| a.path.cmp(&b.path));
+    list
+}
+
+/// Borra el registro de un worktree ya quitado: solo si de verdad es el de Forge para esa
+/// carpeta (al lado de un worktree cualquiera puede haber un `.json` del usuario).
+fn forget(path: &Path) {
+    if let Some(file) = record_file(path)
+        && read_record(&file).is_some_and(|r| same_path(&r.path, path))
+    {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
+/// ¿La misma carpeta? También si ya no existe (se compara la carpeta que la contiene):
+/// `/var` y `/private/var` en macOS, `C:\` y `\\?\C:\` en Windows.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let key = |p: &Path| {
+        p.parent()
+            .map(crate::canonical)
+            .unwrap_or_default()
+            .join(p.file_name().unwrap_or_default())
+    };
+    key(a) == key(b)
+}
+
+/// El registro de `wt`, si lo tiene.
+pub fn record_of<'a>(wt: &Worktree, records: &'a [Record]) -> Option<&'a Record> {
+    records.iter().find(|r| same_path(&r.path, &wt.path))
+}
+
+/// Lo que Forge propone limpiar: worktrees registrados que la limpieza quitaría y cuya rama
+/// ya está fusionada o cuya terminal (`open`: las sesiones abiertas) ya se cerró.
+pub fn offers(plan: &[Cleanup], records: &[Record], open: &[String]) -> Vec<Cleanup> {
+    plan.iter()
+        .filter(|c| !matches!(c.action, Action::Keep(_)))
+        .filter(|c| {
+            record_of(&c.worktree, records).is_some_and(|r| {
+                c.worktree.merged == Some(true)
+                    || r.session.as_deref().is_some_and(|s| closed(s, open))
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// ¿Se cerró la terminal de `session` («pid de la app:terminal»)? De esta app, si no está
+/// en `open`; de otra (otra ventana, o antes de reiniciar), solo si esa app ya no corre.
+fn closed(session: &str, open: &[String]) -> bool {
+    match session
+        .split(':')
+        .next()
+        .and_then(|p| p.parse::<u32>().ok())
+    {
+        Some(pid) if pid != std::process::id() => !crate::danger::alive(pid),
+        _ => !open.iter().any(|s| s == session),
+    }
+}
+
+/// La carpeta `.git` común del repositorio en `dir` (la misma desde cualquier worktree).
+fn common_dir(dir: &Path) -> Option<PathBuf> {
+    let out = git(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()?;
+    Some(crate::canonical(Path::new(out.trim())))
+}
+
+/// ¿`dir` es el mismo repositorio que `project`? La misma carpeta `.git` o el mismo remoto.
+fn same_repo(dir: &Path, project: &Path) -> bool {
+    if let (Some(a), Some(b)) = (common_dir(dir), common_dir(project))
+        && a == b
+    {
+        return true;
+    }
+    matches!((crate::git::remote(dir), crate::git::remote(project)), (Some(a), Some(b)) if a == b)
+}
+
+/// Opciones de `git clone` que toman su valor en el argumento siguiente.
+const CLONE_VALUES: &[&str] = &[
+    "-b",
+    "--branch",
+    "-o",
+    "--origin",
+    "-u",
+    "--upload-pack",
+    "-c",
+    "--config",
+    "-j",
+    "--jobs",
+    "--reference",
+    "--reference-if-able",
+    "--separate-git-dir",
+    "--depth",
+    "--shallow-since",
+    "--shallow-exclude",
+    "--template",
+    "--filter",
+    "--bundle-uri",
+    "--server-option",
+    "--ref-format",
+];
+
+/// El origen de `git clone <opciones> <origen> [carpeta]`.
+fn clone_source(rest: &[String]) -> Option<&str> {
+    let mut i = 0;
+    while let Some(a) = rest.get(i) {
+        if a == "--" {
+            return rest.get(i + 1).map(String::as_str);
+        }
+        if !a.starts_with('-') {
+            return Some(a);
+        }
+        i += if CLONE_VALUES.contains(&a.as_str()) {
+            2
+        } else {
+            1
+        };
+    }
+    None
+}
+
+/// ¿Clonar `source` (desde `cwd`) copia el repositorio de `project`?
+fn same_source(source: &str, cwd: &Path, project: &Path) -> bool {
+    let local = cwd.join(source.strip_prefix("file://").unwrap_or(source));
+    if local.exists() {
+        return same_repo(&local, project);
+    }
+    crate::git::remote(project).is_some_and(|r| crate::git::normalize_remote(source) == r)
+}
+
+/// Si `git <args>` (desde `cwd`) crea un worktree o un clon del mismo repositorio que
+/// `project`, el aviso para el agente (en inglés: es para él).
+pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String> {
+    // Opciones globales antes del subcomando (`-C dir` cambia de carpeta, como en git).
+    let mut dir = cwd.to_path_buf();
+    let mut i = 0;
+    while let Some(a) = args.get(i).filter(|a| a.starts_with('-')) {
+        match a.as_str() {
+            // `--git-dir` también dice de qué repositorio es (rev-parse vale dentro de `.git`).
+            "-C" | "--git-dir" => {
+                dir = dir.join(args.get(i + 1)?);
+                i += 2;
+            }
+            _ if a.starts_with("--git-dir=") => {
+                dir = dir.join(&a["--git-dir=".len()..]);
+                i += 1;
+            }
+            "-c" | "--work-tree" | "--namespace" | "--config-env" => i += 2,
+            _ => i += 1,
+        }
+    }
+    let (sub, rest) = (args.get(i)?.as_str(), &args[i + 1..]);
+    let what = match sub {
+        "worktree"
+            if rest.iter().find(|a| !a.starts_with('-'))? == "add" && same_repo(&dir, project) =>
+        {
+            "a worktree"
+        }
+        "clone" if same_source(clone_source(rest)?, &dir, project) => "a clone",
+        _ => return None,
+    };
+    Some(format!(
+        "Forge: don't create {what} of this project by hand: copies made in /tmp, \
+         .claude/worktrees or sibling folders are left behind as clutter. Run \
+         `forge worktree new <branch> [--from <base>]` instead: it creates the worktree in \
+         Forge's worktrees folder, registers it and prints its path (cd there). When you \
+         finish, remove it with `git worktree remove <path>` or let Forge offer the cleanup. \
+         Only if a manual copy is truly needed, rerun the command with {ALLOW}=1 in front."
+    ))
+}
+
+/// Dónde está `git` si es el comando del segmento: tras prefijos (`A=1`, `sudo`, `env`…) y
+/// envoltorios de shell (`bash -lc`, `cmd /c`, `pwsh -Command`). Un `git` dentro de un texto
+/// (`gh pr create --body "… git clone …"`, `echo git …`) no cuenta.
+fn command_start(words: &[String]) -> Option<usize> {
+    const PREFIXES: &[&str] = &["sudo", "env", "command", "exec", "time", "nohup", "xargs"];
+    const SHELLS: &[&str] = &["sh", "bash", "zsh", "cmd", "powershell", "pwsh"];
+    let mut i = 0;
+    while let Some(w) = words.get(i) {
+        let file = w
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(w)
+            .to_ascii_lowercase();
+        let name = file.strip_suffix(".exe").unwrap_or(&file);
+        if name == "git" {
+            return Some(i);
+        }
+        let prefix = (w.contains('=') && !w.starts_with('-')) || PREFIXES.contains(&name);
+        if !prefix && !SHELLS.contains(&name) {
+            return None;
+        }
+        i += 1;
+        // Las opciones del envoltorio (`-lc`, `/c`, `-Command`).
+        while words
+            .get(i)
+            .is_some_and(|o| o.starts_with('-') || (o.starts_with('/') && o.len() == 2))
+        {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Como `stray_copy`, en una línea de shell (para los hooks previos de los agentes).
+// ponytail: palabras sueltas, sin un parser de shell (como `danger::dangerous_in_command`);
+// el `git` puede ir tras `bash -lc '…'`, `sudo` o `env`. Los enlaces de Guard son el respaldo.
+pub fn stray_copy_in_command(command: &str, cwd: &Path, project: &Path) -> Option<String> {
+    if command.contains(&format!("{ALLOW}=1")) {
+        return None;
+    }
+    let mut cwd = cwd.to_path_buf();
+    command
+        .replace("&&", ";")
+        .replace("||", ";")
+        .split([';', '|', '\n'])
+        .find_map(|segment| {
+            let words: Vec<String> = segment
+                .split_whitespace()
+                .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
+                .collect();
+            if words.first().is_some_and(|w| w == "cd") {
+                // Una carpeta que no se puede seguir (con espacios, `~`, `$(…)`): se supone el
+                // proyecto, para no dejar pasar lo que sí sería una copia.
+                cwd = match words.get(1).map(|d| cwd.join(d)) {
+                    Some(dir) if words.len() == 2 && dir.is_dir() => dir,
+                    _ => project.to_path_buf(),
+                };
+                return None;
+            }
+            let at = command_start(&words)?;
+            stray_copy(&words[at + 1..], &cwd, project)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::git::test_repo;
+
+    fn words(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    /// Plan #194, fase 2: el worktree va a `<raíz>/<proyecto>/<rama saneada>`, con su rama
+    /// nueva desde la principal, y queda registrado con quién lo pidió.
+    #[test]
+    fn a_new_worktree_goes_to_forges_folder_and_is_registered() {
+        let dir = test_repo("wt-new", "true");
+        let root = dir.join("forge-data/worktrees");
+        let who = Record {
+            origin: Some("Codex".into()),
+            session: Some("1:7".into()),
+            ..Default::default()
+        };
+        let path = create(&dir, "feat/new-thing", None, &root, who).unwrap();
+        let name = dir.file_name().unwrap();
+        assert_eq!(path, root.join(name).join("feat-new-thing"));
+        assert!(path.join("a").is_file(), "es un checkout del repositorio");
+        let list = list(&dir).unwrap();
+        let wt = list.iter().find(|w| !w.main).unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("feat/new-thing"));
+        assert_eq!(crate::canonical(&wt.path), crate::canonical(&path));
+        // Sin seguir a la principal: si no, la limpieza la tomaría por subida.
+        assert!(wt.unpushed.is_none(), "{wt:?}");
+        let records = records(&dir, &root);
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(records[0].branch, "feat/new-thing");
+        assert_eq!(records[0].origin.as_deref(), Some("Codex"));
+        assert_eq!(records[0].requester(), "Codex");
+        // Otra vez la misma rama: la misma carpeta, sin error (un agente que repite).
+        let again = create(&dir, "feat/new-thing", None, &root, Record::default()).unwrap();
+        assert_eq!(again, path);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_worktree_can_start_from_another_base_or_reuse_a_branch() {
+        let dir = test_repo(
+            "wt-from",
+            "git switch -qc base && echo b > b && git add b && git commit -qm b \
+             && git switch -q main && git branch ya-existe",
+        );
+        let root = dir.join("forge-data/worktrees");
+        let from = create(&dir, "feat/x", Some("base"), &root, Record::default()).unwrap();
+        assert!(from.join("b").is_file(), "sale de --from");
+        let reused = create(&dir, "ya-existe", None, &root, Record::default()).unwrap();
+        assert!(reused.join("a").is_file() && !reused.join("b").exists());
+        assert!(create(&dir, "-mal", None, &root, Record::default()).is_err());
+        assert!(create(&dir, "feat/y", Some("-mal"), &root, Record::default()).is_err());
+        // Una etiqueta con el nombre no es la rama: se crea la rama, no un HEAD separado.
+        let dir_tag = test_repo("wt-from-tag", "git tag v1");
+        let tag = create(&dir_tag, "v1", None, &root, Record::default()).unwrap();
+        let wt = list(&dir_tag)
+            .unwrap()
+            .into_iter()
+            .find(|w| !w.main)
+            .unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("v1"), "{tag:?}");
+        std::fs::remove_dir_all(dir_tag).unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn worktree_add_and_clones_of_the_same_repo_are_stray_copies() {
+        let dir = test_repo(
+            "wt-stray",
+            "git remote add origin git@github.com:Acme/Repo.git && mkdir sub",
+        );
+        let other = test_repo("wt-stray-other", "true");
+        let tmp = std::env::temp_dir();
+        let stray = |cmd: &str, cwd: &Path| stray_copy(&words(cmd), cwd, &dir);
+        let msg = stray("worktree add ../x", &dir).expect("worktree add");
+        assert!(msg.contains("forge worktree new"), "{msg}");
+        assert!(msg.contains(ALLOW), "{msg}");
+        assert!(stray("worktree add -b feat/y ../y", &dir.join("sub")).is_some());
+        assert!(stray(&format!("-C {} worktree add x", dir.display()), &tmp).is_some());
+        // Clones del mismo repositorio: por carpeta o por el mismo remoto en otra forma.
+        assert!(stray(&format!("clone {} /tmp/c", dir.display()), &tmp).is_some());
+        assert!(stray("clone --depth 1 . ../c", &dir).is_some());
+        assert!(stray("clone https://github.com/acme/repo /tmp/c", &tmp).is_some());
+        // Lo demás pasa: listar, quitar, podar, clonar otro repo, un worktree de otro repo.
+        for ok in [
+            "worktree list",
+            "worktree remove ../x",
+            "worktree prune",
+            "status",
+        ] {
+            assert_eq!(stray(ok, &dir), None, "{ok}");
+        }
+        assert_eq!(stray(&format!("clone {} c", other.display()), &tmp), None);
+        assert_eq!(stray("clone https://github.com/acme/otro c", &tmp), None);
+        assert_eq!(stray("worktree add ../x", &other), None);
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(other).unwrap();
+    }
+
+    #[test]
+    fn shell_lines_are_checked_with_their_cd_and_the_escape() {
+        let dir = test_repo("wt-line", "true");
+        let tmp = std::env::temp_dir();
+        let line = |cmd: &str, cwd: &Path| stray_copy_in_command(cmd, cwd, &dir);
+        assert!(line("git status && git worktree add ../x", &dir).is_some());
+        assert!(line(&format!("cd {} && git worktree add x", dir.display()), &tmp).is_some());
+        assert!(line("bash -lc 'git worktree add ../x'", &dir).is_some());
+        assert!(line("sudo env A=1 git worktree add ../x", &dir).is_some());
+        // Solo `git` como comando: un texto que lo menciona no es una copia.
+        assert_eq!(
+            line("gh pr create --body \"never run git worktree add\"", &dir),
+            None
+        );
+        assert_eq!(line("echo git clone .", &dir), None);
+        // Una carpeta que no se puede seguir (`cd "/a b"`, `cd ~/x`): se mira el proyecto.
+        assert!(line("cd \"/no existe/x\" && git worktree add y", &dir).is_some());
+        assert_eq!(line("git worktree list", &dir), None);
+        let away = format!("cd {} && git worktree add x", tmp.display());
+        assert_eq!(line(&away, &dir), None);
+        assert_eq!(
+            line(&format!("{ALLOW}=1 git worktree add ../x"), &dir),
+            None
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn forge_offers_to_clean_registered_worktrees_once_merged_or_orphaned() {
+        let wt = |path: &str, merged| Worktree {
+            path: PathBuf::from(path),
+            branch: Some(path.into()),
+            merged: Some(merged),
+            ..Default::default()
+        };
+        let cleanup = |w: Worktree, action| Cleanup {
+            worktree: w,
+            action,
+            result: None,
+        };
+        let remove = Action::Remove {
+            delete_branch: false,
+        };
+        let plan = [
+            cleanup(wt("/w/merged", true), remove),
+            cleanup(wt("/w/closed", false), remove),
+            cleanup(wt("/w/open", false), remove),
+            cleanup(wt("/w/dirty", true), Action::Keep(Keep::Dirty)),
+            cleanup(wt("/w/unregistered", true), remove),
+        ];
+        let record = |path: &str, session: &str| Record {
+            path: PathBuf::from(path),
+            session: Some(session.into()),
+            ..Default::default()
+        };
+        // Sesiones de esta app («pid:terminal»), de otra ya cerrada y de otra que sigue viva.
+        let me = std::process::id();
+        let session = |panel: u32| format!("{me}:{panel}");
+        let mut alive = std::process::Command::new(if cfg!(windows) { "cmd" } else { "sleep" })
+            .args(if cfg!(windows) {
+                &["/c", "ping -n 30 127.0.0.1 >nul"][..]
+            } else {
+                &["30"][..]
+            })
+            .spawn()
+            .unwrap();
+        let records = [
+            record("/w/merged", &session(1)),
+            record("/w/closed", &session(2)),
+            record("/w/open", &session(3)),
+            record("/w/dirty", &session(4)),
+            record("/w/other-app-closed", "999999:1"),
+            record("/w/other-app-open", &format!("{}:1", alive.id())),
+        ];
+        let plan = [
+            &plan[..],
+            &[
+                cleanup(wt("/w/other-app-closed", false), remove),
+                cleanup(wt("/w/other-app-open", false), remove),
+            ][..],
+        ]
+        .concat();
+        let open = [session(1), session(3)];
+        let offered: Vec<_> = offers(&plan, &records, &open)
+            .into_iter()
+            .map(|c| c.worktree.path)
+            .collect();
+        let _ = alive.kill();
+        let _ = alive.wait();
+        assert_eq!(
+            offered,
+            ["/w/merged", "/w/closed", "/w/other-app-closed"].map(PathBuf::from)
+        );
+    }
+
+    #[test]
+    fn cleaning_a_registered_worktree_forgets_its_record() {
+        let dir = test_repo("wt-forget", "true");
+        let root = dir.join("forge-data/worktrees");
+        let path = create(&dir, "feat/gone", None, &root, Record::default()).unwrap();
+        std::fs::remove_dir_all(&path).unwrap();
+        let plan = clean(&dir, &[], &[], true).unwrap();
+        assert!(
+            plan.iter()
+                .any(|c| matches!(c.action, Action::Prune { .. }))
+        );
+        assert!(records(&dir, &root).is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     use std::process::Command;
 
     fn find<'a>(list: &'a [Worktree], tail: &str) -> &'a Worktree {

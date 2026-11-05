@@ -76,6 +76,9 @@ pub const DELEGATE: &str = "Saving tokens: when understanding something will tak
 /// cada turno relee todo el contexto; el subagente empieza con uno pequeño.
 pub const CHORES_DELEGATE: &str = "Forge Jev: hand git and GitHub chores (commit, push, pull, branch, merge, rebase, changesets, opening or updating a pull request) to Forge's chores subagent on a cheap model (forge:chores in Claude Code, forge-chores in the other agents), with the exact message, branch and texts to use. It starts with a small context, so a chore costs a fraction of doing it here, where every step re-reads this whole conversation. Do a chore yourself only when that subagent isn't available, or when it needs judgment about the code.";
 
+/// Plan #194: los agentes en paralelo dejaban worktrees y clones sueltos como basura.
+pub const WORKTREES: &str = "Parallel work: never create worktrees or clones of this project by hand (git worktree add, git clone into /tmp or a sibling folder). Run `forge worktree new <branch> [--from <base>]`: it creates the worktree in Forge's folder, registers it and prints its path; cd there. When you finish, remove it with `git worktree remove <path>` or leave it to the cleanup Forge offers.";
+
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
 fn instructions(modes: Modes) -> String {
@@ -96,6 +99,8 @@ fn instructions_in(modes: Modes, lang: crate::i18n::Lang) -> String {
     ));
     out.push_str("\n\n");
     out.push_str(DELEGATE);
+    out.push_str("\n\n");
+    out.push_str(WORKTREES);
     for (on, text) in [
         (modes.ask_first, ASK_FIRST),
         (modes.tests_first, TESTS_FIRST),
@@ -1685,6 +1690,8 @@ mod tests {
         assert!(plain.contains("subagent on a cheaper model"));
         assert!(plain.contains("full test suites"));
         assert!(plain.contains("forge-reviewer"));
+        // Plan #194: todos los agentes con Forge saben dónde van los worktrees.
+        assert!(plain.contains("forge worktree new"));
         assert!(!plain.contains("up to three questions") && !plain.contains("Tests-first"));
         let ask = Modes {
             ask_first: true,

@@ -4652,3 +4652,48 @@ fn worktrees_are_listed_and_cleaned_only_after_a_preview() {
     assert_eq!(forge_core::git::resolve_commit(&dir, "feat/done"), None);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Plan #194, fase 2: un worktree de `forge worktree new` cuya rama ya está fusionada: Forge
+/// propone limpiarlo y el clic lleva a la vista previa, que no borra nada.
+#[test]
+fn forge_offers_to_clean_a_registered_worktree_once_merged() {
+    let _serial = serial();
+    let dir = project("wt-offer");
+    let sh = |cwd: &Path, script: &str| {
+        let ok = std::process::Command::new("sh")
+            .args(["-c", script])
+            .current_dir(cwd)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{script}");
+    };
+    sh(
+        &dir,
+        "git commit -qm inicio && echo .forge-wt/ >> .git/info/exclude",
+    );
+    let root = dir.join(".forge-wt");
+    let who = forge_core::worktrees::Record {
+        session: Some("999999:1".into()),
+        ..Default::default()
+    };
+    let wt = forge_core::worktrees::create(&dir, "feat/done", None, &root, who).unwrap();
+    sh(&wt, "echo c > c && git add c && git commit -qm c");
+    sh(
+        &dir,
+        "git merge -q --squash feat/done && git commit -qm 'c (#1)'",
+    );
+    let mut h = app(dir.clone());
+    h.run_steps(2);
+    h.state_mut().worktrees.root = Some(root);
+    h.state_mut().worktrees.offer_checked = None;
+    wait_until(&mut h, "la propuesta", |a| !a.worktrees.offer.is_empty());
+    h.run_steps(2);
+    h.get_by_label_contains("Forge propone limpiar: feat/done")
+        .click();
+    wait_until(&mut h, "la vista previa", |a| a.worktrees.preview.is_some());
+    h.run_steps(2);
+    h.get_by_label_contains("quitar y borrar la rama feat/done");
+    assert!(wt.join("c").is_file(), "proponer no borra nada");
+    let _ = std::fs::remove_dir_all(dir);
+}

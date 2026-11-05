@@ -9,6 +9,7 @@ description: Branches, commits, pull requests and review comments in Forge.
 - One branch per phase or change, from an up-to-date `main`: `git checkout main && git pull && git checkout -b type/short-description`.
 - Types: `feat/`, `fix/`, `docs/`, `chore/`, `refactor/`, `perf/`, `test/`, `ci/`. Lowercase, hyphens. If the plan phase names a branch, use it.
 - Never commit to `main`: it is protected and requires the CI `check`.
+- Parallel work: no stray worktrees or clones of the repo (`git worktree add`, `git clone` into /tmp, `.claude/worktrees` or a sibling folder). Run `forge worktree new <branch> [--from <base>]` and `cd` to the path it prints; when you finish, `git worktree remove <path>` or leave it to the cleanup Forge offers. Guard blocks the manual ones; `FORGE_ALLOW_WORKTREE=1` in front is the escape for a real need.
 
 ## Commits: one work unit each
 - Conventional Commits in English: `feat(settings): …`, `fix(mod): …`, `docs: …`. Add `!` for a breaking change.
