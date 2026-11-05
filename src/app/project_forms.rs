@@ -624,6 +624,13 @@ impl App {
                     }
                     theme::help(ui, tr!("Forge lo comprueba cada pocos segundos y marca el proceso en verde o en rojo en la barra lateral."));
                 });
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(tr!("Puerto por worktree:")).size(11.5).color(theme::TEXT_3));
+                    changed |= ui
+                        .add(egui::DragValue::new(&mut p.base_port).range(0..=65_535).prefix(":"))
+                        .changed();
+                    theme::help(ui, tr!("Opcional (0 = no). Forge le pasa PORT con este puerto en la carpeta principal y desplazado en cada worktree (3000, 3010, 3020…), para que las copias no choquen. Si el proceso ya define PORT en su entorno, se respeta el suyo. Todos los procesos reciben FORGE_PORT_OFFSET."));
+                });
             }
             if let Some(n) = remove {
                 g.form.processes.remove(n);

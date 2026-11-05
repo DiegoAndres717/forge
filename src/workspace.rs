@@ -3236,6 +3236,9 @@ impl Workspace {
             if let Some(m) = process {
                 detail.push(m.def.command.clone());
                 detail.push(m.describe().0);
+                if let Some(port) = self.processes.port_text(&m.def) {
+                    detail.push(port);
+                }
                 if let Some(url) = m.urls().first() {
                     detail.push(url.clone());
                 }

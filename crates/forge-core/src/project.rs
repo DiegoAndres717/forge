@@ -66,6 +66,9 @@ pub struct ProcessDef {
     #[serde(default)]
     pub auto_restart: AutoRestart,
     pub health_check: Option<HealthCheck>,
+    /// Puerto base (opcional): Forge le pasa `PORT` = este + el desplazamiento del worktree
+    /// (`FORGE_PORT_OFFSET`, 0 en el principal), salvo que el proceso fije su propio `PORT`.
+    pub port: Option<u16>,
 }
 
 impl ProcessDef {
@@ -298,6 +301,8 @@ pub struct ProcessForm {
     pub port: u16,
     pub url: String,
     pub check_command: String,
+    /// Puerto base para `PORT` en cada worktree (`ProcessDef::port`); 0 = ninguno.
+    pub base_port: u16,
     /// Lo que el formulario no edita, para no perderlo al guardar.
     pub environment: HashMap<String, String>,
     pub interval_seconds: u64,
@@ -357,6 +362,7 @@ impl ProjectForm {
                         port: h.and_then(|h| h.port).unwrap_or_default(),
                         url: h.and_then(|h| h.url.clone()).unwrap_or_default(),
                         check_command: h.and_then(|h| h.command.clone()).unwrap_or_default(),
+                        base_port: p.port.unwrap_or_default(),
                         environment: p.environment.clone(),
                         interval_seconds: h.map_or(default_interval(), |h| h.interval_seconds),
                         timeout_seconds: h.map_or(default_timeout(), |h| h.timeout_seconds),
@@ -414,6 +420,9 @@ impl ProjectForm {
                 AutoRestart::Never => {}
                 AutoRestart::OnFailure => t["auto_restart"] = value("on-failure"),
                 AutoRestart::Always => t["auto_restart"] = value("always"),
+            }
+            if p.base_port != 0 {
+                t["port"] = value(i64::from(p.base_port));
             }
             if !p.environment.is_empty() {
                 let mut env = Table::new();
@@ -578,7 +587,8 @@ fn template(name: &str, commands: &[SavedCommand]) -> String {
             # command = \"npm run dev\"\n\
             # restart = \"on-workspace-open\"   # manual | on-workspace-open | never\n\
             # auto_restart = \"on-failure\"     # never | on-failure | always\n\
-            # health_check = { url = \"http://localhost:5173\" }   # o { port = 5432 } o { command = \"pg_isready\" }\n\n\
+            # health_check = { url = \"http://localhost:5173\" }   # o { port = 5432 } o { command = \"pg_isready\" }\n\
+            # port = 5173   # PORT para el proceso: 5173 aquí, 5183, 5193… en cada worktree (FORGE_PORT_OFFSET)\n\n\
             # Variables de entorno para todos los paneles y procesos.\n\
             # [environment]\n\
             # NODE_ENV = \"development\"\n\n";
@@ -788,6 +798,7 @@ mod tests {
             auto_restart: AutoRestart::OnFailure,
             health: HealthKind::Port,
             port: 5173,
+            base_port: 5173,
             ..ProcessForm::default()
         });
         form.save(&dir).unwrap();
@@ -798,6 +809,8 @@ mod tests {
             (StartPolicy::OnWorkspaceOpen, AutoRestart::OnFailure)
         );
         assert_eq!(p.health_check.as_ref().unwrap().port, Some(5173));
+        // El puerto base por worktree (plan #194, fase 5) no se pierde al guardar.
+        assert_eq!(p.port, Some(5173));
         assert_eq!(p.working_directory.as_deref(), Some(Path::new("apps/web")));
         assert_eq!(ProjectForm::load(&dir).unwrap().processes, form.processes);
 

@@ -1114,10 +1114,20 @@ fn status_json(project: &Path) -> Result<i32, String> {
 
 /// `forge worktrees`: los del repositorio con su estado y lo que ocupan.
 fn worktrees_list(out: &Out, project: &Path) -> Result<i32, String> {
-    let records = forge_core::worktrees::root()
-        .map(|root| forge_core::worktrees::records(project, &root))
+    let root = forge_core::worktrees::root();
+    let records = root
+        .as_ref()
+        .map(|root| forge_core::worktrees::records(project, root))
+        .unwrap_or_default();
+    let offsets = root
+        .map(|root| forge_core::ports::offsets(project, &root))
         .unwrap_or_default();
     for wt in forge_core::worktrees::list(project)? {
+        // Su desplazamiento de puertos (solo los de Forge: el principal y el resto, 0).
+        let ports = forge_core::worktrees::record_of(&wt, &records)
+            .and_then(|r| offsets.iter().find(|(p, _)| *p == r.path))
+            .filter(|(_, o)| *o > 0)
+            .map(|(_, o)| tr!("puertos +{n}", n = o).to_string());
         let asked = forge_core::worktrees::record_of(&wt, &records)
             .map(|r| r.requester())
             .filter(|r| !r.is_empty())
@@ -1132,6 +1142,7 @@ fn worktrees_list(out: &Out, project: &Path) -> Result<i32, String> {
         let state = [wt.state(), size]
             .into_iter()
             .chain(asked)
+            .chain(ports)
             .filter(|s| !s.is_empty());
         out.line(&format!("    {}", state.collect::<Vec<_>>().join(" · ")));
     }
@@ -1179,6 +1190,20 @@ fn worktree_new(
             "Worktree de {b} listo. Al terminar: git worktree remove {p} (o la limpieza de Forge).",
             b = branch,
             p = path.display()
+        )
+    );
+    // Su ranura de puertos se asigna (y se guarda) ya, para que el agente sepa cuál usar.
+    let offset = forge_core::ports::offset(&path, &root);
+    if offset == 0 {
+        return Ok(0);
+    }
+    let _ = writeln!(
+        std::io::stderr(),
+        "{}",
+        tr!(
+            "Puertos de este worktree: +{n} (FORGE_PORT_OFFSET={n}): un servidor que va en el 3000 aquí va en el {p}.",
+            n = offset,
+            p = 3000u32.saturating_add(offset)
         )
     );
     Ok(0)

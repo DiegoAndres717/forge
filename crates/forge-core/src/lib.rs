@@ -20,6 +20,7 @@ pub mod launch;
 pub mod mcp;
 pub mod memory;
 pub mod parallel;
+pub mod ports;
 pub mod pr;
 pub mod project;
 pub mod reviewers;
