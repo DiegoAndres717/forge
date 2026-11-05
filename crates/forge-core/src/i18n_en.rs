@@ -3165,4 +3165,65 @@ pub const EN: &[(&str, &str)] = &[
         "Worktrees creados con forge worktree new cuya rama ya está fusionada o cuya terminal se cerró. Clic: vista previa de la limpieza (no borra nada)",
         "Worktrees made with forge worktree new whose branch is merged or whose terminal was closed. Click: cleanup preview (deletes nothing)",
     ),
+    (
+        "Las fases {a} y {b} nombran los mismos archivos ({f}): pueden pisarse.",
+        "Phases {a} and {b} name the same files ({f}): they may step on each other.",
+    ),
+    (
+        "La fase {a} nombra a la fase {b}: puede depender de ella.",
+        "Phase {a} names phase {b}: it may depend on it.",
+    ),
+    (
+        "La fase {n} ya está completada.",
+        "Phase {n} is already done.",
+    ),
+    (
+        "La fase {n} ya está en curso: ya hay alguien trabajando en ella.",
+        "Phase {n} is already in progress: someone is already working on it.",
+    ),
+    (
+        "La fase {n} no tiene rama: cada fase en paralelo trabaja en su propio worktree, que sale de su rama. Ponle una rama y vuelve a lanzarla.",
+        "Phase {n} has no branch: each parallel phase works in its own worktree, which comes from its branch. Give it a branch and launch it again.",
+    ),
+    (
+        "Elige al menos dos fases para lanzarlas en paralelo.",
+        "Pick at least two phases to launch them in parallel.",
+    ),
+    (
+        "El plan #{id} no tiene fase {n}.",
+        "Plan #{id} has no phase {n}.",
+    ),
+    (
+        "Las fases {a} y {b} tienen la misma rama ({r}): cada una necesita la suya.",
+        "Phases {a} and {b} have the same branch ({r}): each one needs its own.",
+    ),
+    (
+        "{name} no admite empezar con un mensaje, así que no puede recibir la fase: elige otro agente (Claude Code, Codex, OpenCode o Antigravity).",
+        "{name} can't start with a message, so it can't receive the phase: pick another agent (Claude Code, Codex, OpenCode or Antigravity).",
+    ),
+    (
+        "No encuentro el agente {id} en este proyecto.",
+        "Agent {id} is not in this project.",
+    ),
+    (
+        "no se pudo abrir la terminal de {name}",
+        "could not open the terminal for {name}",
+    ),
+    ("la fase no tiene rama", "the phase has no branch"),
+    ("{agent} · fase {n}", "{agent} · phase {n}"),
+    ("Fase {n} ({b}): {e}", "Phase {n} ({b}): {e}"),
+    ("Lanzar fases en paralelo", "Launch phases in parallel"),
+    (
+        "Varios agentes a la vez: una terminal por fase, cada una en su propio worktree y su rama",
+        "Several agents at once: one terminal per phase, each in its own worktree and branch",
+    ),
+    (
+        "Elige las fases: cada una se abre con su agente en una terminal propia, dentro de su worktree.",
+        "Pick the phases: each one opens with its agent in its own terminal, inside its worktree.",
+    ),
+    ("Lanzar con {agent}", "Launch with {agent}"),
+    (
+        "No encuentro ningún agente instalado y activo que pueda empezar con un mensaje (Claude Code, Codex, OpenCode o Antigravity).",
+        "No installed and enabled agent can start with a message (Claude Code, Codex, OpenCode or Antigravity).",
+    ),
 ];
