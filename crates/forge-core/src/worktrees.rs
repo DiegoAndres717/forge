@@ -643,10 +643,153 @@ pub fn record_of<'a>(wt: &Worktree, records: &'a [Record]) -> Option<&'a Record>
     records.iter().find(|r| same_path(&r.path, &wt.path))
 }
 
+/// La carpeta `.git` común del repositorio en `dir` (la misma desde cualquier worktree).
+fn common_dir(dir: &Path) -> Option<PathBuf> {
+    let out = git(
+        dir,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .ok()?;
+    Some(crate::canonical(Path::new(out.trim())))
+}
+
+/// ¿`dir` es el mismo repositorio que `project`? La misma carpeta `.git` o el mismo remoto.
+fn same_repo(dir: &Path, project: &Path) -> bool {
+    if let (Some(a), Some(b)) = (common_dir(dir), common_dir(project))
+        && a == b
+    {
+        return true;
+    }
+    matches!((crate::git::remote(dir), crate::git::remote(project)), (Some(a), Some(b)) if a == b)
+}
+
+/// Opciones de `git clone` que toman su valor en el argumento siguiente.
+const CLONE_VALUES: &[&str] = &[
+    "-b",
+    "--branch",
+    "-o",
+    "--origin",
+    "-u",
+    "--upload-pack",
+    "-c",
+    "--config",
+    "-j",
+    "--jobs",
+    "--reference",
+    "--reference-if-able",
+    "--separate-git-dir",
+    "--depth",
+    "--shallow-since",
+    "--shallow-exclude",
+    "--template",
+    "--filter",
+    "--bundle-uri",
+    "--server-option",
+    "--ref-format",
+];
+
+/// El origen de `git clone <opciones> <origen> [carpeta]`.
+fn clone_source(rest: &[String]) -> Option<&str> {
+    let mut i = 0;
+    while let Some(a) = rest.get(i) {
+        if a == "--" {
+            return rest.get(i + 1).map(String::as_str);
+        }
+        if !a.starts_with('-') {
+            return Some(a);
+        }
+        i += if CLONE_VALUES.contains(&a.as_str()) {
+            2
+        } else {
+            1
+        };
+    }
+    None
+}
+
+/// ¿Clonar `source` (desde `cwd`) copia el repositorio de `project`?
+fn same_source(source: &str, cwd: &Path, project: &Path) -> bool {
+    let local = cwd.join(source.strip_prefix("file://").unwrap_or(source));
+    if local.exists() {
+        return same_repo(&local, project);
+    }
+    crate::git::remote(project).is_some_and(|r| crate::git::normalize_remote(source) == r)
+}
+
+/// Si `git <args>` (desde `cwd`) crea un worktree o un clon del mismo repositorio que
+/// `project`, el aviso para el agente (en inglés: es para él).
+pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String> {
+    // Opciones globales antes del subcomando (`-C dir` cambia de carpeta, como en git).
+    let mut dir = cwd.to_path_buf();
+    let mut i = 0;
+    while let Some(a) = args.get(i).filter(|a| a.starts_with('-')) {
+        match a.as_str() {
+            "-C" => {
+                dir = dir.join(args.get(i + 1)?);
+                i += 2;
+            }
+            "-c" | "--git-dir" | "--work-tree" | "--namespace" | "--config-env" => i += 2,
+            _ => i += 1,
+        }
+    }
+    let (sub, rest) = (args.get(i)?.as_str(), &args[i + 1..]);
+    let what = match sub {
+        "worktree"
+            if rest.iter().find(|a| !a.starts_with('-'))? == "add" && same_repo(&dir, project) =>
+        {
+            "a worktree"
+        }
+        "clone" if same_source(clone_source(rest)?, &dir, project) => "a clone",
+        _ => return None,
+    };
+    Some(format!(
+        "Forge: don't create {what} of this project by hand: copies made in /tmp, \
+         .claude/worktrees or sibling folders are left behind as clutter. Run \
+         `forge worktree new <branch> [--from <base>]` instead: it creates the worktree in \
+         Forge's worktrees folder, registers it and prints its path (cd there). When you \
+         finish, remove it with `git worktree remove <path>` or let Forge offer the cleanup. \
+         Only if a manual copy is truly needed, rerun the command with {ALLOW}=1 in front."
+    ))
+}
+
+/// Como `stray_copy`, en una línea de shell (para los hooks previos de los agentes).
+// ponytail: palabras sueltas, sin un parser de shell (como `danger::dangerous_in_command`);
+// el `git` puede ir tras `bash -lc '…'`, `sudo` o `env`. Los enlaces de Guard son el respaldo.
+pub fn stray_copy_in_command(command: &str, cwd: &Path, project: &Path) -> Option<String> {
+    if command.contains(&format!("{ALLOW}=1")) {
+        return None;
+    }
+    let mut cwd = cwd.to_path_buf();
+    command
+        .replace("&&", ";")
+        .replace("||", ";")
+        .split([';', '|', '\n'])
+        .find_map(|segment| {
+            let words: Vec<String> = segment
+                .split_whitespace()
+                .map(|w| w.trim_matches(|c| c == '\'' || c == '"').to_string())
+                .collect();
+            if words.first().is_some_and(|w| w == "cd") {
+                if let Some(dir) = words.get(1) {
+                    cwd = cwd.join(dir);
+                }
+                return None;
+            }
+            let at = words
+                .iter()
+                .position(|w| crate::danger::shim_name(w).as_deref() == Some("git"))?;
+            stray_copy(&words[at + 1..], &cwd, project)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::git::test_repo;
+
+    fn words(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
 
     /// Plan #194, fase 2: el worktree va a `<raíz>/<proyecto>/<rama saneada>`, con su rama
     /// nueva desde la principal, y queda registrado con quién lo pidió.
@@ -693,6 +836,57 @@ mod tests {
         let reused = create(&dir, "ya-existe", None, &root, Record::default()).unwrap();
         assert!(reused.join("a").is_file() && !reused.join("b").exists());
         assert!(create(&dir, "-mal", None, &root, Record::default()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn worktree_add_and_clones_of_the_same_repo_are_stray_copies() {
+        let dir = test_repo(
+            "wt-stray",
+            "git remote add origin git@github.com:Acme/Repo.git && mkdir sub",
+        );
+        let other = test_repo("wt-stray-other", "true");
+        let tmp = std::env::temp_dir();
+        let stray = |cmd: &str, cwd: &Path| stray_copy(&words(cmd), cwd, &dir);
+        let msg = stray("worktree add ../x", &dir).expect("worktree add");
+        assert!(msg.contains("forge worktree new"), "{msg}");
+        assert!(msg.contains(ALLOW), "{msg}");
+        assert!(stray("worktree add -b feat/y ../y", &dir.join("sub")).is_some());
+        assert!(stray(&format!("-C {} worktree add x", dir.display()), &tmp).is_some());
+        // Clones del mismo repositorio: por carpeta o por el mismo remoto en otra forma.
+        assert!(stray(&format!("clone {} /tmp/c", dir.display()), &tmp).is_some());
+        assert!(stray("clone --depth 1 . ../c", &dir).is_some());
+        assert!(stray("clone https://github.com/acme/repo /tmp/c", &tmp).is_some());
+        // Lo demás pasa: listar, quitar, podar, clonar otro repo, un worktree de otro repo.
+        for ok in [
+            "worktree list",
+            "worktree remove ../x",
+            "worktree prune",
+            "status",
+        ] {
+            assert_eq!(stray(ok, &dir), None, "{ok}");
+        }
+        assert_eq!(stray(&format!("clone {} c", other.display()), &tmp), None);
+        assert_eq!(stray("clone https://github.com/acme/otro c", &tmp), None);
+        assert_eq!(stray("worktree add ../x", &other), None);
+        std::fs::remove_dir_all(dir).unwrap();
+        std::fs::remove_dir_all(other).unwrap();
+    }
+
+    #[test]
+    fn shell_lines_are_checked_with_their_cd_and_the_escape() {
+        let dir = test_repo("wt-line", "true");
+        let tmp = std::env::temp_dir();
+        let line = |cmd: &str, cwd: &Path| stray_copy_in_command(cmd, cwd, &dir);
+        assert!(line("git status && git worktree add ../x", &dir).is_some());
+        assert!(line(&format!("cd {} && git worktree add x", dir.display()), &tmp).is_some());
+        assert!(line("bash -lc 'git worktree add ../x'", &dir).is_some());
+        assert_eq!(line("git worktree list", &dir), None);
+        assert_eq!(line("cd /tmp && git worktree add x", &dir), None);
+        assert_eq!(
+            line(&format!("{ALLOW}=1 git worktree add ../x"), &dir),
+            None
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

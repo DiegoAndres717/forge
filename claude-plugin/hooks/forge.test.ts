@@ -567,6 +567,26 @@ test('outside Windows the shims already guard Bash: Forge is not asked', async (
   expect(asked.some(a => a.includes('danger'))).toBe(false)
 })
 
+test('a stray worktree or clone of the project is denied with how to do it', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const asked: string[][] = []
+  on('process.run', ($, e) => {
+    asked.push([...e.argv])
+    const stray = e.argv.includes('check') && e.argv.some(a => a.includes('worktree add'))
+    return { value: { exitCode: stray ? 0 : 1, stdout: stray ? 'Forge: run `forge worktree new <branch>`' : '', stderr: '' } } as never
+  })
+  on('tool.check', () => ({ decision: 'allow' as const }))
+  const check = (command: string) => $.tool.check({ tool: 'Bash', input: { command } } as never)
+  const add = await check('git worktree add ../x')
+  expect(add.decision).toBe('deny')
+  expect(add.reason).toContain('forge worktree new')
+  // Forge says a clone of another repo is fine; `git worktree list` isn't even asked.
+  expect((await check('git clone https://example.com/other c')).decision).toBe('allow')
+  const before = asked.length
+  expect((await check('git worktree list')).decision).toBe('allow')
+  expect(asked.length).toBe(before)
+})
+
 test('reading a file with secrets asks first; other files keep their verdict', async ($, on) => {
   mock.env(on, { FORGE_BIN: '/forge' })
   const asked: string[][] = []

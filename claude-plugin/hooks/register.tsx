@@ -66,7 +66,10 @@ let sinceAnchor = 0
 // Windows: Claude Code's shell can rebuild PATH and skip Guard's shims, so on a Bash call
 // that names a watched program the mod asks Forge (`forge danger`) as a second line.
 const DANGER_HINT = /\b(git|rm|docker|psql|mysql|mariadb|dropdb)(\.exe)?\b/i
-const SECRET_HINT = /\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
+// A stray worktree or clone of the project: the shims stop it too, but denying it here
+// tells the model to use `forge worktree new` before anything runs. Forge decides.
+const STRAY_HINT = /\bgit\b[\s\S]*\b(worktree\s+add|clone)\b/
+const SECRET_HINT =/\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
  * hand the exploration to forge:explorer (cheaper, and keeps the context clean). */
@@ -434,6 +437,10 @@ export const register: Register = on => {
     const verdict = await next(e)
     if (verdict.decision === 'deny') return verdict
     const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; command?: unknown }
+    if (e.tool === 'Bash' && typeof input.command === 'string' && STRAY_HINT.test(input.command)) {
+      const out = await forge($, ['worktree', 'check', '--command', input.command], undefined, 2_000)
+      if (out && out.exitCode === 0) return { decision: 'deny' as const, reason: out.stdout.trim() }
+    }
     if (e.tool === 'Bash' && typeof input.command === 'string' && DANGER_HINT.test(input.command)
       && await $.env.get('FORGE_GUARD_COMMANDS').catch(() => undefined) === '1') {
       const out = await forge($, ['danger', '--command', input.command], undefined, 2_000)

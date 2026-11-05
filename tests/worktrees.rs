@@ -125,3 +125,106 @@ fn worktree_new_creates_it_in_forges_folder_and_registers_who_asked() {
         "{list}"
     );
 }
+
+#[test]
+fn agent_shells_cannot_make_stray_worktrees_or_clones_of_the_project() {
+    let e = setup("shim");
+    let blocked = |dir: &Path, script: &str| {
+        let out = sh(&e, dir, script);
+        let err = text(&out.stderr);
+        assert!(!out.status.success(), "{script} pasó: {err}");
+        assert!(err.contains("forge worktree new"), "{script}: {err}");
+    };
+    blocked(&e.repo, "git worktree add ../wt-x");
+    blocked(&e.base, "git clone repo clone-x");
+    blocked(&e.base, "git clone git@github.com:acme/repo.git clone-y");
+    assert!(!e.base.join("wt-x").exists() && !e.base.join("clone-x").exists());
+    // Lo demás pasa: listar worktrees y clonar otro repositorio.
+    let list = sh(&e, &e.repo, "git worktree list");
+    assert!(list.status.success(), "{}", text(&list.stderr));
+    let other = sh(&e, &e.base, "git clone -q other other-clone");
+    assert!(other.status.success(), "{}", text(&other.stderr));
+    // La salida explícita.
+    let escape = sh(
+        &e,
+        &e.repo,
+        "FORGE_ALLOW_WORKTREE=1 git worktree add -q ../wt-ok",
+    );
+    assert!(escape.status.success(), "{}", text(&escape.stderr));
+    assert!(e.base.join("wt-ok/a.txt").is_file());
+    // Lo que escribe la persona (sin FORGE_ORIGIN) no se frena.
+    let mut person = Command::new("sh");
+    person
+        .args(["-c", "git worktree add -q ../wt-person"])
+        .current_dir(&e.repo)
+        .envs(&e.vars)
+        .env_remove("FORGE_ORIGIN");
+    assert!(person.output().unwrap().status.success());
+}
+
+/// El hook previo de Codex, Gemini CLI y Antigravity (`forge secret --agent-hook <formato>`)
+/// deniega en el formato de cada uno; el mod de Claude Code pregunta `forge worktree check`.
+#[test]
+fn each_agent_hook_denies_stray_copies_and_lets_the_rest_through() {
+    let e = setup("hooks");
+    let hook = |format: &str, input: String| {
+        let file = e.base.join("input.json");
+        std::fs::write(&file, input).unwrap();
+        let out = Command::new(FORGE)
+            .args(["secret", "--agent-hook", format])
+            .current_dir(&e.repo)
+            .envs(&e.vars)
+            .env_remove("FORGE_APPROVALS")
+            .stdin(std::fs::File::open(&file).unwrap())
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{format}: {}", text(&out.stderr));
+        text(&out.stdout).trim().to_string()
+    };
+    let cwd = serde_json::to_string(&e.repo).unwrap();
+    let codex =
+        |c: &str| format!(r#"{{"cwd":{cwd},"tool_name":"Bash","tool_input":{{"command":"{c}"}}}}"#);
+    let gemini = |c: &str| {
+        format!(
+            r#"{{"cwd":{cwd},"tool_name":"run_shell_command","tool_input":{{"command":"{c}"}}}}"#
+        )
+    };
+    let agy = |c: &str| {
+        format!(
+            r#"{{"workspacePaths":[{cwd}],"toolCall":{{"name":"run_command","args":{{"CommandLine":"{c}"}}}}}}"#
+        )
+    };
+    for bad in [
+        "git worktree add ../x",
+        "git clone https://github.com/acme/repo /tmp/x",
+    ] {
+        let v: serde_json::Value = serde_json::from_str(&hook("codex", codex(bad))).unwrap();
+        assert_eq!(
+            v["hookSpecificOutput"]["permissionDecision"], "deny",
+            "{bad}"
+        );
+        let why = v["hookSpecificOutput"]["permissionDecisionReason"].as_str();
+        assert!(why.unwrap().contains("forge worktree new"), "{v}");
+        for (format, input) in [("gemini", gemini(bad)), ("agy", agy(bad))] {
+            let v: serde_json::Value = serde_json::from_str(&hook(format, input)).unwrap();
+            assert_eq!(v["decision"], "deny", "{format}: {bad}");
+            assert!(v["reason"].as_str().unwrap().contains("forge worktree new"));
+        }
+    }
+    let other = format!("git clone {} c", e.other.display()).replace('\\', "/");
+    for ok in [
+        "git worktree list",
+        other.as_str(),
+        "FORGE_ALLOW_WORKTREE=1 git worktree add ../x",
+    ] {
+        assert_eq!(hook("codex", codex(ok)), "", "{ok}");
+        assert_eq!(hook("gemini", gemini(ok)), "{}", "{ok}");
+        assert_eq!(hook("agy", agy(ok)), "{}", "{ok}");
+    }
+    // Claude Code: el mod pregunta y deniega si sale 0 con el motivo.
+    let check = |c: &str| forge(&e, &["worktree", "check", "--command", c]);
+    let out = check("git worktree add ../x");
+    assert_eq!(out.status.code(), Some(0));
+    assert!(text(&out.stdout).contains("forge worktree new"));
+    assert_eq!(check("git worktree list").status.code(), Some(1));
+}

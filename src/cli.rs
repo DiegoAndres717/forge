@@ -299,6 +299,20 @@ pub fn run(args: &[String]) -> i32 {
         (Some("worktree"), Some("new")) => {
             worktree_new(&out, &project, pos.get(2).copied(), flag(args, "--from"))
         }
+        // ¿Crea un worktree o un clon suelto? (`--command "…"`; el mod de Claude Code lo
+        // pregunta antes de Bash). Sale 0 con el aviso si sí, 1 si no.
+        (Some("worktree"), Some("check")) => {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            let found = flag(args, "--command")
+                .and_then(|c| forge_core::danger::stray_copy_in_agent_command(&c, &cwd, &project));
+            match found {
+                Some(why) => {
+                    println!("{why}");
+                    Ok(0)
+                }
+                None => Ok(1),
+            }
+        }
         // Resumen para seguir en otro agente la última conversación de uno (por defecto Claude).
         (Some("handoff"), from) => {
             let program = from.unwrap_or("claude");

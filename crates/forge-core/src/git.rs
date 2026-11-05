@@ -142,6 +142,18 @@ pub fn ignored(repo: &Path, paths: &[String]) -> std::collections::HashSet<Strin
 /// Identidad estable de un repositorio: el remoto (origin o el primero) normalizado, más la
 /// subcarpeta si el proyecto es parte del repo. `None` si no es un repo o no tiene remoto.
 pub fn remote_identity(repo: &Path) -> Option<String> {
+    let base = remote(repo)?;
+    let prefix = git(repo, &["rev-parse", "--show-prefix"]).unwrap_or_default();
+    let prefix = prefix.trim().trim_end_matches('/');
+    Some(if prefix.is_empty() {
+        base
+    } else {
+        format!("{base}/{prefix}")
+    })
+}
+
+/// El remoto del repositorio (origin o el primero), normalizado; `None` sin remoto.
+pub fn remote(repo: &Path) -> Option<String> {
     let remotes = git(repo, &["config", "--get-regexp", r"^remote\..*\.url$"]).ok()?;
     let urls: Vec<(&str, &str)> = remotes.lines().filter_map(|l| l.split_once(' ')).collect();
     let url = urls
@@ -149,14 +161,7 @@ pub fn remote_identity(repo: &Path) -> Option<String> {
         .find(|(k, _)| *k == "remote.origin.url")
         .or(urls.first())?
         .1;
-    let prefix = git(repo, &["rev-parse", "--show-prefix"]).unwrap_or_default();
-    let prefix = prefix.trim().trim_end_matches('/');
-    let base = normalize_remote(url);
-    Some(if prefix.is_empty() {
-        base
-    } else {
-        format!("{base}/{prefix}")
-    })
+    Some(normalize_remote(url))
 }
 
 /// `git@github.com:Org/Repo.git`, `https://user@github.com/org/repo` y
