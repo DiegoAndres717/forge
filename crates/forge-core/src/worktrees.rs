@@ -174,6 +174,14 @@ const REBUILDABLE: &[&str] = &[
 ];
 
 /// `sizes`: medir lo que ocupa cada uno (recorre todas sus carpetas: la limpieza no lo usa).
+/// Solo la lista de `git worktree list` (ruta, rama, prunable), sin mirar nada más: barata.
+pub fn list_basic(repo: &Path) -> Result<Vec<Worktree>, String> {
+    Ok(parse(&git(
+        repo,
+        &["worktree", "list", "--porcelain", "-z"],
+    )?))
+}
+
 fn list_with(repo: &Path, sizes: bool) -> Result<Vec<Worktree>, String> {
     let out = git(repo, &["worktree", "list", "--porcelain", "-z"])?;
     let base = crate::git::main_branch(repo);

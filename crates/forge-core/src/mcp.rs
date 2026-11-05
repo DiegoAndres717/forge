@@ -216,9 +216,8 @@ pub fn codex_skills_installed(codex: &Path) -> bool {
 fn hints(name: &str) -> Value {
     // (solo lee, destructiva, idempotente)
     let (read_only, destructive, idempotent) = match name {
-        "memory_search" | "memory_get" | "memory_list" | "plans_list" | "project_context" => {
-            (true, false, true)
-        }
+        "memory_search" | "memory_get" | "memory_list" | "plans_list" | "project_context"
+        | "work_status" => (true, false, true),
         "memory_save" | "plan_add" | "review_comment_add" => (false, false, false),
         "review_progress" => (false, false, true),
         // Editar guarda versiones, y borrar una memoria la archiva: nada se pierde.
@@ -435,6 +434,12 @@ fn raw_tools() -> Value {
         {
             "name": "project_context",
             "description": tr!("Resumen del proyecto: reglas y checks del Guard, procesos, últimas validaciones y decisiones recientes."),
+            "inputSchema": {"type": "object", "properties": {}}
+        },
+        {
+            "name": "work_status",
+            // Para agentes: en inglés, como todo lo que les llega.
+            "description": "Live board of the agents working on this repository in parallel: which agent (and subagent) is on which worktree, branch and plan phase, what it is doing now, the files each worktree has changed, and overlaps (the same file touched by two at once). Call it before editing files another agent may be working on, and when starting work in a worktree. Agents without hooks Forge can use are listed as having no live data.",
             "inputSchema": {"type": "object", "properties": {}}
         }
     ])
@@ -843,6 +848,12 @@ impl<'a> Server<'a> {
                 None => Err(tr!("falta `id`").into()),
             },
             "project_context" => Ok(project_context(self.project, self.store)),
+            "work_status" => Ok(crate::activity::work_status(
+                self.store,
+                self.project,
+                crate::store::current_session_id().as_deref(),
+                crate::store::now(),
+            )),
             _ => Err(format!("herramienta desconocida: {tool}")),
         };
         match result {
@@ -1511,7 +1522,7 @@ mod tests {
         let list = server
             .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
             .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 14);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 15);
 
         let call = |server: &mut Server, id: i64, name: &str, args: Value| {
             server.handle(&json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()
@@ -1755,6 +1766,31 @@ mod tests {
     }
 
     #[test]
+    fn work_status_answers_any_agent_with_the_live_board() {
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/no/such/project");
+        let e = crate::activity::Event {
+            kind: "tool".into(),
+            tool: Some("Bash".into()),
+            target: Some("cargo test".into()),
+            origin: Some("Codex".into()),
+            ..Default::default()
+        };
+        store
+            .record_activity(project, "1:4", &e, None, crate::store::now())
+            .unwrap();
+        let mut server = Server::new(project, &store);
+        let reply = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "work_status", "arguments": {}}}))
+            .unwrap();
+        let text = reply["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("Codex (terminal 4) · running `cargo test`"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn every_tool_says_whether_it_only_reads_or_changes_things() {
         let tools = tools();
         let hint = |name: &str, key: &str| {
@@ -1779,6 +1815,7 @@ mod tests {
             "memory_list",
             "plans_list",
             "project_context",
+            "work_status",
         ] {
             assert_eq!(hint(name, "readOnlyHint"), Some(true), "{name}");
         }

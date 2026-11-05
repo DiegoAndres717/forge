@@ -353,6 +353,18 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
         (_, Some(summary)) => format!("{name}: {summary}"),
         _ => crate::tr!("{name} terminó", name = name),
     };
+    // El tablero de agentes: la conversación principal terminó su turno, con su resumen.
+    if kind == "stop"
+        && let Some(session) = crate::store::current_session_id()
+    {
+        let done = crate::activity::Event {
+            kind: "stop".into(),
+            result: field("message"),
+            origin: Some(name.clone()),
+            ..Default::default()
+        };
+        crate::activity::record_event(Path::new(&project), &session, &done, None);
+    }
     let event = AgentEvent {
         project: PathBuf::from(project),
         text,

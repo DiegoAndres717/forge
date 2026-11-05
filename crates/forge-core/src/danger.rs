@@ -792,6 +792,16 @@ pub fn secret_hook_main(format: &str) -> ! {
             _ => None,
         });
     let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+    // El tablero de agentes: la herramienta en uso (solo en una terminal de agente de Forge).
+    if let (Some(p), Some(session), Some(event)) = (
+        project
+            .as_deref()
+            .filter(|_| std::env::var_os("FORGE_ORIGIN").is_some()),
+        crate::store::current_session_id(),
+        crate::activity::tool_event(&call),
+    ) {
+        crate::activity::record_event(p, &session, &event, Some(&cwd));
+    }
     let stray = shell
         .zip(project)
         .and_then(|(c, p)| stray_copy_in_agent_command(&c, &cwd, &p));

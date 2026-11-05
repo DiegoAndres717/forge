@@ -47,6 +47,7 @@ Uso:
   forge worktrees                       worktrees del repositorio: rama, estado y tamaño
   forge worktrees clean [--apply]       quita los fusionados o subidos y sin cambios (sin --apply, solo simula)
   forge worktree new <rama> [--from <base>]   crea un worktree en la carpeta de Forge (y la rama) e imprime su ruta
+  forge work-status [--main-check]      qué agente está en qué worktree, qué toca y dónde se pisan
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -98,6 +99,7 @@ Usage:
   forge worktrees                       repository worktrees: branch, state and size
   forge worktrees clean [--apply]       removes merged or pushed ones with no changes (without --apply, only simulates)
   forge worktree new <branch> [--from <base>] creates a worktree in Forge's folder (and the branch) and prints its path
+  forge work-status [--main-check]      which agent is on which worktree, what it touches and where they overlap
   forge mcp                             MCP server (memory and context) for agents
 
 Options:
@@ -221,6 +223,7 @@ pub const COMMANDS: &[&str] = &[
     "review",
     "secret",
     "status",
+    "work-status",
     "worktree",
     "worktrees",
 ];
@@ -292,6 +295,27 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
+        // Qué agente está en qué worktree y qué toca; con `--main-check`, el aviso del hook
+        // cuando la rama principal cambió algo que esta sesión toca (una vez por cambio).
+        (Some("work-status"), _) => open_store().map(|store| {
+            let me = forge_core::store::current_session_id();
+            let now = forge_core::store::now();
+            if args.iter().any(|a| a == "--main-check") {
+                let cwd = std::env::current_dir().unwrap_or_default();
+                if let (Some(me), Some(root)) = (me, forge_core::activity::root_of(&cwd)) {
+                    forge_core::activity::fetch_if_stale(&root, 600);
+                    if let Some(warning) =
+                        forge_core::activity::main_check(&store, &project, &me, &root)
+                    {
+                        println!("{warning}");
+                    }
+                }
+            } else {
+                let text = forge_core::activity::work_status(&store, &project, me.as_deref(), now);
+                println!("{text}");
+            }
+            0
+        }),
         (Some("worktrees"), Some("clean")) => {
             worktrees_clean(&out, &project, args.iter().any(|a| a == "--apply"))
         }

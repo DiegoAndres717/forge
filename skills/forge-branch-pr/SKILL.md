@@ -10,6 +10,7 @@ description: Branches, commits, pull requests and review comments in Forge.
 - Types: `feat/`, `fix/`, `docs/`, `chore/`, `refactor/`, `perf/`, `test/`, `ci/`. Lowercase, hyphens. If the plan phase names a branch, use it.
 - Never commit to `main`: it is protected and requires the CI `check`.
 - Parallel work: no stray worktrees or clones of the repo (`git worktree add`, `git clone` into /tmp, `.claude/worktrees` or a sibling folder). Run `forge worktree new <branch> [--from <base>]` and `cd` to the path it prints; when you finish, `git worktree remove <path>` or leave it to the cleanup Forge offers. Guard blocks the manual ones; `FORGE_ALLOW_WORKTREE=1` in front is the escape for a real need.
+- Before editing in parallel, call the `work_status` MCP tool (or `forge work-status`): it shows which agent is on which worktree and branch, what each one is touching, and overlaps on the same file.
 
 ## Commits: one work unit each
 - Conventional Commits in English: `feat(settings): …`, `fix(mod): …`, `docs: …`. Add `!` for a breaking change.
