@@ -9,6 +9,7 @@ pub mod danger;
 pub mod embed;
 pub mod events;
 pub mod evidence;
+pub mod failure_hint;
 pub mod files;
 pub mod git;
 pub mod guard;
