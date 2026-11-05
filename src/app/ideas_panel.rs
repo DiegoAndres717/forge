@@ -114,6 +114,7 @@ impl App {
         cmds: &mut Vec<UiCmd>,
     ) {
         let reviewers = view.reviewers.clone();
+        let launchers = view.launchers.clone();
         let comments = view.comments.clone();
         let runs = view.runs.clone();
         let input = ui.add(
@@ -150,11 +151,13 @@ impl App {
             highlighted,
             phase_input,
             learning,
+            parallel,
             ..
         } = view;
         let mut toggles = Toggles::default();
         let phase_cell = std::cell::RefCell::new(phase_input.take());
         let learn_cell = std::cell::RefCell::new(std::mem::take(learning));
+        let parallel_cell = std::cell::RefCell::new(parallel.take());
         let doing: Vec<&Idea> = items.iter().filter(|i| i.status == "doing").collect();
         let backlog: Vec<&Idea> = items.iter().filter(|i| i.status == "pending").collect();
         let done: Vec<&Idea> = items.iter().filter(|i| i.done()).collect();
@@ -171,6 +174,8 @@ impl App {
                 learning: &learn_cell,
                 highlighted: *highlighted,
                 phase_input: &phase_cell,
+                parallel: &parallel_cell,
+                launchers: &launchers,
             };
             if let Some(edit) = editing.as_mut().filter(|e| e.0 == idea.id) {
                 edit_card(edit, target, ui, cmds);
@@ -223,6 +228,7 @@ impl App {
 
         *phase_input = phase_cell.into_inner();
         *learning = learn_cell.into_inner();
+        *parallel = parallel_cell.into_inner();
         if let Some((id, open)) = toggles.plan {
             toggled.insert(id, open);
         }
@@ -652,6 +658,10 @@ struct ItemCtx<'a> {
     highlighted: Option<i64>,
     /// Campo "Añadir fase" (lo escribe una tarjeta mientras las demás solo leen).
     phase_input: &'a std::cell::RefCell<Option<(i64, String)>>,
+    /// «Lanzar en paralelo» abierto (lo edita una tarjeta mientras las demás solo leen).
+    parallel: &'a std::cell::RefCell<super::parallel_launch::Pick>,
+    /// Agentes para lanzar fases: (id, nombre, admite un mensaje inicial).
+    launchers: &'a [(String, String, bool)],
 }
 
 /// Cabecera de sección: `EN PROGRESO  2`.
@@ -838,6 +848,10 @@ fn plan_card(
             if start.clicked() {
                 cmds.push(UiCmd::PlanWithAgent(idea.id));
             }
+        }
+        // Solo en un proyecto: los worktrees y las terminales son suyos.
+        if ctx.target.is_some() {
+            super::parallel_launch::parallel_box(ui, idea, ctx.parallel, ctx.launchers, cmds);
         }
 
         if expanded {

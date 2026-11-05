@@ -547,14 +547,24 @@ pub fn create(
     let project = main_root(repo)?;
     let path = project_dir(&project, root).join(folder_name(branch));
     if path.exists() {
-        // Un agente que lo vuelve a pedir: el mismo, sin error.
-        let same = record_file(&path)
-            .and_then(|f| read_record(&f))
-            .is_some_and(|r| r.branch == branch);
-        return if same {
-            Ok(path)
-        } else {
-            Err(tr!("ya existe {p}", p = path.display()).to_string())
+        // Un agente que lo vuelve a pedir: el mismo, sin error. Lo que traiga el nuevo pedido
+        // (otra terminal, otra fase) pasa al registro: si no, la limpieza seguiría mirando la
+        // terminal de antes.
+        let file = record_file(&path);
+        return match file.as_ref().and_then(|f| read_record(f)) {
+            Some(mut r) if r.branch == branch => {
+                let before = r.clone();
+                r.origin = who.origin.or(r.origin);
+                r.session = who.session.or(r.session);
+                r.phase = who.phase.or(r.phase);
+                if let (true, Some(f), Ok(json)) =
+                    (r != before, file, serde_json::to_string_pretty(&r))
+                {
+                    let _ = std::fs::write(f, json);
+                }
+                Ok(path)
+            }
+            _ => Err(tr!("ya existe {p}", p = path.display()).to_string()),
         };
     }
     if let Some(dir) = path.parent() {
@@ -906,6 +916,26 @@ mod tests {
         // Otra vez la misma rama: la misma carpeta, sin error (un agente que repite).
         let again = create(&dir, "feat/new-thing", None, &root, Record::default()).unwrap();
         assert_eq!(again, path);
+        assert_eq!(
+            super::records(&dir, &root)[0].session.as_deref(),
+            Some("1:7")
+        );
+        // Pedido de nuevo desde otra terminal (otro lanzamiento de la fase): el registro pasa
+        // a ella; si no, la limpieza lo daría por cerrado al cerrarse la primera.
+        let who = Record {
+            session: Some("1:9".into()),
+            phase: Some("plan #1, fase 2".into()),
+            ..Default::default()
+        };
+        create(&dir, "feat/new-thing", None, &root, who).unwrap();
+        let updated = &super::records(&dir, &root)[0];
+        assert_eq!(updated.session.as_deref(), Some("1:9"));
+        assert_eq!(updated.phase.as_deref(), Some("plan #1, fase 2"));
+        assert_eq!(
+            updated.origin.as_deref(),
+            Some("Codex"),
+            "lo que no trae se queda"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 

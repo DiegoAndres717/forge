@@ -353,7 +353,13 @@ fn ui_preview() {
                         "Local storage sync",
                         "pending",
                         Some("feat/offline-cart"),
-                        &[],
+                        &[("Persist the cart in src/cart/store.ts", false)],
+                    ),
+                    phase(
+                        "Sync on reconnect",
+                        "pending",
+                        Some("feat/cart-sync"),
+                        &[("Read src/cart/store.ts when back online", false)],
                     ),
                     phase("Conflict resolution", "pending", None, &[]),
                 ],
@@ -546,6 +552,28 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "8d-ideas-aprender");
     harness.state_mut().workspaces[0].ideas.learning.clear();
+    settle(&mut harness);
+    // «Lanzar fases en paralelo»: las fases con rama, el aviso de que tocan lo mismo y la fase
+    // sin rama explicando por qué no puede ir.
+    // (el plan en curso, plegado: si no, la tarjeta queda por debajo del borde)
+    let ideas = &mut harness.state_mut().workspaces[0].ideas;
+    let doing: Vec<i64> = ideas
+        .items
+        .iter()
+        .filter(|i| i.status == "doing")
+        .map(|i| i.id)
+        .collect();
+    for id in doing {
+        ideas.toggled.insert(id, false);
+    }
+    settle(&mut harness);
+    harness
+        .get_by_label_contains("Launch phases in parallel")
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "8e-ideas-paralelo");
+    harness.state_mut().workspaces[0].ideas.parallel = None;
+    harness.state_mut().workspaces[0].ideas.toggled.clear();
     settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
     std::fs::write(

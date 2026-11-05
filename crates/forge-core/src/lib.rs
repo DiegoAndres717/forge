@@ -19,6 +19,7 @@ pub mod ideas;
 pub mod launch;
 pub mod mcp;
 pub mod memory;
+pub mod parallel;
 pub mod pr;
 pub mod project;
 pub mod reviewers;

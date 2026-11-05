@@ -102,6 +102,14 @@ struct Panel {
     account: Option<i64>,
 }
 
+/// Por qué no se puede abrir el agente `name` con un mensaje inicial (Gemini CLI, Qwen Code…).
+pub fn no_prompt(name: &str) -> String {
+    tr!(
+        "{name} no admite empezar con un mensaje, así que no puede recibir la fase: elige otro agente (Claude Code, Codex, OpenCode o Antigravity).",
+        name = name
+    )
+}
+
 /// `/Users/x/dev` → `~/dev`
 pub fn tilde(path: &std::path::Path) -> String {
     match forge_core::home_dir().and_then(|h| path.strip_prefix(h).ok().map(PathBuf::from)) {
@@ -325,6 +333,11 @@ pub struct IdeasView {
     /// Agentes que pueden revisar una fase: (id, nombre, tiene modo de solo lectura). Los pone
     /// la app antes de dibujar.
     pub reviewers: Vec<(String, String, bool)>,
+    /// Agentes instalados y activos para lanzar fases en paralelo: (id, nombre, admite un
+    /// mensaje inicial). Los pone la app antes de dibujar.
+    pub launchers: Vec<(String, String, bool)>,
+    /// «Lanzar en paralelo» abierto en un plan: (plan, fases elegidas, desde 0).
+    pub parallel: Option<(i64, std::collections::BTreeSet<usize>)>,
     /// Comentarios de revisión de los planes del proyecto.
     pub comments: Vec<forge_core::ideas::ReviewComment>,
     /// Revisiones de fases (en curso y terminadas) del proyecto.
@@ -1302,6 +1315,52 @@ impl Workspace {
         if self.panels.len() > before {
             self.reviewing.push(self.focus); // el panel nuevo toma el foco
         }
+    }
+
+    /// La sesión (`FORGE_SESSION_ID`) que tendrá la próxima terminal que se abra: el registro
+    /// de un worktree la apunta antes de abrirla, para que la limpieza sepa cuándo se cerró.
+    pub fn next_session_id(&self) -> String {
+        forge_core::store::session_id_for_panel(std::process::id(), self.next_id)
+    }
+
+    /// Abre el agente `id` en una terminal nueva en `cwd` (nunca reutiliza otra: cada fase en
+    /// paralelo tiene la suya), con `prompt` como primer mensaje. Dice por qué no si no puede.
+    pub fn launch_agent_in(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        prompt: &str,
+        cwd: PathBuf,
+        name: String,
+        area: Rect,
+    ) -> Result<(), String> {
+        let spec = self
+            .project
+            .agents
+            .iter()
+            .find(|a| a.id == id)
+            .cloned()
+            .ok_or_else(|| tr!("No encuentro el agente {id} en este proyecto.", id = id))?;
+        let command = spec
+            .with_prompt(&spec.command, prompt)
+            .ok_or_else(|| no_prompt(&spec.name))?;
+        let state = PanelState {
+            name: Some(name),
+            cwd,
+            command: Some(command),
+            process: None,
+            agent: Some(spec.id.clone()),
+            account: None,
+        };
+        let dir = self.focused_rect(area).map_or(Dir::Row, layout::auto_dir);
+        let before = self.next_id;
+        self.add_panel(ctx, dir, state);
+        if self.next_id == before {
+            return Err(self.error.take().unwrap_or_else(|| {
+                tr!("no se pudo abrir la terminal de {name}", name = spec.name)
+            }));
+        }
+        Ok(())
     }
 
     /// Pone las cuentas y las elegidas en el proyecto (programa → id de cuenta).
