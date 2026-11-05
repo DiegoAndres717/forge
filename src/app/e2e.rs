@@ -4764,8 +4764,16 @@ fn running_agents_show_what_they_do_their_overlaps_and_honest_gaps() {
             .unwrap();
     }
     let mut h = app_with(store, Some(dir.clone()));
+    // La detección de agentes en segundo plano cambia el alto de la sección AGENTES al
+    // terminar: si acaba entre la consulta y el clic, el clic cae donde ya no está la fila
+    // (pasó en el CI de Linux). Primero, que termine.
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.run_steps(2);
     h.get_by_label("Agentes en marcha").click();
     h.run_steps(3);
+    assert!(h.state().agents_board.open, "el clic abre la sección");
     h.get_by_label("explorer: find the login");
     h.get_by_label("corriendo cargo test -p x");
     h.get_by_label("✓ terminó: All 12 tests pass");
