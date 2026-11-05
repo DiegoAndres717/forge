@@ -439,7 +439,7 @@ fn raw_tools() -> Value {
         {
             "name": "work_status",
             // Para agentes: en inglés, como todo lo que les llega.
-            "description": "Live board of the agents working on this repository in parallel: which agent (and subagent) is on which worktree, branch and plan phase, what it is doing now, the files each worktree has changed, and overlaps (the same file touched by two at once). Call it before editing files another agent may be working on, and when starting work in a worktree. Agents without hooks Forge can use are listed as having no live data.",
+            "description": "Live board of the agents working on this repository in parallel: which agent (and subagent) is on which worktree, branch and plan phase, what it is doing now, the files each worktree has changed, the port offset of each Forge worktree (run dev servers on their usual port plus it), and overlaps (the same file touched by two at once). Call it before editing files another agent may be working on, and when starting work in a worktree. Agents without hooks Forge can use are listed as having no live data.",
             "inputSchema": {"type": "object", "properties": {}}
         }
     ])

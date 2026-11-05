@@ -3234,4 +3234,15 @@ pub const EN: &[(&str, &str)] = &[
         "No encuentro ningún agente instalado y activo que pueda empezar con un mensaje (Claude Code, Codex, OpenCode o Antigravity).",
         "No installed and enabled agent can start with a message (Claude Code, Codex, OpenCode or Antigravity).",
     ),
+    ("puerto {p}", "port {p}"),
+    ("puertos +{n}", "ports +{n}"),
+    ("Puerto por worktree:", "Port per worktree:"),
+    (
+        "Opcional (0 = no). Forge le pasa PORT con este puerto en la carpeta principal y desplazado en cada worktree (3000, 3010, 3020…), para que las copias no choquen. Si el proceso ya define PORT en su entorno, se respeta el suyo. Todos los procesos reciben FORGE_PORT_OFFSET.",
+        "Optional (0 = none). Forge passes PORT with this port in the main folder and shifted in each worktree (3000, 3010, 3020…), so copies don't collide. If the process already sets PORT in its environment, its own is kept. Every process gets FORGE_PORT_OFFSET.",
+    ),
+    (
+        "Puertos de este worktree: +{n} (FORGE_PORT_OFFSET={n}): un servidor que va en el 3000 aquí va en el {p}.",
+        "Ports for this worktree: +{n} (FORGE_PORT_OFFSET={n}): a server that runs on 3000 goes on {p} here.",
+    ),
 ];

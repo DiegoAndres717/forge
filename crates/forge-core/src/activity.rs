@@ -573,6 +573,8 @@ pub struct Tree {
     pub changed: Vec<String>,
     /// «plan #194, phase 3 "Live board"» si su rama es la de una fase.
     pub phase: Option<String>,
+    /// Desplazamiento de puertos (`crate::ports`): 0 en el principal y los que no son de Forge.
+    pub port_offset: u32,
 }
 
 /// Un archivo que dos o más tocan a la vez.
@@ -632,6 +634,12 @@ fn tree_label(t: &Tree) -> String {
 
 /// Los worktrees vivos del repositorio, con sus cambios y la fase de su rama.
 pub fn trees(repo: &Path, plans: &[crate::ideas::Idea]) -> Vec<Tree> {
+    let offsets: Vec<(PathBuf, u32)> = crate::worktrees::root()
+        .map(|root| crate::ports::offsets(repo, &root))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, o)| (crate::canonical(&p), o))
+        .collect();
     crate::worktrees::list_basic(repo)
         .unwrap_or_default()
         .into_iter()
@@ -647,11 +655,17 @@ pub fn trees(repo: &Path, plans: &[crate::ideas::Idea]) -> Vec<Tree> {
                 })
                 .unwrap_or_default();
             let phase = w.branch.as_deref().and_then(|b| phase_of(plans, b));
+            let path = crate::canonical(&w.path);
+            let port_offset = offsets
+                .iter()
+                .find(|(p, _)| *p == path)
+                .map_or(0, |(_, o)| *o);
             Tree {
-                path: crate::canonical(&w.path),
+                path,
                 branch: w.branch,
                 changed,
                 phase,
+                port_offset,
             }
         })
         .collect()
@@ -938,11 +952,17 @@ pub fn render(
         if let Some(p) = &t.phase {
             line.push_str(&format!(" · {p}"));
         }
+        if t.port_offset > 0 {
+            line.push_str(&format!(" · ports +{}", t.port_offset));
+        }
         match t.changed.len() {
             0 => line.push_str(" · no uncommitted changes"),
             n => line.push_str(&format!(" · {n} changed: {}", files_line(&t.changed))),
         }
         out.push(line);
+    }
+    if trees.iter().any(|t| t.port_offset > 0) {
+        out.push("Ports: in a worktree with \"ports +N\", run dev servers on their usual port + N (3000 becomes 3000 + N) so copies don't collide. Forge's processes get it as FORGE_PORT_OFFSET (and PORT when they declare a base port).".into());
     }
     out.push("Agents:".into());
     let tree_of = |a: &Activity| {
@@ -1120,6 +1140,32 @@ mod tests {
         assert_eq!(live_data("Claude Code"), Live::Full);
         assert_eq!(live_data("Codex"), Live::Commands);
         assert_eq!(live_data("Qwen Code"), Live::None);
+    }
+
+    /// Plan #194, fase 5: cada agente ve qué puertos le tocan en su worktree.
+    #[test]
+    fn work_status_tells_each_worktree_its_port_offset() {
+        let trees = [
+            Tree {
+                path: "/r/main".into(),
+                branch: Some("main".into()),
+                ..Default::default()
+            },
+            Tree {
+                path: "/r/wt".into(),
+                branch: Some("feat/x".into()),
+                port_offset: 10,
+                ..Default::default()
+            },
+        ];
+        let text = render(&trees, &[], &[], None, 0);
+        let line = |tail: &str| text.lines().find(|l| l.contains(tail)).unwrap().to_string();
+        assert!(line("/r/wt").contains("ports +10"), "{text}");
+        assert!(!line("/r/main").contains("ports"), "{text}");
+        assert!(text.contains("FORGE_PORT_OFFSET"), "{text}");
+        // Sin worktrees desplazados no se añade nada.
+        let text = render(&trees[..1], &[], &[], None, 0);
+        assert!(!text.contains("FORGE_PORT_OFFSET"), "{text}");
     }
 
     /// Repositorio Git real en una carpeta temporal (la prueba la borra al final).

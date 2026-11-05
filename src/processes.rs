@@ -135,6 +135,8 @@ pub struct Processes {
     env: HashMap<String, String>,
     poll: Option<Receiver<Vec<Probe>>>,
     last_poll: Instant,
+    /// Desplazamiento de puertos del worktree en `root` (`forge_core::ports`).
+    port_offset: u32,
 }
 
 impl Processes {
@@ -145,7 +147,9 @@ impl Processes {
             env,
             poll: None,
             last_poll: Instant::now(),
+            port_offset: 0,
         };
+        processes.port_offset = forge_core::ports::offset_here(&processes.root);
         processes.sync(defs);
         processes
     }
@@ -178,8 +182,57 @@ impl Processes {
     }
 
     pub fn set_env(&mut self, root: PathBuf, env: HashMap<String, String>) {
+        if root != self.root {
+            self.port_offset = forge_core::ports::offset_here(&root);
+        }
         self.root = root;
         self.env = env;
+    }
+
+    /// El `PORT` que recibe el proceso (su `port` + el desplazamiento), si le toca.
+    pub fn assigned_port(&self, def: &ProcessDef) -> Option<u16> {
+        forge_core::ports::assigned(def.port, &def.environment, self.port_offset)
+    }
+
+    /// Lo que se muestra del puerto asignado (solo texto): «puerto 3010», o «puertos +10»
+    /// si no declara `port`; nada en el principal sin `port` (como hasta ahora).
+    pub fn port_text(&self, def: &ProcessDef) -> Option<String> {
+        match self.assigned_port(def) {
+            Some(p) => Some(tr!("puerto {p}", p = p)),
+            None if self.port_offset > 0 => Some(tr!("puertos +{n}", n = self.port_offset)),
+            None => None,
+        }
+    }
+
+    /// El puerto que mira su comprobación de salud: si es su puerto base, el desplazado.
+    /// La comprobación de salud que se ejecuta: la del proceso con su puerto y su URL
+    /// desplazados cuando apuntan a su puerto base.
+    pub fn health_check(&self, def: &ProcessDef) -> Option<HealthCheck> {
+        let mut check = def.health_check.clone()?;
+        check.port = self.health_port(def);
+        if let (Some(base), Some(assigned)) = (def.port, self.assigned_port(def))
+            && let Some(url) = &check.url
+        {
+            // `http://host:3000/…` → `http://host:3010/…` (solo si es el puerto base).
+            let (from, to) = (format!(":{base}"), format!(":{assigned}"));
+            if let Some(at) = url.find(&from)
+                && url[at + from.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_ascii_digit())
+            {
+                check.url = Some(format!("{}{to}{}", &url[..at], &url[at + from.len()..]));
+            }
+        }
+        Some(check)
+    }
+
+    pub fn health_port(&self, def: &ProcessDef) -> Option<u16> {
+        let port = def.health_check.as_ref()?.port?;
+        match self.assigned_port(def) {
+            Some(assigned) if def.port == Some(port) => Some(assigned),
+            _ => Some(port),
+        }
     }
 
     pub fn get(&self, id: &str) -> Option<&Managed> {
@@ -206,6 +259,7 @@ impl Processes {
     pub fn environment(&self, def: &ProcessDef) -> HashMap<String, String> {
         let mut env = self.env.clone();
         env.extend(def.environment.clone());
+        forge_core::ports::apply(&mut env, def.port, &def.environment, self.port_offset);
         env.insert(
             "FORGE_PROJECT".into(),
             self.root.to_string_lossy().into_owned(),
@@ -372,7 +426,7 @@ impl Processes {
             .filter(|m| matches!(m.status, Status::Running { .. }))
             .filter_map(|m| {
                 let pid = m.terminal.as_ref()?.pid()?;
-                let check = m.def.health_check.clone().filter(|_| now >= m.next_health);
+                let check = self.health_check(&m.def).filter(|_| now >= m.next_health);
                 Some((m.def.id.clone(), pid, check))
             })
             .collect();
@@ -727,6 +781,100 @@ mod tests {
         ));
     }
 
+    /// Plan #194, fase 5: un proceso lanzado desde un worktree de Forge recibe su
+    /// desplazamiento y su `PORT` (base + desplazamiento); uno que fija su propio `PORT`
+    /// conserva el suyo, y la comprobación de salud mira el puerto ya desplazado.
+    #[test]
+    #[cfg_attr(windows, ignore = "reads the variables back with sh")]
+    fn a_process_started_in_a_worktree_gets_its_port() {
+        use forge_core::worktrees::{Record, create};
+        let dir = std::env::temp_dir().join(format!("forge-proc-ports-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let init = "git init -q -b main && git config user.email t@t && git config user.name t \
+                    && echo 1 > a && git add -A && git commit -qm inicio";
+        let ok = std::process::Command::new("sh")
+            .args(["-c", init])
+            .current_dir(&dir)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok);
+        let data = dir.join("forge-data/worktrees");
+        let wt = create(&dir, "feat/web", None, &data, Record::default()).unwrap();
+        let offset = forge_core::ports::offset(&wt, &data);
+        assert!(offset > 0);
+        let def = |id: &str, env: &[(&str, &str)]| ProcessDef {
+            id: id.into(),
+            name: None,
+            command: "printf '%s %s' \"$PORT\" \"$FORGE_PORT_OFFSET\" > ports.txt".into(),
+            working_directory: None,
+            environment: env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            restart: Default::default(),
+            auto_restart: AutoRestart::Never,
+            health_check: Some(HealthCheck {
+                port: Some(3000),
+                url: None,
+                command: None,
+                interval_seconds: 5,
+                timeout_seconds: 2,
+            }),
+            port: Some(3000),
+        };
+        let web = def("web", &[]);
+        let own = def("api", &[("PORT", "4500")]);
+        let mut p = Processes::new(&[web.clone(), own.clone()], wt.clone(), HashMap::new());
+        // La carpeta de worktrees de la prueba no es la de la base de datos.
+        p.port_offset = offset;
+        let port = 3000 + offset as u16;
+        assert_eq!(p.assigned_port(&web), Some(port));
+        assert_eq!(p.health_port(&web), Some(port));
+        assert_eq!(p.assigned_port(&own), None);
+        assert_eq!(p.health_port(&own), Some(3000));
+        // Una comprobación por URL al puerto base también mira el desplazado.
+        let mut by_url = def("docs", &[]);
+        by_url.health_check = Some(HealthCheck {
+            port: None,
+            url: Some("http://localhost:3000/health".into()),
+            command: None,
+            interval_seconds: 5,
+            timeout_seconds: 2,
+        });
+        assert_eq!(
+            p.health_check(&by_url).and_then(|c| c.url),
+            Some(format!("http://localhost:{port}/health"))
+        );
+        assert_eq!(
+            p.health_check(&own).and_then(|c| c.url),
+            None,
+            "sin url no se inventa"
+        );
+        assert_eq!(
+            p.environment(&own).get("PORT").map(String::as_str),
+            Some("4500")
+        );
+        let ctx = egui::Context::default();
+        p.start(&ctx, "web");
+        let file = wt.join("ports.txt");
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while std::fs::read_to_string(&file)
+            .unwrap_or_default()
+            .is_empty()
+        {
+            assert!(Instant::now() < deadline, "no escribió {}", file.display());
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            format!("{port} {offset}")
+        );
+        drop(p);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     fn wait_until(
         processes: &mut Processes,
         ctx: &egui::Context,
@@ -761,6 +909,7 @@ mod tests {
             restart: Default::default(),
             auto_restart,
             health_check: None,
+            port: None,
         };
         let server = "exec python3 -c 'import socket,time;s=socket.socket();s.bind((\"127.0.0.1\",0));s.listen();print(\"listo\",flush=True);time.sleep(60)'";
         let mut p = Processes::new(
@@ -828,6 +977,7 @@ mod orphan_tests {
             restart: Default::default(),
             auto_restart: AutoRestart::Never,
             health_check: None,
+            port: None,
         };
         let mut p = Processes::new(&[def], "/tmp".into(), HashMap::new());
         p.start(&ctx, "bg");
@@ -866,6 +1016,7 @@ mod orphan_tests {
             restart: Default::default(),
             auto_restart: AutoRestart::Never,
             health_check: None,
+            port: None,
         };
         let alive = |pid: &str| {
             let out = std::process::Command::new("tasklist")

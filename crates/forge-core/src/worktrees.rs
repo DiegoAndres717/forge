@@ -466,6 +466,9 @@ pub struct Record {
     pub phase: Option<String>,
     #[serde(default)]
     pub created_at: i64,
+    /// Ranura de puertos (`crate::ports`): desplazamiento = ranura × 10. 0 = sin asignar.
+    #[serde(default)]
+    pub slot: u32,
 }
 
 impl Record {
@@ -526,6 +529,23 @@ fn record_file(path: &Path) -> Option<PathBuf> {
 
 fn read_record(file: &Path) -> Option<Record> {
     serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
+}
+
+/// Vuelve a guardar un registro (p. ej. con su ranura de puertos ya asignada).
+/// Solo sobre el registro de esa misma carpeta (no un `.json` ajeno con otra ruta), y de una
+/// vez (archivo temporal y renombrar): quien lo lea a la vez no ve un registro a medias.
+pub(crate) fn write_record(record: &Record) -> bool {
+    let (Some(file), Ok(json)) = (
+        record_file(&record.path),
+        serde_json::to_string_pretty(record),
+    ) else {
+        return false;
+    };
+    if !read_record(&file).is_some_and(|r| same_path(&r.path, &record.path)) {
+        return false;
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, json).is_ok() && std::fs::rename(&tmp, &file).is_ok()
 }
 
 /// Crea el worktree de `branch` en `root/<proyecto>/<rama>` (y la rama, desde `from` o la
