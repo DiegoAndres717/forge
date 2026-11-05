@@ -117,6 +117,8 @@ impl App {
         let launchers = view.launchers.clone();
         let comments = view.comments.clone();
         let runs = view.runs.clone();
+        let authors = view.authors.clone();
+        let in_use = view.in_use.clone();
         let input = ui.add(
             theme::field(egui::TextEdit::singleline(&mut view.input))
                 .hint_text(tr!("Nueva idea para el backlog… (Enter)"))
@@ -176,6 +178,8 @@ impl App {
                 phase_input: &phase_cell,
                 parallel: &parallel_cell,
                 launchers: &launchers,
+                authors: &authors,
+                in_use: &in_use,
             };
             if let Some(edit) = editing.as_mut().filter(|e| e.0 == idea.id) {
                 edit_card(edit, target, ui, cmds);
@@ -291,10 +295,12 @@ impl App {
                 let runs = self
                     .db(|s| s.list_review_runs(Some(&path)))
                     .unwrap_or_default();
+                let authors = self.phase_authors(i, &items);
                 let ws = &mut self.workspaces[i];
                 let view = &mut ws.ideas;
                 view.comments = comments;
                 view.runs = runs;
+                view.authors = authors;
                 let new_plan = view
                     .loaded
                     .is_some()
@@ -524,6 +530,60 @@ impl App {
             .map(|a| (a.id.clone(), a.name.clone()))
     }
 
+    /// Qué agente hizo cada fase con rama de `items`, según lo que Forge ya sabe: el registro
+    /// de su worktree, las terminales abiertas, lo que editó cada agente y el plan.
+    fn phase_authors(
+        &mut self,
+        workspace: usize,
+        items: &[Idea],
+    ) -> HashMap<(i64, usize), forge_core::cross_review::Author> {
+        // Solo hace falta en las fases que muestran «Revisar» (sin ellas, nada que leer).
+        let reviewable: Vec<(i64, usize, &Phase)> = items
+            .iter()
+            .flat_map(|idea| {
+                idea.phases
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.reviewable())
+                    .map(|(n, p)| (idea.id, n, p))
+            })
+            .collect();
+        let Some(store) = self.store.as_ref().filter(|_| !reviewable.is_empty()) else {
+            return HashMap::new();
+        };
+        let ws = &mut self.workspaces[workspace];
+        let path = ws.project.path.clone();
+        let repo = ws
+            .ideas
+            .repo
+            .get_or_insert_with(|| {
+                forge_core::worktrees::main_root(&path).unwrap_or_else(|_| path.clone())
+            })
+            .clone();
+        let records = forge_core::worktrees::root()
+            .map(|root| forge_core::worktrees::records_of_main(&repo, &root))
+            .unwrap_or_default();
+        let sessions = store.active_agent_sessions(&path).unwrap_or_default();
+        let activity = store.agent_activity(&repo, forge_core::store::now());
+        let evidence = forge_core::cross_review::Evidence {
+            records: &records,
+            sessions: &sessions,
+            activity: &activity,
+        };
+        reviewable
+            .into_iter()
+            .filter_map(|(plan, n, phase)| {
+                let author = forge_core::cross_review::author(
+                    phase.branch.as_deref(),
+                    phase.worked_by.as_deref(),
+                    &evidence,
+                    &ws.project.agents,
+                )?;
+                Some(((plan, n), author))
+            })
+            .collect()
+    }
+
     /// Los agentes instalados y activos que pueden revisar una fase: (id, nombre, modo de
     /// solo lectura).
     pub(super) fn reviewers(&self, workspace: usize) -> Vec<(String, String, bool)> {
@@ -662,6 +722,10 @@ struct ItemCtx<'a> {
     parallel: &'a std::cell::RefCell<super::parallel_launch::Pick>,
     /// Agentes para lanzar fases: (id, nombre, admite un mensaje inicial).
     launchers: &'a [(String, String, bool)],
+    /// Qué agente hizo cada fase (plan, número de fase).
+    authors: &'a HashMap<(i64, usize), forge_core::cross_review::Author>,
+    /// Agentes que el dueño usa ahora (ids), el más a mano primero.
+    in_use: &'a [String],
 }
 
 /// Cabecera de sección: `EN PROGRESO  2`.
@@ -1029,6 +1093,16 @@ fn phase_row(
                     }
                 }
             });
+            if phase.reviewable()
+                && let Some((line, hover)) = reviewer_line(idea.id, index, ctx)
+            {
+                let label = ui.add(
+                    egui::Label::new(RichText::new(line).size(11.0).color(theme::TEXT_3)).wrap(),
+                );
+                if let Some(hover) = hover {
+                    label.on_hover_text(hover);
+                }
+            }
             if open {
                 if !phase.notes.is_empty() {
                     ui.add(
@@ -1330,6 +1404,69 @@ fn fix_button(
             }
         }
     });
+}
+
+/// «Revisor: Codex (otra empresa que Claude Code)»: quién revisaría la fase y por qué (plan
+/// #84), y en la ayuda quién la hizo según qué. Solo texto: el botón «Revisar» sigue igual.
+fn reviewer_line(plan: i64, index: usize, ctx: &ItemCtx) -> Option<(String, Option<String>)> {
+    use forge_core::cross_review::{Source, Why, choose};
+    let author = ctx.authors.get(&(plan, index));
+    let candidates: Vec<&str> = ctx.reviewers.iter().map(|(id, _, _)| id.as_str()).collect();
+    let in_use: Vec<&str> = ctx.in_use.iter().map(String::as_str).collect();
+    let choice = choose(author.map(|a| a.agent.as_str()), &candidates, &in_use)?;
+    let name = |id: &str| {
+        ctx.reviewers
+            .iter()
+            .find(|(a, _, _)| a == id)
+            .map(|(_, name, _)| name.clone())
+            .or_else(|| {
+                forge_core::agents::builtins()
+                    .into_iter()
+                    .find(|a| a.id == id)
+                    .map(|a| a.name)
+            })
+            .unwrap_or_else(|| id.to_string())
+    };
+    let agent = name(&choice.agent);
+    let line = match &choice.why {
+        Why::OtherCompany(a) => tr!(
+            "Revisor: {agent} (otra empresa que {author})",
+            agent = agent,
+            author = name(a)
+        ),
+        Why::OnlyAgent => tr!(
+            "Revisor: {agent} (es el único agente instalado que puede revisar)",
+            agent = agent
+        ),
+        Why::NoOtherCompany(a) => tr!(
+            "Revisor: {agent} (no hay instalado ningún agente de otra empresa que {author})",
+            agent = agent,
+            author = name(a)
+        ),
+        Why::UnknownAuthor => tr!(
+            "Revisor: {agent} (no se sabe qué agente hizo la fase)",
+            agent = agent
+        ),
+        Why::UnknownCompany(a) => tr!(
+            "Revisor: {agent} (no se sabe de qué empresa es {author})",
+            agent = agent,
+            author = name(a)
+        ),
+    };
+    let hover = author.map(|a| {
+        let from = match a.source {
+            Source::Worktree => tr!("según el registro de su worktree"),
+            Source::Terminal => tr!("según su terminal en Forge"),
+            Source::Activity => tr!("según lo que editó en su worktree"),
+            Source::Plan => tr!("según quién marcó la fase en curso"),
+        };
+        tr!(
+            "Hizo la fase {author}, {from}. Con «Revisar» puedes elegir otro revisor.",
+            author = name(&a.agent),
+            from = from
+        )
+    });
+    Some((line.to_string(), hover.map(|h| h.to_string())))
 }
 
 /// «Revisar»: un menú con los agentes que pueden revisar la fase; el elegido abre su terminal.
