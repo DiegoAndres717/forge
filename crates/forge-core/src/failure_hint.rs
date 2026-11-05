@@ -36,7 +36,10 @@ pub fn failure_keys(output: &str) -> Vec<String> {
         } else if let Some(rest) = line.strip_prefix("thread '") {
             if let Some((name, tail)) = rest.split_once('\'')
                 && tail.contains("panicked at")
-                && name != "main"
+                // Solo nombres de test (`ruta::nombre`, `nombre_con_guiones`): ni «main» ni
+                // «<unnamed>» ni «tokio-runtime-worker».
+                && (name.contains("::") || name.contains('_'))
+                && !name.starts_with('<')
             {
                 add(name);
             }
@@ -47,8 +50,11 @@ pub fn failure_keys(output: &str) -> Vec<String> {
                 add(id);
             }
         // jest/vitest: «● Suite › nombre del test»
+        // (sin sus avisos propios, que no son tests).
         } else if let Some(rest) = line.strip_prefix("● ") {
-            add(rest.rsplit(" › ").next().unwrap_or(rest));
+            if !JEST_NOISE.iter().any(|n| rest.starts_with(n)) {
+                add(rest.rsplit(" › ").next().unwrap_or(rest));
+            }
         // go: «--- FAIL: TestNombre (0.00s)»
         } else if let Some(rest) = line.strip_prefix("--- FAIL: ") {
             add(rest.split_whitespace().next().unwrap_or(rest));
@@ -63,11 +69,18 @@ const MIN_KEY: usize = 8;
 const MAX_LINES: usize = 20_000;
 const MAX_KEYS: usize = 12;
 const MAX_HINTS: usize = 3;
+/// Líneas «● …» de jest que no son el nombre de un test.
+const JEST_NOISE: &[&str] = &[
+    "Test suite failed to run",
+    "Console",
+    "Validation",
+    "Deprecation",
+];
 
-/// ¿Sale `key` en `text` como nombre entero? Sin distinguir mayúsculas, y sin letras,
-/// cifras ni `_` pegadas a los lados: `foo_test` no es `foo_test_on_linux`.
+/// ¿Sale `key` en `text` (ya en minúsculas) como nombre entero? Sin distinguir mayúsculas,
+/// y sin letras, cifras ni `_` pegadas a los lados: `foo_test` no es `foo_test_on_linux`.
 fn names(text: &str, key: &str) -> bool {
-    let (text, key) = (text.to_lowercase(), key.to_lowercase());
+    let key = key.to_lowercase();
     let word = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
     text.match_indices(&key).any(|(at, _)| {
         !word(text[..at].chars().next_back()) && !word(text[at + key.len()..].chars().next())
@@ -76,7 +89,7 @@ fn names(text: &str, key: &str) -> bool {
 
 /// « (names `clave`)» cuando el título no la dice ya.
 fn naming(title: &str, key: &str) -> String {
-    if names(title, key) {
+    if names(&title.to_lowercase(), key) {
         String::new()
     } else {
         format!(" (names `{key}`)")
@@ -100,7 +113,14 @@ pub fn hint(store: &Store, project: &Path, session: &str, output: &str) -> Optio
     if keys.is_empty() {
         return None;
     }
-    let matched = |text: &str| keys.iter().find(|k| names(text, k)).cloned();
+    // Un nombre con espacios (jest: «renders correctly») es casi prosa: solo cuenta en el
+    // título o las etiquetas, no en el texto de la nota.
+    let matched = |head: &str, body: &str| {
+        let (head, body) = (head.to_lowercase(), body.to_lowercase());
+        keys.iter()
+            .find(|k| names(&head, k) || (!k.contains(' ') && names(&body, k)))
+            .cloned()
+    };
     // (clave para no repetir, línea para el agente)
     let mut found: Vec<(String, String)> = Vec::new();
     let memories = store.list_memories(project, None, usize::MAX >> 1).ok()?;
@@ -108,7 +128,7 @@ pub fn hint(store: &Store, project: &Path, session: &str, output: &str) -> Optio
         .iter()
         .filter(|m| m.status == "active" && !crate::memory::is_session_note(m))
     {
-        if let Some(key) = matched(&format!("{}\n{}\n{}", m.title, m.body, m.tags)) {
+        if let Some(key) = matched(&format!("{}\n{}", m.title, m.tags), &m.body) {
             let line = first_line(&m.body);
             found.push((
                 format!("m{}", m.id),
@@ -116,21 +136,21 @@ pub fn hint(store: &Store, project: &Path, session: &str, output: &str) -> Optio
                     "- memory #{} [{}] {}{}: {line}",
                     m.id,
                     m.kind,
-                    m.title,
+                    first_line(&m.title),
                     naming(&m.title, &key)
                 ),
             ));
         }
     }
     for idea in store.list_ideas(Some(project), false).unwrap_or_default() {
-        let mut text = format!("{}\n{}", idea.title, idea.note);
+        let mut text = idea.note.clone();
         for phase in &idea.phases {
             text.push_str(&format!("\n{}\n{}", phase.title, phase.notes));
             for task in &phase.tasks {
                 text.push_str(&format!("\n{}", task.text));
             }
         }
-        if let Some(key) = matched(&text) {
+        if let Some(key) = matched(&idea.title, &text) {
             let what = if idea.phases.is_empty() {
                 "backlog"
             } else {
@@ -330,6 +350,46 @@ mod tests {
             hint(&store, p, "s1", "error: could not find `Cargo.toml`"),
             None
         );
+    }
+
+    #[test]
+    fn jest_noise_and_unnamed_threads_are_not_test_names() {
+        let keys = failure_keys(
+            "  ● Test suite failed to run\n  ● Console\nthread '<unnamed>' panicked at src/x.rs:1:1:\nthread 'tokio-runtime-worker' panicked at src/y.rs:2:2:\n",
+        );
+        assert!(keys.is_empty(), "{keys:?}");
+    }
+
+    #[test]
+    fn a_jest_name_in_prose_is_not_a_match_but_one_in_the_title_is() {
+        let store = Store::in_memory().unwrap();
+        let p = Path::new("/p/jest");
+        let out = "  ● Cart › renders correctly\n";
+        store
+            .add_memory(
+                p,
+                "note",
+                "Estilo",
+                "The widget renders correctly on dark mode.",
+                "",
+                "x",
+            )
+            .unwrap();
+        assert_eq!(hint(&store, p, "s1", out), None);
+        let id = store
+            .add_memory(
+                p,
+                "error",
+                "Flaky: renders correctly\nsecond line",
+                "Timing.",
+                "",
+                "x",
+            )
+            .unwrap();
+        let text = hint(&store, p, "s1", out).expect("a hint");
+        assert!(text.contains(&format!("memory #{id}")), "{text}");
+        // El título va en una sola línea: una nota no mete líneas propias en el aviso.
+        assert!(!text.contains("\nsecond line"), "{text}");
     }
 
     #[test]

@@ -298,11 +298,13 @@ pub fn run(args: &[String]) -> i32 {
         // La salida de un comando que falló (por stdin, el hook posterior a la herramienta):
         // las notas que nombran lo que falló, una vez por nota y sesión; nada si no hay.
         (Some("memory"), Some("failure-hint")) => open_store().map(|store| {
-            let mut output = String::new();
-            let _ = std::io::Read::read_to_string(
+            // En bytes: un corte a mitad de un carácter no deja la salida vacía.
+            let mut bytes = Vec::new();
+            let _ = std::io::Read::read_to_end(
                 &mut std::io::Read::take(std::io::stdin(), 512 * 1024),
-                &mut output,
+                &mut bytes,
             );
+            let output = String::from_utf8_lossy(&bytes);
             let session = forge_core::store::current_session_id().unwrap_or_else(|| "none".into());
             if let Some(text) = forge_core::failure_hint::hint(&store, &project, &session, &output)
             {
