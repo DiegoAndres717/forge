@@ -68,6 +68,7 @@ pub struct Author {
 pub struct Evidence<'a> {
     pub records: &'a [Record],
     pub sessions: &'a [ActiveAgentSession],
+    /// Con `root` ya en forma canónica (`crate::canonical`), para no tocar el disco por fase.
     pub activity: &'a [Activity],
 }
 
@@ -104,19 +105,17 @@ pub fn author(
             .find(|s| s.id == session)
             .and_then(|s| id(&s.agent))
     };
+    // Quien editó primero (un revisor que edita llega después); las filas sin un agente
+    // reconocible no cuentan.
     let edited_in = |root: &Path| {
         let root = crate::canonical(root);
         evidence
             .activity
             .iter()
-            .filter(|a| !a.files.is_empty())
-            .filter(|a| {
-                a.root
-                    .as_deref()
-                    .is_some_and(|r| crate::canonical(r) == root)
-            })
-            .max_by_key(|a| a.updated_at)
-            .and_then(|a| id(&a.agent))
+            .filter(|a| !a.files.is_empty() && a.root.as_deref() == Some(root.as_path()))
+            .filter_map(|a| Some((a.started_at, id(&a.agent)?)))
+            .min()
+            .map(|(_, agent)| agent)
     };
     record
         .and_then(|r| r.origin.as_deref().and_then(id))
@@ -133,12 +132,18 @@ pub fn author(
         })
         .or_else(|| worked_by.and_then(id).map(found(Source::Plan)))
         .or_else(|| {
+            // Solo si en la rama hay un único agente: con dos, uno puede ser el revisor.
             let branch = branch?;
-            evidence
+            let mut on_branch: Vec<String> = evidence
                 .sessions
                 .iter()
                 .filter(|s| s.branch == branch)
-                .find_map(|s| id(&s.agent))
+                .filter_map(|s| id(&s.agent))
+                .collect();
+            on_branch.sort();
+            on_branch.dedup();
+            (on_branch.len() == 1)
+                .then(|| on_branch.remove(0))
                 .map(found(Source::Terminal))
         })
 }
@@ -379,6 +384,56 @@ mod tests {
                 source: Source::Terminal
             })
         );
+    }
+
+    #[test]
+    fn the_reviewer_editing_later_or_sharing_the_branch_is_not_taken_for_the_author() {
+        let agents = crate::agents::builtins();
+        let records = [record("feat/x", None, None)];
+        let row = |agent: &str, started_at| Activity {
+            agent: agent.into(),
+            root: Some(PathBuf::from("/wt/feat-x")),
+            files: vec!["a".into()],
+            started_at,
+            updated_at: 100 + started_at,
+            ..Default::default()
+        };
+        // Claude editó primero; luego un revisor sin modo de solo lectura y una fila sin
+        // nombre de agente. Cuenta quien editó primero, y la fila sin nombre no lo tapa.
+        let activity = [
+            row("OpenCode", 50),
+            row("agent", 60),
+            row("Claude Code", 10),
+        ];
+        let ev = Evidence {
+            records: &records,
+            activity: &activity,
+            ..Default::default()
+        };
+        assert_eq!(
+            author(Some("feat/x"), None, &ev, &agents).map(|a| a.agent),
+            Some("claude".into())
+        );
+        let activity = [row("agent", 60), row("Claude Code", 10)];
+        let ev = Evidence {
+            records: &records,
+            activity: &activity,
+            ..Default::default()
+        };
+        assert_eq!(
+            author(Some("feat/x"), None, &ev, &agents).map(|a| a.agent),
+            Some("claude".into())
+        );
+        // Dos terminales de agentes distintos en la rama (el autor y su revisor): no se sabe.
+        let sessions = [
+            session("s2", "feat/x", "Codex"),
+            session("s1", "feat/x", "Claude Code"),
+        ];
+        let ev = Evidence {
+            sessions: &sessions,
+            ..Default::default()
+        };
+        assert_eq!(author(Some("feat/x"), None, &ev, &agents), None);
     }
 
     #[test]

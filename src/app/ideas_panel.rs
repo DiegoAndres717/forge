@@ -564,7 +564,11 @@ impl App {
             .map(|root| forge_core::worktrees::records_of_main(&repo, &root))
             .unwrap_or_default();
         let sessions = store.active_agent_sessions(&path).unwrap_or_default();
-        let activity = store.agent_activity(&repo, forge_core::store::now());
+        // Las raíces en forma canónica una sola vez (no por fase).
+        let mut activity = store.agent_activity(&repo, forge_core::store::now());
+        for a in &mut activity {
+            a.root = a.root.as_deref().map(forge_core::canonical);
+        }
         let evidence = forge_core::cross_review::Evidence {
             records: &records,
             sessions: &sessions,
