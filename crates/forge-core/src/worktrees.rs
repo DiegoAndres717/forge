@@ -409,6 +409,9 @@ pub fn apply(repo: &Path, plan: &mut [Cleanup]) {
             }
             Action::Keep(_) => continue,
         };
+        if removed.is_ok() {
+            forget(&c.worktree.path);
+        }
         c.result = Some(removed.and_then(|()| {
             match (&c.worktree.branch, &c.worktree.head) {
                 // Como `branch -d`, pero vale con squash (ya comprobado): solo si la rama
@@ -424,10 +427,289 @@ pub fn apply(repo: &Path, plan: &mut [Cleanup]) {
     }
 }
 
+// ------------------------------------------------------------------ worktrees de Forge
+//
+// Varios agentes en paralelo creaban worktrees y clones sueltos (en /tmp, .claude/worktrees,
+// carpetas hermanas) que quedaban como basura. `forge worktree new` los pone todos en un
+// mismo sitio, `<datos de Forge>/worktrees/<proyecto>/<rama>`, y apunta quién lo pidió en
+// `<rama>.json` al lado (fuera del worktree: dentro lo dejaría con cambios). Guard frena
+// los `git worktree add` y `git clone` a mano del propio proyecto.
+
+/// Con `FORGE_ALLOW_WORKTREE=1` un agente puede crear a mano un worktree o un clon del
+/// proyecto (casos legítimos: probar un clon limpio, un bisect…).
+pub const ALLOW: &str = "FORGE_ALLOW_WORKTREE";
+
+/// Un worktree creado con `forge worktree new` y quién lo pidió (lo que hubiera en el
+/// entorno; vacío si no se sabe).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Record {
+    pub path: PathBuf,
+    pub branch: String,
+    /// Raíz del worktree principal del repositorio.
+    pub project: PathBuf,
+    /// El agente (`FORGE_ORIGIN`).
+    #[serde(default)]
+    pub origin: Option<String>,
+    /// La terminal (`FORGE_SESSION_ID`: «pid de la app:terminal»).
+    #[serde(default)]
+    pub session: Option<String>,
+    /// La fase del plan cuya rama es esta («plan #194, fase 2»).
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub created_at: i64,
+}
+
+impl Record {
+    /// «Claude Code · plan #194, fase 2», o vacío si no se sabe quién lo pidió.
+    pub fn requester(&self) -> String {
+        [&self.origin, &self.phase]
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+/// `<datos de Forge>/worktrees`, junto a la base de datos (`FORGE_DB` la mueve).
+pub fn root() -> Option<PathBuf> {
+    Some(
+        crate::store::Store::default_path()?
+            .parent()?
+            .join("worktrees"),
+    )
+}
+
+/// `feat/x` → `feat-x`: un nombre de carpeta válido en cualquier sistema.
+fn folder_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-_.".contains(c) {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+/// Raíz del worktree principal (la carpeta del proyecto, aunque se pida desde otro worktree).
+pub fn main_root(repo: &Path) -> Result<PathBuf, String> {
+    let out = git(repo, &["worktree", "list", "--porcelain", "-z"])?;
+    parse(&out)
+        .into_iter()
+        .next()
+        .map(|w| w.path)
+        .ok_or_else(|| tr!("no es un repositorio Git").to_string())
+}
+
+/// Carpeta de los worktrees de `project` (raíz del principal) dentro de `root`.
+fn project_dir(project: &Path, root: &Path) -> PathBuf {
+    let name = project.file_name().unwrap_or_default().to_string_lossy();
+    root.join(folder_name(&name))
+}
+
+/// El registro de un worktree, al lado de su carpeta (`feat-x` → `feat-x.json`).
+fn record_file(path: &Path) -> Option<PathBuf> {
+    let name = path.file_name()?.to_string_lossy();
+    Some(path.with_file_name(format!("{name}.json")))
+}
+
+fn read_record(file: &Path) -> Option<Record> {
+    serde_json::from_str(&std::fs::read_to_string(file).ok()?).ok()
+}
+
+/// Crea el worktree de `branch` en `root/<proyecto>/<rama>` (y la rama, desde `from` o la
+/// principal, si no existe) y lo registra. Devuelve su carpeta.
+pub fn create(
+    repo: &Path,
+    branch: &str,
+    from: Option<&str>,
+    root: &Path,
+    who: Record,
+) -> Result<PathBuf, String> {
+    if branch.starts_with('-') || git(repo, &["check-ref-format", "--branch", branch]).is_err() {
+        return Err(tr!("nombre de rama no válido: {b}", b = branch).to_string());
+    }
+    let project = main_root(repo)?;
+    let path = project_dir(&project, root).join(folder_name(branch));
+    if path.exists() {
+        // Un agente que lo vuelve a pedir: el mismo, sin error.
+        let same = record_file(&path)
+            .and_then(|f| read_record(&f))
+            .is_some_and(|r| r.branch == branch);
+        return if same {
+            Ok(path)
+        } else {
+            Err(tr!("ya existe {p}", p = path.display()).to_string())
+        };
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let target = path.to_string_lossy().into_owned();
+    let exists = crate::git::resolve_commit(&project, branch).is_some();
+    let args: Vec<String> = match from {
+        // La rama ya existe (local o en origin): git la saca tal cual.
+        None if exists => vec!["worktree".into(), "add".into(), target, branch.into()],
+        _ => {
+            let base = match from {
+                Some(f) => f.to_string(),
+                None => crate::git::main_branch(&project)
+                    .ok_or_else(|| tr!("no se encontró la rama principal").to_string())?,
+            };
+            // Sin seguir a la base (origin/main): la limpieza la tomaría por ya subida.
+            [
+                "worktree",
+                "add",
+                "--no-track",
+                "-b",
+                branch,
+                &target,
+                &base,
+            ]
+            .map(String::from)
+            .to_vec()
+        }
+    };
+    let out = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(&project)
+        // Los enlaces de Guard dejan pasar este: lo crea Forge, en su sitio.
+        .env(ALLOW, "1")
+        .output()
+        .map_err(|e| tr!("no se pudo ejecutar git: {e}", e = e).to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let record = Record {
+        path: path.clone(),
+        branch: branch.to_string(),
+        project,
+        created_at: crate::store::now(),
+        ..who
+    };
+    if let (Some(file), Ok(json)) = (record_file(&path), serde_json::to_string_pretty(&record)) {
+        std::fs::write(file, json).map_err(|e| e.to_string())?;
+    }
+    Ok(path)
+}
+
+/// Los worktrees de `repo` creados con `forge worktree new`.
+pub fn records(repo: &Path, root: &Path) -> Vec<Record> {
+    let Ok(project) = main_root(repo) else {
+        return Vec::new();
+    };
+    let project = crate::canonical(&project);
+    let Ok(entries) = std::fs::read_dir(project_dir(&project, root)) else {
+        return Vec::new();
+    };
+    let mut list: Vec<Record> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "json"))
+        .filter_map(|p| read_record(&p))
+        .filter(|r| crate::canonical(&r.project) == project)
+        .collect();
+    list.sort_by(|a, b| a.path.cmp(&b.path));
+    list
+}
+
+/// Borra el registro de un worktree ya quitado: solo si de verdad es el de Forge para esa
+/// carpeta (al lado de un worktree cualquiera puede haber un `.json` del usuario).
+fn forget(path: &Path) {
+    if let Some(file) = record_file(path)
+        && read_record(&file).is_some_and(|r| same_path(&r.path, path))
+    {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
+/// ¿La misma carpeta? También si ya no existe (se compara la carpeta que la contiene):
+/// `/var` y `/private/var` en macOS, `C:\` y `\\?\C:\` en Windows.
+fn same_path(a: &Path, b: &Path) -> bool {
+    let key = |p: &Path| {
+        p.parent()
+            .map(crate::canonical)
+            .unwrap_or_default()
+            .join(p.file_name().unwrap_or_default())
+    };
+    key(a) == key(b)
+}
+
+/// El registro de `wt`, si lo tiene.
+pub fn record_of<'a>(wt: &Worktree, records: &'a [Record]) -> Option<&'a Record> {
+    records.iter().find(|r| same_path(&r.path, &wt.path))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::git::test_repo;
+
+    /// Plan #194, fase 2: el worktree va a `<raíz>/<proyecto>/<rama saneada>`, con su rama
+    /// nueva desde la principal, y queda registrado con quién lo pidió.
+    #[test]
+    fn a_new_worktree_goes_to_forges_folder_and_is_registered() {
+        let dir = test_repo("wt-new", "true");
+        let root = dir.join("forge-data/worktrees");
+        let who = Record {
+            origin: Some("Codex".into()),
+            session: Some("1:7".into()),
+            ..Default::default()
+        };
+        let path = create(&dir, "feat/new-thing", None, &root, who).unwrap();
+        let name = dir.file_name().unwrap();
+        assert_eq!(path, root.join(name).join("feat-new-thing"));
+        assert!(path.join("a").is_file(), "es un checkout del repositorio");
+        let list = list(&dir).unwrap();
+        let wt = list.iter().find(|w| !w.main).unwrap();
+        assert_eq!(wt.branch.as_deref(), Some("feat/new-thing"));
+        assert_eq!(crate::canonical(&wt.path), crate::canonical(&path));
+        // Sin seguir a la principal: si no, la limpieza la tomaría por subida.
+        assert!(wt.unpushed.is_none(), "{wt:?}");
+        let records = records(&dir, &root);
+        assert_eq!(records.len(), 1, "{records:?}");
+        assert_eq!(records[0].branch, "feat/new-thing");
+        assert_eq!(records[0].origin.as_deref(), Some("Codex"));
+        assert_eq!(records[0].requester(), "Codex");
+        // Otra vez la misma rama: la misma carpeta, sin error (un agente que repite).
+        let again = create(&dir, "feat/new-thing", None, &root, Record::default()).unwrap();
+        assert_eq!(again, path);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_new_worktree_can_start_from_another_base_or_reuse_a_branch() {
+        let dir = test_repo(
+            "wt-from",
+            "git switch -qc base && echo b > b && git add b && git commit -qm b \
+             && git switch -q main && git branch ya-existe",
+        );
+        let root = dir.join("forge-data/worktrees");
+        let from = create(&dir, "feat/x", Some("base"), &root, Record::default()).unwrap();
+        assert!(from.join("b").is_file(), "sale de --from");
+        let reused = create(&dir, "ya-existe", None, &root, Record::default()).unwrap();
+        assert!(reused.join("a").is_file() && !reused.join("b").exists());
+        assert!(create(&dir, "-mal", None, &root, Record::default()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn cleaning_a_registered_worktree_forgets_its_record() {
+        let dir = test_repo("wt-forget", "true");
+        let root = dir.join("forge-data/worktrees");
+        let path = create(&dir, "feat/gone", None, &root, Record::default()).unwrap();
+        std::fs::remove_dir_all(&path).unwrap();
+        let plan = clean(&dir, &[], &[], true).unwrap();
+        assert!(
+            plan.iter()
+                .any(|c| matches!(c.action, Action::Prune { .. }))
+        );
+        assert!(records(&dir, &root).is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
     use std::process::Command;
 
     fn find<'a>(list: &'a [Worktree], tail: &str) -> &'a Worktree {

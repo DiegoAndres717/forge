@@ -3120,4 +3120,17 @@ pub const EN: &[(&str, &str)] = &[
         "Nada aplicado: cambiaron desde la vista previa",
         "Nothing applied: they changed since the preview",
     ),
+    // Plan #194, fase 2: forge worktree new.
+    ("nombre de rama no válido: {b}", "invalid branch name: {b}"),
+    ("ya existe {p}", "{p} already exists"),
+    (
+        "no se encontró la rama principal",
+        "the main branch was not found",
+    ),
+    ("pedido por {r}", "requested by {r}"),
+    ("plan #{id}, fase {n}", "plan #{id}, phase {n}"),
+    (
+        "Worktree de {b} listo. Al terminar: git worktree remove {p} (o la limpieza de Forge).",
+        "Worktree for {b} ready. When done: git worktree remove {p} (or Forge's cleanup).",
+    ),
 ];

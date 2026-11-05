@@ -46,6 +46,7 @@ Uso:
      (--general: la lista general; `forge ideas` también vale)
   forge worktrees                       worktrees del repositorio: rama, estado y tamaño
   forge worktrees clean [--apply]       quita los fusionados o subidos y sin cambios (sin --apply, solo simula)
+  forge worktree new <rama> [--from <base>]   crea un worktree en la carpeta de Forge (y la rama) e imprime su ruta
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -96,6 +97,7 @@ Usage:
      (--general: the general list; `forge ideas` works too)
   forge worktrees                       repository worktrees: branch, state and size
   forge worktrees clean [--apply]       removes merged or pushed ones with no changes (without --apply, only simulates)
+  forge worktree new <branch> [--from <base>] creates a worktree in Forge's folder (and the branch) and prints its path
   forge mcp                             MCP server (memory and context) for agents
 
 Options:
@@ -163,7 +165,14 @@ fn positional(args: &[String]) -> Vec<&str> {
             skip = false;
         } else if matches!(
             a.as_str(),
-            "--project" | "--reason" | "--scope" | "--stage" | "--output" | "--kind" | "--tags"
+            "--project"
+                | "--reason"
+                | "--scope"
+                | "--stage"
+                | "--output"
+                | "--kind"
+                | "--tags"
+                | "--from"
         ) {
             skip = true;
         } else if !a.starts_with("--") {
@@ -212,6 +221,7 @@ pub const COMMANDS: &[&str] = &[
     "review",
     "secret",
     "status",
+    "worktree",
     "worktrees",
 ];
 
@@ -286,6 +296,9 @@ pub fn run(args: &[String]) -> i32 {
             worktrees_clean(&out, &project, args.iter().any(|a| a == "--apply"))
         }
         (Some("worktrees"), _) => worktrees_list(&out, &project),
+        (Some("worktree"), Some("new")) => {
+            worktree_new(&out, &project, pos.get(2).copied(), flag(args, "--from"))
+        }
         // Resumen para seguir en otro agente la última conversación de uno (por defecto Claude).
         (Some("handoff"), from) => {
             let program = from.unwrap_or("claude");
@@ -1064,7 +1077,14 @@ fn status_json(project: &Path) -> Result<i32, String> {
 
 /// `forge worktrees`: los del repositorio con su estado y lo que ocupan.
 fn worktrees_list(out: &Out, project: &Path) -> Result<i32, String> {
+    let records = forge_core::worktrees::root()
+        .map(|root| forge_core::worktrees::records(project, &root))
+        .unwrap_or_default();
     for wt in forge_core::worktrees::list(project)? {
+        let asked = forge_core::worktrees::record_of(&wt, &records)
+            .map(|r| r.requester())
+            .filter(|r| !r.is_empty())
+            .map(|r| tr!("pedido por {r}", r = r).to_string());
         let size = wt.size.map(crate::app::human_bytes).unwrap_or_default();
         let main = if wt.main { tr!(" (principal)") } else { "" };
         out.line(&format!(
@@ -1072,9 +1092,58 @@ fn worktrees_list(out: &Out, project: &Path) -> Result<i32, String> {
             out.paint("1", &wt.label()),
             wt.path.display()
         ));
-        let state = [wt.state(), size].into_iter().filter(|s| !s.is_empty());
+        let state = [wt.state(), size]
+            .into_iter()
+            .chain(asked)
+            .filter(|s| !s.is_empty());
         out.line(&format!("    {}", state.collect::<Vec<_>>().join(" · ")));
     }
+    Ok(0)
+}
+
+/// `forge worktree new <rama> [--from <base>]`: el worktree en la carpeta de Forge,
+/// registrado con quién lo pidió. Solo la ruta va a stdout (`cd "$(forge worktree new x)"`).
+fn worktree_new(
+    out: &Out,
+    project: &Path,
+    branch: Option<&str>,
+    from: Option<String>,
+) -> Result<i32, String> {
+    let Some(branch) = branch else {
+        out.line(usage());
+        return Ok(2);
+    };
+    let root = forge_core::worktrees::root().ok_or_else(|| tr!("no se encontró $HOME"))?;
+    let main = forge_core::worktrees::main_root(project)?;
+    // La fase del plan cuya rama es esta, si la hay.
+    let phase = open_store()
+        .and_then(|s| s.list_ideas(Some(&main), false))
+        .unwrap_or_default()
+        .iter()
+        .find_map(|idea| {
+            let n = idea
+                .phases
+                .iter()
+                .position(|p| p.branch.as_deref() == Some(branch))?;
+            Some(tr!("plan #{id}, fase {n}", id = idea.id, n = n + 1).to_string())
+        });
+    let who = forge_core::worktrees::Record {
+        origin: std::env::var("FORGE_ORIGIN").ok(),
+        session: forge_core::store::current_session_id(),
+        phase,
+        ..Default::default()
+    };
+    let path = forge_core::worktrees::create(project, branch, from.as_deref(), &root, who)?;
+    println!("{}", path.display());
+    let _ = writeln!(
+        std::io::stderr(),
+        "{}",
+        tr!(
+            "Worktree de {b} listo. Al terminar: git worktree remove {p} (o la limpieza de Forge).",
+            b = branch,
+            p = path.display()
+        )
+    );
     Ok(0)
 }
 
