@@ -44,7 +44,11 @@ impl App {
     ) {
         let Some(i) = self.active else { return };
         let path = self.workspaces[i].project.path.clone();
-        let Some(Some(idea)) = self.db(|s| s.get_idea(Some(&path), id)) else {
+        let Some(idea) = self.db(|s| s.get_idea(Some(&path), id)) else {
+            return; // el error de la base ya se muestra
+        };
+        let Some(idea) = idea else {
+            self.error = Some(tr!("El plan #{id} ya no existe.", id = id));
             return;
         };
         if let Err(why) = parallel::check(&idea, phases) {
@@ -53,6 +57,10 @@ impl App {
         }
         let ws = &self.workspaces[i];
         let Some(spec) = ws.project.agents.iter().find(|a| a.id == agent).cloned() else {
+            self.error = Some(tr!(
+                "No encuentro el agente {id} en este proyecto.",
+                id = agent
+            ));
             return;
         };
         // Antes de crear nada: un agente sin mensaje inicial no recibiría la fase.
@@ -78,6 +86,8 @@ impl App {
         chosen.sort_unstable();
         chosen.dedup();
         let mut failed = Vec::new();
+        // Las que no llegaron a abrirse quedan elegidas para reintentarlas.
+        let mut retry = BTreeSet::new();
         for &n in &chosen {
             let Some(branch) = idea.phases[n].branch.as_deref().map(str::trim) else {
                 continue; // `check` ya lo descartó
@@ -98,6 +108,7 @@ impl App {
             });
             if let Err(e) = launched {
                 failed.push(tr!("Fase {n} ({b}): {e}", n = n + 1, b = branch, e = e));
+                retry.insert(n);
                 continue;
             }
             let change = PhaseChange {
@@ -105,11 +116,22 @@ impl App {
                 branch: Some(branch),
                 ..Default::default()
             };
-            self.db(|s| s.update_phase(Some(&path), id, n, change, &spec.id));
+            // El agente ya trabaja: si no se pudo marcar, se dice (y no se ofrece relanzarla).
+            if self
+                .db(|s| s.update_phase(Some(&path), id, n, change, &spec.id))
+                .is_none()
+            {
+                let e = self.error.take().unwrap_or_default();
+                failed.push(tr!(
+                    "Fase {n}: su agente ya trabaja, pero no se pudo marcar en curso: {e}",
+                    n = n + 1,
+                    e = e
+                ));
+            }
         }
         let view = &mut self.workspaces[i].ideas;
         view.dirty = true;
-        view.parallel = None;
+        view.parallel = (!retry.is_empty()).then_some((id, retry));
         if failed.is_empty() {
             view.open = false; // que se vean los agentes trabajando
         } else {

@@ -4906,9 +4906,15 @@ fn the_plans_panel_launches_phases_in_parallel_each_in_its_own_worktree() {
             .iter()
             .all(|r| cwds.contains(&forge_core::canonical(&r.path)))
     });
-    // Cada agente recibió el mensaje de su fase.
-    wait_until(&mut h, "el mensaje de la fase", |a| {
-        ws(a).shell_text().contains("You are working on phase")
+    // Cada agente recibió el mensaje de su fase (sin espacios: la terminal parte las líneas).
+    wait_until(&mut h, "el mensaje de cada fase", |a| {
+        let text: String = ws(a)
+            .shell_text()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        text.contains("Youareworkingonphase1(\"Webhook\")")
+            && text.contains("Youareworkingonphase2(\"Panel\")")
     });
     let idea = h
         .state_mut()
@@ -4978,6 +4984,42 @@ fn launching_in_parallel_refuses_a_phase_without_a_branch_or_an_agent_without_a_
         .flatten()
         .unwrap();
     assert!(idea.phases.iter().all(|p| p.status == "pending"));
+
+    // Una fase cuyo worktree no se puede crear (su rama ya está fuera, en la carpeta del
+    // proyecto) falla sola: se dice, la otra arranca y la fallida queda elegida para reintentar.
+    let mut otra = Phase::new("Otra");
+    otra.branch = Some("feat/otra".into());
+    let mut principal = Phase::new("Principal");
+    principal.branch = Some("main".into());
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&dir), "R", "", &[otra, principal], "x"))
+        .unwrap();
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.state_mut().apply(
+        &ctx,
+        UiCmd::LaunchParallel(plan, vec![0, 1], "fake".into()),
+        area,
+    );
+    let error = h.state_mut().error.take().unwrap_or_default();
+    assert!(error.contains("Fase 2 (main)"), "{error}");
+    assert_eq!(ws(h.state()).panel_count(), 2, "la fase 1 sí arranca");
+    let records = forge_core::worktrees::records(&dir, &root);
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].branch, "feat/otra");
+    let idea = h
+        .state_mut()
+        .db(|s| s.get_idea(Some(&dir), plan))
+        .flatten()
+        .unwrap();
+    assert_eq!(idea.phases[0].status, "doing");
+    assert_eq!(idea.phases[1].status, "pending");
+    assert_eq!(
+        ws(h.state()).ideas.parallel,
+        Some((plan, [1].into_iter().collect()))
+    );
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }

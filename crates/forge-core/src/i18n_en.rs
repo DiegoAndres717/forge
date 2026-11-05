@@ -3223,6 +3223,14 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Lanzar con {agent}", "Launch with {agent}"),
     (
+        "El plan #{id} ya no existe.",
+        "Plan #{id} no longer exists.",
+    ),
+    (
+        "Fase {n}: su agente ya trabaja, pero no se pudo marcar en curso: {e}",
+        "Phase {n}: its agent is already working, but it could not be marked in progress: {e}",
+    ),
+    (
         "No encuentro ningún agente instalado y activo que pueda empezar con un mensaje (Claude Code, Codex, OpenCode o Antigravity).",
         "No installed and enabled agent can start with a message (Claude Code, Codex, OpenCode or Antigravity).",
     ),

@@ -145,10 +145,25 @@ fn text_of(phase: &Phase) -> String {
     text
 }
 
-/// El mismo archivo, o uno dentro de una carpeta nombrada (`src/app/` y `src/app/x.rs`).
+/// El mismo archivo (sin mirar mayúsculas ni `./`; sin carpeta, por su nombre), o uno
+/// dentro de una carpeta nombrada (`src/app/` y `src/app/x.rs`).
 fn overlap(a: &str, b: &str) -> bool {
-    a == b || (a.ends_with('/') && b.starts_with(a)) || (b.ends_with('/') && a.starts_with(b))
+    let norm = |s: &str| s.trim_start_matches("./").to_lowercase();
+    let (a, b) = (norm(a), norm(b));
+    let name = |s: &str| s.rsplit('/').next().unwrap_or(s).to_string();
+    a == b
+        || (a.ends_with('/') && b.starts_with(&a))
+        || (b.ends_with('/') && a.starts_with(&b))
+        || (!a.contains('/') && !b.ends_with('/') && name(&b) == a)
+        || (!b.contains('/') && !a.ends_with('/') && name(&a) == b)
 }
+
+/// Extensiones de archivo habituales: `self.error` o `ws.ideas` son código, no archivos.
+const EXTENSIONS: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "mjs", "cjs", "json", "toml", "yaml", "yml", "md", "py", "go",
+    "rb", "java", "kt", "swift", "c", "h", "cc", "cpp", "hpp", "cs", "css", "scss", "html", "vue",
+    "svelte", "sh", "ps1", "sql", "lock", "txt", "xml", "proto", "gradle",
+];
 
 /// Archivos y carpetas que nombra la fase (en sus notas o tareas): palabras con extensión
 /// (`ideas_panel.rs`, `src/cli.rs`) o rutas que acaban en `/` (`src/app/`). Las ramas de
@@ -175,7 +190,12 @@ fn is_file(word: &str) -> bool {
         return false;
     };
     let name = stem.rsplit('/').next().unwrap_or(stem);
-    (1..=5).contains(&ext.len())
+    let path = word.contains('/');
+    // «Node.js», «Next.js»: productos, no archivos.
+    let product = !path && ext == "js" && name.starts_with(|c: char| c.is_ascii_uppercase());
+    (path || EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+        && !product
+        && (1..=5).contains(&ext.len())
         && ext.chars().all(|c| c.is_ascii_alphabetic())
         && name.chars().any(|c| c.is_ascii_alphanumeric())
         && word
@@ -260,7 +280,8 @@ pub fn brief(
     }
     out += &format!(
         "\nYour worktree: {} (branch `{branch}`). You are already in it: work only here. Do not create other worktrees or clones and do not switch branches; if you really need another worktree, use `forge worktree new <branch>`.\n",
-        worktree.display()
+        // Sin el `\\?\` de Windows: el agente lo copia tal cual.
+        worktree.display().to_string().trim_start_matches(r"\\?\")
     );
     out += &format!("\nGoal: {}\n", phase.title);
     if !phase.notes.trim().is_empty() {
@@ -408,7 +429,11 @@ mod tests {
             vec![
                 Warning::SharedFiles {
                     phases: (1, 2),
-                    files: vec!["src/app/ideas_panel.rs".into(), "src/app/".into()],
+                    files: vec![
+                        "src/app/ideas_panel.rs".into(),
+                        "src/app/".into(),
+                        "ideas_panel.rs".into()
+                    ],
                 },
                 Warning::Mentions { phase: 2, other: 1 },
             ]
@@ -425,6 +450,35 @@ mod tests {
             &[],
         );
         assert_eq!(files_named(&p), vec!["Cargo.toml".to_string()]);
+        // Código y nombres de producto con punto tampoco: solo extensiones de archivo conocidas
+        // (o una ruta con `/`).
+        let p = phase(
+            "X",
+            None,
+            "Pon self.error y ws.ideas como en Node.js; ver docs/guide.weird",
+            &[],
+        );
+        assert_eq!(files_named(&p), vec!["docs/guide.weird".to_string()]);
+    }
+
+    #[test]
+    fn the_same_file_named_with_or_without_its_folder_still_warns() {
+        let idea = plan(vec![
+            phase("A", Some("feat/a"), "", &["Botón en ideas_panel.rs"]),
+            phase(
+                "B",
+                Some("feat/b"),
+                "",
+                &["Cambiar ./src/app/Ideas_Panel.rs"],
+            ),
+        ]);
+        assert_eq!(
+            check(&idea, &[0, 1]).unwrap(),
+            vec![Warning::SharedFiles {
+                phases: (1, 2),
+                files: vec!["ideas_panel.rs".into()],
+            }]
+        );
     }
 
     #[test]
