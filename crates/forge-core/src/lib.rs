@@ -27,6 +27,7 @@ pub mod sessions;
 pub mod store;
 pub mod subagents;
 pub mod updates;
+pub mod worktrees;
 
 /// Los shells instalados que `/etc/shells` lista y existen (para elegir en cuál trabajar).
 /// Windows usa siempre PowerShell: allí no hay nada que elegir.

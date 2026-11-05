@@ -1752,6 +1752,17 @@ impl Workspace {
         }
     }
 
+    /// La carpeta del proyecto y las de sus terminales (un worktree en uso no se quita).
+    pub fn working_dirs(&self) -> Vec<PathBuf> {
+        let shells = self.panels.values().filter_map(|p| match &p.content {
+            Content::Shell(t) => t.cwd(),
+            Content::Process(_) => None,
+        });
+        std::iter::once(self.project.path.clone())
+            .chain(shells)
+            .collect()
+    }
+
     /// Nueva terminal en `cwd`, en el mismo hueco que la enfocada.
     pub fn new_tab_in(&mut self, ctx: &egui::Context, cwd: PathBuf) {
         let state = PanelState {

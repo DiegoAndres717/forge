@@ -48,6 +48,7 @@ mod settings;
 mod sidebar;
 mod update;
 mod welcome;
+mod worktrees_panel;
 
 pub use files_panel::FilesView;
 use guard_panel::*;
@@ -62,7 +63,7 @@ fn short_version(v: &str) -> String {
 }
 
 /// 1468006400 → "1,4 GB"
-fn human_bytes(bytes: u64) -> String {
+pub(crate) fn human_bytes(bytes: u64) -> String {
     let gb = bytes as f64 / 1_073_741_824.0;
     if gb >= 1.0 {
         let text = format!("{gb:.1} GB");
@@ -415,6 +416,7 @@ pub struct App {
     last_sessions_sync: Option<Instant>,
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
+    worktrees: worktrees_panel::WorktreesView,
     /// Notificaciones de macOS (desactivadas en tests).
     notifications: bool,
     /// Próxima búsqueda de actualizaciones (solo la app real; los tests no salen a la red).
@@ -530,6 +532,7 @@ impl App {
             merged_check: Instant::now(),
             merging: Arc::default(),
             show_all: false,
+            worktrees: Default::default(),
             general: crate::workspace::IdeasView {
                 dirty: true,
                 ..Default::default()

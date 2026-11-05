@@ -44,6 +44,8 @@ Uso:
   forge plans phase <id> <n> start|done|backlog
   forge plans task <id> <fase>.<tarea> [--undo]   tacha (o destacha) una tarea
      (--general: la lista general; `forge ideas` también vale)
+  forge worktrees                       worktrees del repositorio: rama, estado y tamaño
+  forge worktrees clean [--apply]       quita los fusionados o subidos y sin cambios (sin --apply, solo simula)
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -92,6 +94,8 @@ Usage:
   forge plans phase <id> <n> start|done|backlog
   forge plans task <id> <phase>.<task> [--undo]   ticks (or unticks) a task
      (--general: the general list; `forge ideas` works too)
+  forge worktrees                       repository worktrees: branch, state and size
+  forge worktrees clean [--apply]       removes merged or pushed ones with no changes (without --apply, only simulates)
   forge mcp                             MCP server (memory and context) for agents
 
 Options:
@@ -192,8 +196,23 @@ fn open_store() -> Result<Store, String> {
 /// carpeta que abrir en la app. Una sola lista: una orden nueva que falte aquí abriría
 /// la app en vez de ejecutarse.
 pub const COMMANDS: &[&str] = &[
-    "agent", "ai", "anchor", "context", "danger", "doctor", "guard", "handoff", "hooks", "ideas",
-    "mcp", "memory", "plans", "review", "secret", "status",
+    "agent",
+    "ai",
+    "anchor",
+    "context",
+    "danger",
+    "doctor",
+    "guard",
+    "handoff",
+    "hooks",
+    "ideas",
+    "mcp",
+    "memory",
+    "plans",
+    "review",
+    "secret",
+    "status",
+    "worktrees",
 ];
 
 pub fn run(args: &[String]) -> i32 {
@@ -263,6 +282,10 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
+        (Some("worktrees"), Some("clean")) => {
+            worktrees_clean(&out, &project, args.iter().any(|a| a == "--apply"))
+        }
+        (Some("worktrees"), _) => worktrees_list(&out, &project),
         // Resumen para seguir en otro agente la última conversación de uno (por defecto Claude).
         (Some("handoff"), from) => {
             let program = from.unwrap_or("claude");
@@ -1037,6 +1060,64 @@ fn status_json(project: &Path) -> Result<i32, String> {
     });
     println!("{status}");
     Ok(0)
+}
+
+/// `forge worktrees`: los del repositorio con su estado y lo que ocupan.
+fn worktrees_list(out: &Out, project: &Path) -> Result<i32, String> {
+    for wt in forge_core::worktrees::list(project)? {
+        let size = wt.size.map(crate::app::human_bytes).unwrap_or_default();
+        let main = if wt.main { tr!(" (principal)") } else { "" };
+        out.line(&format!(
+            "{}{main}  {}",
+            out.paint("1", &wt.label()),
+            wt.path.display()
+        ));
+        let state = [wt.state(), size].into_iter().filter(|s| !s.is_empty());
+        out.line(&format!("    {}", state.collect::<Vec<_>>().join(" · ")));
+    }
+    Ok(0)
+}
+
+/// `forge worktrees clean [--apply]`: sin `--apply` solo dice lo que haría.
+fn worktrees_clean(out: &Out, project: &Path, apply: bool) -> Result<i32, String> {
+    // Nunca el worktree desde el que se pide; tampoco los de procesos en marcha (best-effort:
+    // la CLI no ve las terminales de la app, pero sí sus procesos en macOS y Linux).
+    let mut current = vec![project.to_path_buf()];
+    current.extend(std::env::current_dir().ok());
+    let in_use = forge_core::worktrees::process_cwds();
+    if in_use.is_empty() {
+        out.line(&out.paint(
+            "33",
+            tr!("⚠ No se pudieron ver los procesos en marcha: cierra antes las terminales y agentes que trabajen en un worktree."),
+        ));
+    }
+    let plan = forge_core::worktrees::clean(project, &current, &in_use, apply)?;
+    let mut failed = false;
+    for c in plan.iter().filter(|c| !c.worktree.main) {
+        let mark = match (&c.result, c.action) {
+            (Some(Err(_)), _) => out.paint("31", "✕"),
+            (Some(Ok(())), _) => out.paint("32", "✓"),
+            (None, forge_core::worktrees::Action::Keep(_)) => out.paint("2", "•"),
+            (None, _) => out.paint("33", "→"),
+        };
+        out.line(&format!(
+            "{mark} {}  {}",
+            c.worktree.label(),
+            c.worktree.path.display()
+        ));
+        out.line(&format!("    {}", c.describe()));
+        if let Some(Err(e)) = &c.result {
+            failed = true;
+            out.line(&format!("    {}", out.paint("31", e)));
+        }
+    }
+    if !apply {
+        out.line("");
+        out.line(tr!(
+            "Simulación: no se ha cambiado nada. Para hacerlo: forge worktrees clean --apply"
+        ));
+    }
+    Ok(i32::from(failed))
 }
 
 fn plans_cli(
