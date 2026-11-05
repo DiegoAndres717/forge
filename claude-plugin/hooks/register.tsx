@@ -336,7 +336,9 @@ const arg = (e: object, key: string) => {
 
 /** Tells Forge's live board what a loop is doing (main: agent_id ''). Fire and forget. */
 function activity($: EngineInterface, event: { kind: string; agent_id: string; name?: string; tool?: string; target?: string; result?: string }) {
-  void forge($, ['agent-activity'], JSON.stringify({ ...event, origin: 'Claude Code' }), 5_000)
+  // `at`: these calls may arrive out of order; Forge ignores one older than a loop's end.
+  const at = Math.floor(Date.now() / 1000)
+  void forge($, ['agent-activity'], JSON.stringify({ ...event, origin: 'Claude Code', at }), 5_000)
 }
 
 // After an edit, Forge looks whether main changed the files this loop is touching (it
@@ -347,7 +349,8 @@ async function mainCheck($: EngineInterface, key: string) {
   const now = Date.now()
   if (now - (mainChecked[key] ?? 0) < MAIN_CHECK_EVERY_MS) return null
   mainChecked[key] = now
-  const out = await forge($, ['work-status', '--main-check'], undefined, 3_000)
+  // Room for git on a big repo: Forge marks a warning as given only once it printed it.
+  const out = await forge($, ['work-status', '--main-check'], undefined, 10_000)
   const text = out && out.exitCode === 0 ? out.stdout.trim() : ''
   return text || null
 }
@@ -589,7 +592,7 @@ export const register: Register = on => {
   // the model reads) to hand the rest to forge:explorer. Counted per message of yours.
   on('tool.call', async ($, e, next) => {
     // Forge's live board: what this loop is doing right now.
-    const target = arg(e, 'file_path') ?? arg(e, 'notebook_path') ?? arg(e, 'command') ?? arg(e, 'path') ?? arg(e, 'pattern')
+    const target = arg(e, 'file_path') ?? arg(e, 'notebook_path') ?? arg(e, 'command') ?? arg(e, 'pattern') ?? arg(e, 'path')
     activity($, { kind: 'tool', agent_id: e.agentId ?? '', tool: e.tool, target })
     const result = await next(e)
     const warning = !('deny' in result) && EDIT_TOOLS.has(e.tool) ? await mainCheck($, e.agentId ?? 'main') : null

@@ -635,7 +635,13 @@ fn ui_preview() {
             },
             15,
         );
-        let _ = store.register_agent_session("1:3", &project, "main", "OpenCode", None);
+        for (session, agent) in [
+            ("1:1", "Claude Code"),
+            ("1:2", "Codex"),
+            ("1:3", "OpenCode"),
+        ] {
+            let _ = store.register_agent_session(session, &project, "main", agent, None);
+        }
     }
     // Worktrees ya plegado: la fila está en su sitio de ahora.
     settle(&mut harness);

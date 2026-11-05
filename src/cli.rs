@@ -304,11 +304,10 @@ pub fn run(args: &[String]) -> i32 {
                 let cwd = std::env::current_dir().unwrap_or_default();
                 if let (Some(me), Some(root)) = (me, forge_core::activity::root_of(&cwd)) {
                     forge_core::activity::fetch_if_stale(&root, 600);
-                    if let Some(warning) =
-                        forge_core::activity::main_check(&store, &project, &me, &root)
-                    {
-                        println!("{warning}");
-                    }
+                    // Se apunta como avisado solo después de imprimirlo.
+                    forge_core::activity::main_check(&store, &project, &me, &root, |warning| {
+                        println!("{warning}")
+                    });
                 }
             } else {
                 let text = forge_core::activity::work_status(&store, &project, me.as_deref(), now);

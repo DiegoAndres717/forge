@@ -84,8 +84,30 @@ fn two_terminals_editing_the_same_file_show_up_as_an_overlap() {
         codex,
     );
     assert_eq!(reply.trim(), "", "sin decisión: la llamada sigue");
+    // Leer un .env lo bloquea Guard (sin la app no se puede autorizar): no va al tablero.
+    let secret = r#"{"tool_name":"Bash","tool_input":{"command":"cat .env"}}"#;
+    let reply = forge(
+        &dir,
+        "9:4",
+        "Codex",
+        &["secret", "--agent-hook", "codex"],
+        secret,
+    );
+    assert!(reply.contains("deny"), "{reply}");
 
-    let status = forge(&dir, "9:1", "Claude Code", &["work-status"], "");
+    // El hook lo apunta sin esperar (no frena la llamada): se espera a que llegue.
+    let mut status = String::new();
+    for _ in 0..50 {
+        status = forge(&dir, "9:1", "Claude Code", &["work-status"], "");
+        if status.contains("Codex (terminal 3)") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(
+        !status.contains("cat .env") && !status.contains("terminal 4"),
+        "{status}"
+    );
     assert!(
         status.contains("- src/x.rs: Claude Code (terminal 1) and Claude Code (terminal 2)"),
         "{status}"

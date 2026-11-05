@@ -4753,9 +4753,16 @@ fn running_agents_show_what_they_do_their_overlaps_and_honest_gaps() {
         ..event("stop", "a2", None, None)
     };
     record("1:1", &done, now - 30);
-    store
-        .register_agent_session("1:9", &dir, "main", "OpenCode", None)
-        .unwrap();
+    // Sus terminales siguen abiertas (sin ellas, lo callado hace rato no sigue «en marcha»).
+    for (session, agent) in [
+        ("1:1", "Claude Code"),
+        ("1:2", "Claude Code"),
+        ("1:9", "OpenCode"),
+    ] {
+        store
+            .register_agent_session(session, &dir, "main", agent, None)
+            .unwrap();
+    }
     let mut h = app_with(store, Some(dir.clone()));
     h.get_by_label("Agentes en marcha").click();
     h.run_steps(3);

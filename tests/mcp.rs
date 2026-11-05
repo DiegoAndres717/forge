@@ -70,7 +70,8 @@ fn mcp_server_shares_memory_between_clients() {
             "review_comment_add",
             "review_comment_resolve",
             "review_progress",
-            "project_context"
+            "project_context",
+            "work_status"
         ]
     );
 

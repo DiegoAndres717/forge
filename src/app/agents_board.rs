@@ -55,11 +55,11 @@ impl App {
                 ..Default::default()
             };
         }
-        // Cada 2 s: una consulta a la base (lo pesado, Git, es de `work_status`).
+        // Una lectura de la base (lo pesado, Git, es de `work_status`): cada 2 s abierta, cada
+        // 10 s cerrada (solo para la cifra).
+        let every = Duration::from_secs(if board.open { 2 } else { 10 });
         if let Some(store) = &self.store
-            && board
-                .checked
-                .is_none_or(|t| t.elapsed() >= Duration::from_secs(2))
+            && board.checked.is_none_or(|t| t.elapsed() >= every)
         {
             board.checked = Some(Instant::now());
             let repo = board
@@ -68,17 +68,12 @@ impl App {
                     forge_core::worktrees::main_root(&project).unwrap_or_else(|_| project.clone())
                 })
                 .clone();
-            board.rows = store.agent_activity(&repo, forge_core::store::now());
-            board.terminals = store
-                .active_agent_sessions(&repo)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|s| Terminal {
-                    session: s.id,
-                    agent: s.agent,
-                })
-                .collect();
-            ui.ctx().request_repaint_after(Duration::from_secs(2));
+            let now = forge_core::store::now();
+            board.terminals = activity::terminals(store, &repo);
+            board.rows = activity::alive(store.agent_activity(&repo, now), &board.terminals, now);
+        }
+        if board.open {
+            ui.ctx().request_repaint_after(every);
         }
         let running = board
             .rows
@@ -103,6 +98,8 @@ impl App {
         ));
         if row.clicked() {
             board.open = !board.open;
+            // Al abrir, los datos de ahora (no los de hace 10 s).
+            board.checked = None;
         }
         if !board.open {
             return;

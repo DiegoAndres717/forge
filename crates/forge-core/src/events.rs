@@ -360,10 +360,11 @@ pub fn record(kind: &str, json_arg: Option<&str>) {
         let done = crate::activity::Event {
             kind: "stop".into(),
             result: field("message"),
-            origin: Some(name.clone()),
+            // Sin nombre conocido, el que ya tenga la fila (no «Agente»).
+            origin: field("origin").or_else(|| std::env::var("FORGE_ORIGIN").ok()),
             ..Default::default()
         };
-        crate::activity::record_event(Path::new(&project), &session, &done, None);
+        crate::activity::record_event(Path::new(&project), &session, &done);
     }
     let event = AgentEvent {
         project: PathBuf::from(project),
