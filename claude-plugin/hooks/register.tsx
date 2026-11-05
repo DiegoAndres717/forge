@@ -355,6 +355,19 @@ async function mainCheck($: EngineInterface, key: string) {
   return text || null
 }
 
+// A command or test that failed: Forge looks up what failed (the test's name) in Forge
+// Memory and the open plans, and answers only when a note names it (once per note and
+// session). Only output that looks like a test failure asks: a piped `cargo test | tail`
+// exits 0, so the exit code alone would miss it.
+const FAILURE_HINT = /\.\.\. FAILED\r?$|panicked at|^FAILED \S+::|^\s*● |^--- FAIL: /m
+async function failureHint($: EngineInterface, e: { tool: string }, result: { text?: string }) {
+  const text = result.text ?? ''
+  if (e.tool !== 'Bash' || !FAILURE_HINT.test(text)) return null
+  const out = await forge($, ['memory', 'failure-hint'], text.slice(-512 * 1024), 2_000)
+  const hint = out && out.exitCode === 0 ? out.stdout.trim() : ''
+  return hint || null
+}
+
 /** A command answered by Forge's CLI output (no model call). */
 async function run($: EngineInterface, args: string[]) {
   const out = await forge($, args)
@@ -596,9 +609,11 @@ export const register: Register = on => {
     activity($, { kind: 'tool', agent_id: e.agentId ?? '', tool: e.tool, target })
     const result = await next(e)
     const warning = !('deny' in result) && EDIT_TOOLS.has(e.tool) ? await mainCheck($, e.agentId ?? 'main') : null
+    const known = 'deny' in result ? null : await failureHint($, e, result)
     const answer = await nudge(result)
-    if (!warning || 'deny' in answer) return answer
-    return { ...answer, context: [...(answer.context ?? []), warning] }
+    const extra = [warning, known].filter((c): c is string => Boolean(c))
+    if (!extra.length || 'deny' in answer) return answer
+    return { ...answer, context: [...(answer.context ?? []), ...extra] }
 
     // The reminders only the model reads (delegate, advisor), as before.
     async function nudge(result: Awaited<ReturnType<typeof next>>) {

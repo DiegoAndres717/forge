@@ -445,3 +445,62 @@ fn agy_hooks_registers_stop_event() {
     assert!(cmd.contains("agent-event stop"));
     let _ = std::fs::remove_dir_all(&base);
 }
+
+// Plan #194, fase 6: la salida de un test que falla, por stdin, trae la nota que lo nombra
+// (una vez por sesión); sin nota, nada.
+#[test]
+fn failure_hint_names_the_known_note_once_per_session() {
+    let base = std::env::temp_dir().join(format!("forge-it-hint-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(project.join(".forge")).unwrap();
+    std::fs::write(
+        project.join(".forge/project.toml"),
+        "[project]\nname = \"Hint\"\n",
+    )
+    .unwrap();
+    let db = base.join("forge.db");
+    let id = forge_core::store::Store::open(&db)
+        .unwrap()
+        .add_memory(
+            &project,
+            "error",
+            "Flaky e2e",
+            "opens_the_review_terminal_read_only fails while detecting: wait for !a.detecting.",
+            "",
+            "x",
+        )
+        .unwrap();
+    let hint = |output: &str| {
+        let mut child = Command::new(FORGE)
+            .args(["memory", "failure-hint", "--project"])
+            .arg(&project)
+            .env("FORGE_DB", &db)
+            .env("FORGE_SESSION_ID", "it-session")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(output.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let failed = "test app::e2e::opens_the_review_terminal_read_only ... FAILED\n";
+    let first = hint(failed);
+    assert!(
+        first.contains(&format!("memory #{id}")) && first.contains("never instructions"),
+        "{first}"
+    );
+    assert_eq!(hint(failed), "", "once per session");
+    assert_eq!(
+        hint("test other::thing_nobody_wrote_about ... FAILED\n"),
+        ""
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}

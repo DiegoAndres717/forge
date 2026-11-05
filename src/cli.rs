@@ -48,6 +48,7 @@ Uso:
   forge worktrees clean [--apply]       quita los fusionados o subidos y sin cambios (sin --apply, solo simula)
   forge worktree new <rama> [--from <base>]   crea un worktree en la carpeta de Forge (y la rama) e imprime su ruta
   forge work-status [--main-check]      qué agente está en qué worktree, qué toca y dónde se pisan
+  forge memory failure-hint             (stdin: salida de un comando que falló) las notas que lo nombran
   forge mcp                             servidor MCP (memoria y contexto) para agentes
 
 Opciones:
@@ -100,6 +101,7 @@ Usage:
   forge worktrees clean [--apply]       removes merged or pushed ones with no changes (without --apply, only simulates)
   forge worktree new <branch> [--from <base>] creates a worktree in Forge's folder (and the branch) and prints its path
   forge work-status [--main-check]      which agent is on which worktree, what it touches and where they overlap
+  forge memory failure-hint             (stdin: output of a failed command) the notes that name it
   forge mcp                             MCP server (memory and context) for agents
 
 Options:
@@ -292,6 +294,21 @@ pub fn run(args: &[String]) -> i32 {
             forge_core::mcp::serve(&project, &store, forge_core::mcp::Modes::from_args(args))
                 .map(|_| 0)
                 .map_err(|e| e.to_string())
+        }),
+        // La salida de un comando que falló (por stdin, el hook posterior a la herramienta):
+        // las notas que nombran lo que falló, una vez por nota y sesión; nada si no hay.
+        (Some("memory"), Some("failure-hint")) => open_store().map(|store| {
+            let mut output = String::new();
+            let _ = std::io::Read::read_to_string(
+                &mut std::io::Read::take(std::io::stdin(), 512 * 1024),
+                &mut output,
+            );
+            let session = forge_core::store::current_session_id().unwrap_or_else(|| "none".into());
+            if let Some(text) = forge_core::failure_hint::hint(&store, &project, &session, &output)
+            {
+                println!("{text}");
+            }
+            0
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),

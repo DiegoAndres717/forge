@@ -246,7 +246,7 @@ const STOPWORDS: [&str; 19] = [
 ];
 
 /// La nota de la última sesión (`save_session_summary`), en cualquiera de los dos idiomas.
-fn is_session_note(m: &Memory) -> bool {
+pub(crate) fn is_session_note(m: &Memory) -> bool {
     m.kind == "note"
         && ["Resumen de la última sesión", "Summary of the last session"]
             .iter()
