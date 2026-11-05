@@ -568,6 +568,91 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12k-worktrees");
     harness.get_by_label(forge_core::tr!("Worktrees")).click();
+    // Agentes en marcha: un subagente trabajando, otro que terminó, dos terminales que se
+    // pisan en un archivo y un agente sin hooks.
+    {
+        use forge_core::activity::Event;
+        let now = forge_core::store::now();
+        let state = harness.state();
+        let store = state.store.as_ref().unwrap();
+        let coupons = project
+            .join("src/checkout/coupons.ts")
+            .to_string_lossy()
+            .into_owned();
+        let at = |session: &str, e: Event, ago: i64| {
+            let e = Event {
+                origin: e.origin.or(Some("Claude Code".into())),
+                ..e
+            };
+            let _ = store.record_activity(&project, session, &e, Some(&project), now - ago);
+        };
+        let ev = |kind: &str, id: &str, tool: Option<&str>, target: Option<&str>| Event {
+            kind: kind.into(),
+            agent_id: id.into(),
+            tool: tool.map(str::to_string),
+            target: target.map(str::to_string),
+            ..Default::default()
+        };
+        at("1:1", ev("tool", "", Some("Edit"), Some(&coupons)), 540);
+        at(
+            "1:1",
+            Event {
+                name: Some("explorer: where are taxes computed".into()),
+                ..ev("start", "a1", None, None)
+            },
+            90,
+        );
+        at("1:1", ev("tool", "a1", Some("Grep"), Some("src")), 20);
+        at(
+            "1:1",
+            Event {
+                name: Some("reviewer: run the test suite".into()),
+                ..ev("start", "a2", None, None)
+            },
+            400,
+        );
+        at(
+            "1:1",
+            Event {
+                result: Some("All 48 tests pass".into()),
+                ..ev("stop", "a2", None, None)
+            },
+            60,
+        );
+        at(
+            "1:2",
+            Event {
+                origin: Some("Codex".into()),
+                ..ev("tool", "", Some("Edit"), Some(&coupons))
+            },
+            200,
+        );
+        at(
+            "1:2",
+            Event {
+                origin: Some("Codex".into()),
+                ..ev("tool", "", Some("Bash"), Some("npm test -- coupons"))
+            },
+            15,
+        );
+        for (session, agent) in [
+            ("1:1", "Claude Code"),
+            ("1:2", "Codex"),
+            ("1:3", "OpenCode"),
+        ] {
+            let _ = store.register_agent_session(session, &project, "main", agent, None);
+        }
+    }
+    // Worktrees ya plegado: la fila está en su sitio de ahora.
+    settle(&mut harness);
+    harness
+        .get_by_label(forge_core::tr!("Agentes en marcha"))
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "12l-agentes");
+    harness
+        .get_by_label(forge_core::tr!("Agentes en marcha"))
+        .click();
     // Árbol de archivos con una carpeta abierta y el cambio de arriba marcado.
     std::fs::create_dir_all(project.join("docs")).unwrap();
     std::fs::write(project.join("docs/notas.md"), "# Notas\n").unwrap();

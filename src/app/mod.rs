@@ -29,6 +29,7 @@ const GUARD_WIDTH: f32 = 440.0;
 const DRAWER_MIN: f32 = 240.0;
 const WORKSPACE_MIN: f32 = 320.0;
 
+mod agents_board;
 mod approvals;
 mod chrome;
 mod editors;
@@ -417,6 +418,7 @@ pub struct App {
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
     worktrees: worktrees_panel::WorktreesView,
+    agents_board: agents_board::AgentsBoard,
     /// Notificaciones de macOS (desactivadas en tests).
     notifications: bool,
     /// Próxima búsqueda de actualizaciones (solo la app real; los tests no salen a la red).
@@ -533,6 +535,7 @@ impl App {
             merging: Arc::default(),
             show_all: false,
             worktrees: Default::default(),
+            agents_board: Default::default(),
             general: crate::workspace::IdeasView {
                 dirty: true,
                 ..Default::default()

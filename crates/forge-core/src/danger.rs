@@ -792,11 +792,24 @@ pub fn secret_hook_main(format: &str) -> ! {
             _ => None,
         });
     let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
+    // El tablero de agentes: la herramienta en uso, en una terminal de agente de Forge, sin
+    // esperar (este hook frena la llamada). Lo que toca secretos o se deniega no se apunta:
+    // el tablero lo ven otros agentes.
+    let board = project
+        .as_ref()
+        .filter(|_| std::env::var_os("FORGE_ORIGIN").is_some())
+        .and(crate::store::current_session_id())
+        .and_then(|_| crate::activity::tool_event(&call))
+        .map(|e| crate::activity::Event {
+            cwd: Some(cwd.to_string_lossy().into_owned()),
+            ..e
+        });
     let stray = shell
         .zip(project)
         .and_then(|(c, p)| stray_copy_in_agent_command(&c, &cwd, &p));
     // Los hooks de agy y Gemini son globales: fuera de una terminal de agente de Forge no hacen nada.
     let found = std::env::var_os("FORGE_ORIGIN").and_then(|_| secret_in_tool_call(&call, &cwd));
+    let secret = found.is_some();
     let denied = stray.or_else(|| {
         found.and_then(|reason| {
             crate::i18n::init_from_store();
@@ -822,6 +835,9 @@ pub fn secret_hook_main(format: &str) -> ! {
             }
         })
     });
+    if let Some(event) = board.filter(|_| denied.is_none() && !secret) {
+        crate::activity::record_detached(&event);
+    }
     let reply = match (format, denied) {
         ("codex", Some(why)) => serde_json::json!({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

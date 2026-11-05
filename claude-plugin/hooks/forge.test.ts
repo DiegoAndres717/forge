@@ -665,3 +665,49 @@ test('before ending a turn that edited code, the advisor reviews it once', async
   await $.tool.call({ tool: 'Write' } as never)
   expect((await stop(false)).block).toContain('advisor tool')
 })
+
+test('Forge hears what each loop is doing: tools, subagents starting and finishing', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  const sent: { argv: string[]; stdin?: string }[] = []
+  on('process.run', ($, e) => {
+    sent.push({ argv: [...e.argv], stdin: e.init?.stdin })
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  on('agent.spawn', () => ({ model: 'haiku', agentId: 'a1' }))
+  on('turn.complete', ($, e) => ({ text: e.answer }))
+  await $.tool.call({ tool: 'Bash', command: 'cargo test -p x' } as never)
+  await $.agent.spawn(spawn({ subagentType: 'forge:explorer', prompt: 'x', description: 'find the login' }))
+  await $.tool.call({ tool: 'Edit', file_path: '/r/src/a.rs', agentId: 'a1' } as never)
+  await $.turn.complete(turn({ answer: 'Found it in src/login.rs\nmore', agentId: 'a1' }))
+  // Sent in the background: give it a moment to arrive.
+  for (let i = 0; i < 50 && !sent.some(s => s.stdin?.includes('"stop"')); i++) await Promise.resolve()
+  const events = sent
+    .filter(s => s.argv.includes('agent-activity'))
+    .map(s => JSON.parse(s.stdin ?? '{}') as Record<string, string>)
+  const has = (fields: Record<string, string>) =>
+    events.some(e => Object.entries(fields).every(([k, v]) => e[k] === v))
+  expect(has({ kind: 'tool', agent_id: '', tool: 'Bash', target: 'cargo test -p x' })).toBe(true)
+  expect(has({ kind: 'start', agent_id: 'a1', name: 'explorer: find the login' })).toBe(true)
+  expect(has({ kind: 'tool', agent_id: 'a1', tool: 'Edit', target: '/r/src/a.rs' })).toBe(true)
+  expect(has({ kind: 'stop', agent_id: 'a1', result: 'Found it in src/login.rs' })).toBe(true)
+})
+
+test('after an edit, a change on main to the same files reaches the model once Forge reports it', async ($, on) => {
+  mock.env(on, { FORGE_BIN: '/forge' })
+  let checks = 0
+  on('process.run', ($, e) => {
+    const check = e.argv.includes('--main-check')
+    if (check) checks += 1
+    const stdout = check && checks === 1 ? 'Forge: origin/main changed files you are touching: src/a.rs' : ''
+    return { value: { exitCode: 0, stdout, stderr: '' } } as never
+  })
+  on('tool.call', () => ({ result: {}, context: [] }) as never)
+  const edit = async () =>
+    ((await $.tool.call({ tool: 'Edit', file_path: '/r/src/a.rs' } as never)) as { context?: readonly string[] }).context ?? []
+  expect((await edit()).join('\n')).toContain('origin/main changed files you are touching')
+  // Reading is no reason to look at main, and right after a check there's no other one.
+  await $.tool.call({ tool: 'Read', file_path: '/r/src/a.rs' } as never)
+  expect(await edit()).toEqual([])
+  expect(checks).toBe(1)
+})

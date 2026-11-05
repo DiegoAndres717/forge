@@ -318,6 +318,18 @@ fn main() -> eframe::Result {
             forge_core::events::record_usage();
             return Ok(());
         }
+        // Qué hace ahora un agente o subagente (el mod de Claude Code), para el tablero.
+        Some("agent-activity") => {
+            if let Some(project) = std::env::var_os("FORGE_PROJECT") {
+                let mut payload = String::new();
+                let _ = std::io::Read::read_to_string(
+                    &mut std::io::Read::take(std::io::stdin(), 64 * 1024),
+                    &mut payload,
+                );
+                forge_core::activity::record_main(std::path::Path::new(&project), &payload);
+            }
+            return Ok(());
+        }
         Some("agent-advisor") => {
             forge_core::events::record_advisor();
             return Ok(());

@@ -311,6 +311,7 @@ impl App {
                     cmds.push(UiCmd::ToggleIdeas);
                 }
                 self.worktrees_ui(ui, i);
+                self.agents_board_ui(ui, i);
             });
     }
 

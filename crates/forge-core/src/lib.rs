@@ -1,6 +1,7 @@
 // Lógica de Forge sin interfaz: Guard, hooks, evidencias, agentes, router de modelos,
 // memoria, servidor MCP y persistencia. La app (ventana y CLI) se construye encima.
 pub mod accounts;
+pub mod activity;
 pub mod agents;
 pub mod apicheck;
 pub mod candidate;
