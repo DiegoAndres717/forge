@@ -3053,4 +3053,71 @@ pub const EN: &[(&str, &str)] = &[
         "Guardar solo al dejar de escribir",
         "Save when I stop typing",
     ),
+    // Worktrees (plan #194).
+    ("es el worktree principal", "it is the main worktree"),
+    ("es el worktree actual", "it is the current worktree"),
+    (
+        "una terminal o un proceso trabaja en él",
+        "a terminal or a process is working in it",
+    ),
+    (
+        "está bloqueado (git worktree lock)",
+        "it is locked (git worktree lock)",
+    ),
+    ("tiene cambios sin commit", "it has uncommitted changes"),
+    (
+        "su rama no está fusionada ni subida",
+        "its branch is neither merged nor pushed",
+    ),
+    (
+        "tiene archivos ignorados que no se pueden regenerar",
+        "it has ignored files that can't be rebuilt",
+    ),
+    (
+        "tiene HEAD separado (quizá un rebase a medias)",
+        "its HEAD is detached (maybe a rebase in progress)",
+    ),
+    ("su disco no está conectado", "its disk is not connected"),
+    (
+        "⚠ No se pudieron ver los procesos en marcha: cierra antes las terminales y agentes que trabajen en un worktree.",
+        "⚠ Could not see running processes: first close the terminals and agents working in a worktree.",
+    ),
+    ("ignorados: {p}", "ignored: {p}"),
+    ("carpeta borrada", "folder deleted"),
+    ("bloqueado (lock)", "locked"),
+    ("fusionada", "merged"),
+    ("sin fusionar", "not merged"),
+    ("cambios sin commit", "uncommitted changes"),
+    ("subida", "pushed"),
+    ("{n} sin subir", "{n} not pushed"),
+    ("sin rama remota", "no remote branch"),
+    ("podar y borrar la rama {b}", "prune and delete branch {b}"),
+    (
+        "podar (la carpeta ya no está)",
+        "prune (the folder is gone)",
+    ),
+    (
+        "quitar y borrar la rama {b}",
+        "remove and delete branch {b}",
+    ),
+    ("quitar (la rama se queda)", "remove (the branch stays)"),
+    ("se queda: {r}", "kept: {r}"),
+    (" (principal)", " (main)"),
+    (
+        "Simulación: no se ha cambiado nada. Para hacerlo: forge worktrees clean --apply",
+        "Simulation: nothing was changed. To do it: forge worktrees clean --apply",
+    ),
+    ("Worktrees", "Worktrees"),
+    (
+        "Las copias de trabajo del repositorio (git worktree): rama, estado y lo que ocupan",
+        "The repository's working copies (git worktree): branch, state and disk size",
+    ),
+    ("Solo está el principal", "Only the main one"),
+    ("Vista previa de limpieza", "Preview cleanup"),
+    ("No hay nada que limpiar", "Nothing to clean up"),
+    ("Aplicar limpieza", "Apply cleanup"),
+    (
+        "Nada aplicado: cambiaron desde la vista previa",
+        "Nothing applied: they changed since the preview",
+    ),
 ];

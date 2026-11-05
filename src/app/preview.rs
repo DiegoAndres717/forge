@@ -154,6 +154,14 @@ fn ui_preview() {
          && echo 'export const cart = [];' > src/cart.ts && git add . && git commit -qm 'Add cart' \
          && echo 'export const pay = () => {};' > src/checkout/pay.ts && git add . && git commit -qm 'Checkout with Stripe'",
     );
+    // Worktrees de agentes: uno ya fusionado con squash y otro con cambios sin commit.
+    sh(&format!(
+        "git worktree add -q -b feat/gift-cards {t}/gift-cards && echo 'export const gift = 1;' > {t}/gift-cards/gift.ts \
+         && git -C {t}/gift-cards add . && git -C {t}/gift-cards commit -qm 'Gift cards' \
+         && git merge -q --squash feat/gift-cards && git commit -qm 'Gift cards (#12)' \
+         && git worktree add -q -b fix/tax-rounding {t}/tax-rounding && echo wip > {t}/tax-rounding/tax.ts",
+        t = home.join(".worktrees").display()
+    ));
     std::fs::write(
         project.join(".forge/project.toml"),
         "[project]\nname = \"Acme Store\"\n\
@@ -551,6 +559,15 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12-git");
     harness.state_mut().workspaces[0].git.open = false;
+    // Worktrees en la barra lateral, con la vista previa de la limpieza.
+    harness.get_by_label(forge_core::tr!("Worktrees")).click();
+    settle(&mut harness);
+    harness
+        .get_by_label(forge_core::tr!("Vista previa de limpieza"))
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "12k-worktrees");
+    harness.get_by_label(forge_core::tr!("Worktrees")).click();
     // Árbol de archivos con una carpeta abierta y el cambio de arriba marcado.
     std::fs::create_dir_all(project.join("docs")).unwrap();
     std::fs::write(project.join("docs/notas.md"), "# Notas\n").unwrap();

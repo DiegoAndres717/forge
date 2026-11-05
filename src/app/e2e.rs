@@ -4613,3 +4613,42 @@ fn ctrl_tab_walks_the_terminals_of_the_panel() {
         "da la vuelta al principio"
     );
 }
+
+/// Plan #194, fase 1: la barra lateral lista los worktrees y la limpieza pasa por una
+/// vista previa (que no toca nada) antes de quitar el worktree fusionado y su rama.
+#[test]
+fn worktrees_are_listed_and_cleaned_only_after_a_preview() {
+    let _serial = serial();
+    let dir = project("worktrees");
+    let script = "git commit -qm inicio && echo wt/ >> .git/info/exclude \
+        && git switch -qc feat/done && echo c > c && git add c && git commit -qm c \
+        && git switch -q main && git merge -q --squash feat/done && git commit -qm 'c (#1)' \
+        && git worktree add -q wt/done feat/done";
+    let ok = std::process::Command::new("sh")
+        .args(["-c", script])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let mut h = app(dir.clone());
+    h.get_by_label("Worktrees").click();
+    wait_until(&mut h, "la lista", |a| a.worktrees.list.is_some());
+    h.run_steps(2);
+    h.get_by_label("feat/done");
+    h.get_by_label("Vista previa de limpieza").click();
+    wait_until(&mut h, "la vista previa", |a| a.worktrees.preview.is_some());
+    h.run_steps(2);
+    h.get_by_label_contains("quitar y borrar la rama feat/done");
+    assert!(
+        dir.join("wt/done/c").is_file(),
+        "la vista previa no toca nada"
+    );
+    h.get_by_label("Aplicar limpieza").click();
+    wait_until(&mut h, "la limpieza", |a| {
+        a.worktrees.applied.is_some() && a.worktrees.loading.is_none()
+    });
+    assert!(!dir.join("wt/done").exists());
+    assert_eq!(forge_core::git::resolve_commit(&dir, "feat/done"), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
