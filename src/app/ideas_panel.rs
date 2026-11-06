@@ -648,13 +648,34 @@ impl App {
     ) {
         let Some(i) = self.active else { return };
         let ws = &mut self.workspaces[i];
-        let Some(prompt) = ws
-            .ideas
-            .items
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| forge_core::ideas::review_prompt(p, phase))
-        else {
+        let Some(idea) = ws.ideas.items.iter().find(|p| p.id == id) else {
+            return;
+        };
+        // Quién la hizo y dónde está su rama: el revisor lee el worktree, sin tocarlo.
+        let author = ws.ideas.authors.get(&(id, phase)).and_then(|a| {
+            ws.project
+                .agents
+                .iter()
+                .find(|s| s.id == a.agent)
+                .map(|s| s.name.clone())
+        });
+        let worktree = idea
+            .phases
+            .get(phase)
+            .and_then(|p| p.branch.as_deref())
+            .and_then(|branch| {
+                let repo = ws.ideas.repo.as_ref()?;
+                let root = forge_core::worktrees::root()?;
+                forge_core::worktrees::records_of_main(repo, &root)
+                    .into_iter()
+                    .find(|r| r.branch == branch && r.path.exists())
+                    .map(|r| r.path)
+            });
+        let context = forge_core::ideas::ReviewContext {
+            author: author.as_deref(),
+            worktree: worktree.as_deref(),
+        };
+        let Some(prompt) = forge_core::ideas::review_prompt(idea, phase, &context) else {
             return;
         };
         let path = ws.project.path.clone();
