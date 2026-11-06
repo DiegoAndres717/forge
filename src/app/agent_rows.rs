@@ -231,6 +231,10 @@ pub(super) fn agent_rows_ui(
     now: i64,
     cmds: &mut Vec<UiCmd>,
 ) {
+    // El tiempo de cada fila avanza solo (sin spinner no hay otro repintado).
+    if !rows.is_empty() {
+        ui.ctx().request_repaint_after(Duration::from_secs(10));
+    }
     // Estrecho: sin el modelo (sigue en el aviso al pasar el ratón).
     let narrow = ui.available_width() < 190.0;
     for (row, panel) in rows.iter().zip(panels) {

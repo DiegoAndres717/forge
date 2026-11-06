@@ -1593,6 +1593,12 @@ mod tests {
             Some("agy -i 'planifica #7'")
         );
         assert_eq!(get("gemini").with_prompt("gemini", "x"), None);
+        // Uno propio (sin entrada en el catálogo) lo recibe como argumento suelto.
+        let mine = AgentSpec {
+            id: "mio".into(),
+            ..get("pi").clone()
+        };
+        assert!(mine.with_prompt("mio", "x").is_some());
         let opencode = get("opencode").with_mcp("opencode --continue", &server);
         assert!(
             opencode.starts_with("OPENCODE_CONFIG_CONTENT='{\"mcp\":{\"forge\":"),

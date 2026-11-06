@@ -258,10 +258,11 @@ impl App {
         } else if theme::secondary(ui, tr!("Vista previa de limpieza")).clicked() {
             view.start_preview(ui.ctx(), project.clone(), in_use());
         }
-        // Se cierra sin aplicar: «Cerrar» o Esc con el ratón sobre la barra lateral (así Esc
-        // no se le quita a la terminal, donde interrumpe al agente).
+        // Se cierra sin aplicar: «Cerrar» o Esc con el ratón sobre la barra lateral y sin una
+        // terminal con el foco (así Esc no se le quita al agente, al que interrumpe).
         let esc = view.preview.is_some()
             && ui.rect_contains_pointer(ui.clip_rect())
+            && ui.ctx().memory(|m| m.focused().is_none())
             && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         if esc {
             view.preview = None;

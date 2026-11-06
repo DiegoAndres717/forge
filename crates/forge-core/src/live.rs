@@ -11,6 +11,11 @@ use crate::catalog::{self, Live};
 pub const DONE_SHOWN: i64 = 10 * 60;
 /// Sin datos de hooks: si su terminal escribió hace menos que esto, está trabajando.
 const QUIET_AFTER: i64 = 4;
+/// Con hooks: escribir menos que esto seguido es redibujar (una tecla, cambiar el tamaño).
+const BUSY_FOR: i64 = 2;
+/// Sin eventos ni salida en este rato, lo que seguía «trabajando» se interrumpió (Esc, Ctrl+C
+/// no avisan): pasa a en espera.
+const STALE_AFTER: i64 = 15 * 60;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
@@ -136,7 +141,13 @@ fn row(activity: &[Activity], t: &TerminalInfo, now: i64) -> Row {
             row.reliable = true;
             return row;
         }
-        Some((kind, at)) if kind == "waiting" && *at >= last_activity => {
+        // El aviso de «esperando» que llega tras terminar es el de la pantalla de entrada, no
+        // un permiso: solo cuenta con el turno abierto.
+        Some((kind, at))
+            if kind == "waiting"
+                && *at >= last_activity
+                && main.is_none_or(|m| m.finished_at.is_none()) =>
+        {
             row.state = State::Waiting;
             row.since = *at;
             row.reliable = true;
@@ -149,7 +160,11 @@ fn row(activity: &[Activity], t: &TerminalInfo, now: i64) -> Row {
         let (state, since) = sub_state(m, now);
         row.state = state;
         row.since = since;
-        if state == State::Working {
+        let quiet = t.output_at.is_none_or(|o| now - o >= STALE_AFTER);
+        if state == State::Working && now - m.updated_at >= STALE_AFTER && quiet {
+            row.state = State::Idle;
+            row.since = m.updated_at;
+        } else if state == State::Working {
             row.doing = Some(m.doing());
         }
     } else if let Some(sub) = row.subagents.first().filter(|_| live != Live::None) {
@@ -165,8 +180,10 @@ fn row(activity: &[Activity], t: &TerminalInfo, now: i64) -> Row {
         };
         row.state = state;
         row.since = since;
-        if t.output_at
-            .is_some_and(|o| o > *at && now - o < QUIET_AFTER)
+        // Con hooks, su aviso de fin manda; la salida solo cuenta para los que no los tienen.
+        if live == Live::None
+            && t.output_at
+                .is_some_and(|o| o > *at && now - o < QUIET_AFTER)
         {
             row.state = State::Working;
             row.since = t.busy_since.unwrap_or(*at);
@@ -176,8 +193,9 @@ fn row(activity: &[Activity], t: &TerminalInfo, now: i64) -> Row {
         // Respaldo: su terminal escribe ahora mismo → trabajando (estimado). Quieto, un agente
         // con hooks que no dijo nada está de verdad en espera.
         row.reliable = live != Live::None;
+        let sustained = live == Live::None || t.busy_since.is_some_and(|b| now - b >= BUSY_FOR);
         match t.output_at {
-            Some(o) if now - o < QUIET_AFTER => {
+            Some(o) if now - o < QUIET_AFTER && sustained => {
                 row.state = State::Working;
                 row.since = t.busy_since.unwrap_or(o);
                 row.reliable = false;
@@ -305,6 +323,7 @@ mod tests {
         // espera, sin dudas.
         let mut claude = term("c", "claude", "Claude Code");
         claude.output_at = Some(now - 2);
+        claude.busy_since = Some(now - 10);
         let mut calm = term("k", "claude", "Claude Code");
         calm.output_at = Some(now - 90);
         let rows = rows(&acts, &[busy, quiet, claude, calm], now);
@@ -341,6 +360,45 @@ mod tests {
         assert_eq!(c.subagents[1].state, State::Done);
         assert_eq!((c.state, c.since), (State::Working, now - 200));
         assert!(rows[1].subagents.is_empty(), "Codex no entrega subagentes");
+    }
+
+    /// Revisión: teclear o redimensionar redibuja la terminal; con hooks eso no es trabajar.
+    #[test]
+    fn a_redraw_does_not_wake_an_agent_with_hooks() {
+        let now = 10_000;
+        let mut done = term("s", "codex", "Codex");
+        done.event = Some(("stop".into(), now - 100));
+        done.output_at = Some(now - 1);
+        done.busy_since = Some(now - 1);
+        let mut fresh = term("f", "claude", "Claude Code");
+        fresh.output_at = Some(now - 1);
+        fresh.busy_since = Some(now - 1);
+        let rows = rows(&[], &[done, fresh], now);
+        assert_eq!(rows[0].state, State::Done);
+        assert_eq!(rows[1].state, State::Idle);
+    }
+
+    /// Revisión: el aviso de «esperando entrada» tras terminar no es un permiso pendiente.
+    #[test]
+    fn a_waiting_notice_after_the_turn_ended_is_not_a_permission_request() {
+        let now = 10_000;
+        let mut t = term("s", "claude", "Claude Code");
+        t.event = Some(("waiting".into(), now - 10));
+        let a = act("s", "", now - 300, Some(now - 60));
+        assert_eq!(rows(&[a], &[t], now)[0].state, State::Done);
+    }
+
+    /// Revisión: interrumpido con Esc no avisa; sin eventos ni salida un buen rato, en espera.
+    #[test]
+    fn a_silent_interrupted_turn_stops_spinning() {
+        let now = 100_000;
+        let t = term("s", "claude", "Claude Code");
+        let a = act("s", "", now - STALE_AFTER - 50, None);
+        let row = &rows(&[a], &[t], now)[0];
+        assert_eq!(
+            (row.state, row.since),
+            (State::Idle, now - STALE_AFTER - 50)
+        );
     }
 
     #[test]
