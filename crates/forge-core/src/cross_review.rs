@@ -9,53 +9,12 @@ use crate::agents::AgentSpec;
 use crate::store::{ActiveAgentSession, Store};
 use crate::worktrees::Record;
 
-/// Quién hace el agente (el modelo de serie que trae). Modelos de empresas distintas fallan en
-/// cosas distintas: por eso el revisor es de otra.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Company {
-    Anthropic,
-    OpenAI,
-    Google,
-    Alibaba,
-    /// OpenCode (Anomaly, antes SST): proyecto propio que puede usar modelos de cualquiera.
-    OpenCode,
-    /// Pi (pi-coding-agent): proyecto independiente, también con cualquier modelo.
-    Pi,
-}
+pub use crate::catalog::Company;
 
-impl Company {
-    /// Su nombre (propio: no se traduce).
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Anthropic => "Anthropic",
-            Self::OpenAI => "OpenAI",
-            Self::Google => "Google",
-            Self::Alibaba => "Alibaba",
-            Self::OpenCode => "OpenCode",
-            Self::Pi => "Pi",
-        }
-    }
-}
-
-/// La empresa de cada agente que Forge sabe lanzar (`agents::builtins`), en un solo sitio.
-/// Un agente nuevo sin fila aquí hace fallar `every_launchable_agent_has_a_company`.
-const COMPANIES: &[(&str, Company)] = &[
-    ("claude", Company::Anthropic),
-    ("codex", Company::OpenAI),
-    ("gemini", Company::Google),
-    ("agy", Company::Google),
-    ("qwen", Company::Alibaba),
-    ("opencode", Company::OpenCode),
-    ("pi", Company::Pi),
-];
-
-/// La empresa de un agente por su id (`claude`, `codex`…). `None` para agentes propios de
-/// `agents.toml` que Forge no conoce.
+/// La empresa de un agente por su id (`claude`, `codex`…), del catálogo único. `None` para
+/// agentes propios de `agents.toml` que Forge no conoce.
 pub fn company(agent: &str) -> Option<Company> {
-    COMPANIES
-        .iter()
-        .find(|(id, _)| *id == agent)
-        .map(|(_, c)| *c)
+    crate::catalog::get(agent).map(|a| a.company)
 }
 
 /// De dónde se sabe quién hizo la fase.

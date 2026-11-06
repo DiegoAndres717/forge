@@ -411,12 +411,50 @@ pub fn hairline(ui: &Ui, rect: Rect, vertical: bool) {
     }
 }
 
-/// Agentes con logo propio (los demás usan el icono genérico).
+/// Agentes con logo propio en el catálogo (los demás llevan su letra).
 pub fn has_agent_logo(program: &str) -> bool {
-    matches!(
-        program,
-        "claude" | "codex" | "opencode" | "gemini" | "qwen" | "agy"
-    )
+    forge_core::catalog::get(program)
+        .is_some_and(|a| a.icon == forge_core::catalog::Icon::Logo && logo_art(a.id).is_some())
+}
+
+/// El dibujo de un logo: un PNG pequeño de `assets/agents` o, el de Codex, trazado aquí.
+enum LogoArt {
+    Png(&'static [u8]),
+    Codex,
+}
+
+fn logo_art(id: &str) -> Option<LogoArt> {
+    Some(LogoArt::Png(match id {
+        "claude" => include_bytes!("../assets/agents/claude.png"),
+        "opencode" => include_bytes!("../assets/agents/opencode.png"),
+        "gemini" => include_bytes!("../assets/agents/gemini.png"),
+        "qwen" => include_bytes!("../assets/agents/qwen.png"),
+        "agy" => include_bytes!("../assets/agents/agy.png"),
+        "codex" => return Some(LogoArt::Codex),
+        _ => return None,
+    }))
+}
+
+/// El icono de un agente en `rect`: su logo o, sin logo, su inicial en un cuadrado.
+pub fn agent_icon(ui: &egui::Ui, id: &str, name: &str, rect: Rect, dim: bool) {
+    match forge_core::catalog::icon(id, name) {
+        forge_core::catalog::Icon::Logo if has_agent_logo(id) => agent_logo(ui, id, rect, dim),
+        icon => {
+            let letter = match icon {
+                forge_core::catalog::Icon::Letter(c) => c,
+                _ => forge_core::catalog::letter(name),
+            };
+            let painter = ui.painter();
+            painter.rect_filled(rect, 4.0, Color32::from_gray(if dim { 50 } else { 70 }));
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                letter,
+                FontId::proportional(rect.height() * 0.62),
+                if dim { TEXT_4 } else { TEXT },
+            );
+        }
+    }
 }
 
 /// Logo del agente en el hueco del icono de la fila (atenuado si no está instalado).
@@ -426,13 +464,9 @@ pub fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
     } else {
         Color32::WHITE
     };
-    let png: &[u8] = match program {
-        "claude" => include_bytes!("../assets/agents/claude.png"),
-        "opencode" => include_bytes!("../assets/agents/opencode.png"),
-        "gemini" => include_bytes!("../assets/agents/gemini.png"),
-        "qwen" => include_bytes!("../assets/agents/qwen.png"),
-        "agy" => include_bytes!("../assets/agents/agy.png"),
-        _ => {
+    let png: &[u8] = match logo_art(program) {
+        Some(LogoArt::Png(png)) => png,
+        Some(LogoArt::Codex) => {
             // Codex: la marca de OpenAI (nudo de seis trazos) sobre fondo negro.
             let painter = ui.painter();
             painter.rect_filled(rect, 4.0, Color32::BLACK);
@@ -447,6 +481,7 @@ pub fn agent_logo(ui: &egui::Ui, program: &str, rect: Rect, dim: bool) {
             }
             return;
         }
+        None => return,
     };
     let id = egui::Id::new(("agent-logo", program));
     let texture = ui
@@ -477,4 +512,26 @@ pub fn field(edit: egui::TextEdit<'_>) -> egui::TextEdit<'_> {
     edit.font(FontId::proportional(13.5))
         .margin(Margin::symmetric(10, 8))
         .min_size(Vec2::new(0.0, 34.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Un agente del catálogo marcado con logo debe tener su dibujo aquí (si no, su letra).
+    #[test]
+    fn every_catalog_logo_has_its_art() {
+        for a in forge_core::catalog::CATALOG {
+            if a.icon == forge_core::catalog::Icon::Logo {
+                assert!(
+                    logo_art(a.id).is_some(),
+                    "«{}» sin logo en assets/agents",
+                    a.id
+                );
+                if let Some(LogoArt::Png(png)) = logo_art(a.id) {
+                    assert!(eframe::icon_data::from_png_bytes(png).is_ok(), "{}", a.id);
+                }
+            }
+        }
+    }
 }

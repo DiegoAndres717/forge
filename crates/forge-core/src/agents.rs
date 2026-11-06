@@ -451,11 +451,12 @@ impl AgentSpec {
     /// (Claude Code, Codex, agentes propios), `--prompt` en OpenCode (que toma el argumento
     /// suelto como carpeta); `None` en los integrados sin verificar.
     pub fn with_prompt(&self, command: &str, prompt: &str) -> Option<String> {
-        match self.mcp_style {
-            Some(McpStyle::OpenCodeEnv) => Some(format!("{command} --prompt {}", quote(prompt))),
-            None if matches!(self.id.as_str(), "gemini" | "qwen" | "pi") => None,
-            _ if self.id == "agy" => Some(format!("{command} -i {}", quote(prompt))),
-            _ => Some(format!("{command} {}", quote(prompt))),
+        use crate::catalog::Prompt;
+        // Los propios (sin entrada en el catálogo) lo reciben como argumento suelto.
+        match crate::catalog::get(&self.id).map_or(Prompt::Positional, |a| a.prompt) {
+            Prompt::Positional => Some(format!("{command} {}", quote(prompt))),
+            Prompt::Flag(flag) => Some(format!("{command} {flag} {}", quote(prompt))),
+            Prompt::Unsupported => None,
         }
     }
 
@@ -689,98 +690,24 @@ pub fn ensure_gemini_hooks(home: &Path, forge: &str) -> Result<(), String> {
 /// Agentes conocidos. Las opciones de reanudar y no interactivas se comprobaron con
 /// `--help` de cada CLI; las que no se pudieron comprobar se dejan vacías.
 pub fn builtins() -> Vec<AgentSpec> {
-    let agent = |id: &str,
-                 name: &str,
-                 command: &str,
-                 resume: Option<&str>,
-                 headless: Option<&str>,
-                 mcp: bool,
-                 hint: &str| AgentSpec {
-        id: id.into(),
-        name: name.into(),
-        command: command.into(),
-        resume: resume.map(String::from),
-        headless: headless.map(String::from),
-        mcp,
-        mcp_style: match id {
-            "claude" => Some(McpStyle::ClaudeJson),
-            "codex" => Some(McpStyle::CodexConfig),
-            "opencode" => Some(McpStyle::OpenCodeEnv),
-            "agy" => Some(McpStyle::AgyConfig),
-            _ => None,
-        },
-        install_hint: Some(hint.into()),
-        enabled: true,
-        default: false,
-        configured: false,
-        environment: HashMap::new(),
-    };
-    vec![
-        agent(
-            "claude",
-            "Claude Code",
-            "claude",
-            Some("claude --continue"),
-            Some("claude -p"),
-            true,
-            "curl -fsSL https://claude.ai/install.sh | bash",
-        ),
-        agent(
-            "codex",
-            "Codex",
-            "codex",
-            Some("codex resume --last"),
-            Some("codex exec"),
-            true,
-            "brew install codex",
-        ),
-        agent(
-            "opencode",
-            "OpenCode",
-            "opencode",
-            Some("opencode --continue"),
-            Some("opencode run"),
-            true,
-            "brew install opencode",
-        ),
-        // ponytail: opciones de reanudar sin verificar (no instalados aquí); se añaden al comprobarlas.
-        agent(
-            "gemini",
-            "Gemini CLI",
-            "gemini",
-            None,
-            Some("gemini -p"),
-            true,
-            "npm install -g @google/gemini-cli",
-        ),
-        agent(
-            "qwen",
-            "Qwen Code",
-            "qwen",
-            None,
-            Some("qwen -p"),
-            true,
-            "npm install -g @qwen-code/qwen-code",
-        ),
-        agent(
-            "pi",
-            "Pi",
-            "pi",
-            None,
-            None,
-            false,
-            "npm install -g @mariozechner/pi-coding-agent",
-        ),
-        agent(
-            "agy",
-            "Antigravity",
-            "agy",
-            Some("agy --continue"),
-            Some("agy -p"),
-            true,
-            "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-        ),
-    ]
+    // Salen del catálogo único (`catalog::CATALOG`): un agente nuevo se añade allí.
+    crate::catalog::CATALOG
+        .iter()
+        .map(|a| AgentSpec {
+            id: a.id.into(),
+            name: a.name.into(),
+            command: a.command.into(),
+            resume: a.resume.map(String::from),
+            headless: a.headless.map(String::from),
+            mcp: a.mcp,
+            mcp_style: a.mcp_style,
+            install_hint: Some(a.install_hint.into()),
+            enabled: true,
+            default: false,
+            configured: false,
+            environment: HashMap::new(),
+        })
+        .collect()
 }
 
 /// `.forge/agents.toml` (formato del plan 9.3).

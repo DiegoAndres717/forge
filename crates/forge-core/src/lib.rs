@@ -5,6 +5,7 @@ pub mod activity;
 pub mod agents;
 pub mod apicheck;
 pub mod candidate;
+pub mod catalog;
 pub mod cross_review;
 pub mod danger;
 pub mod embed;

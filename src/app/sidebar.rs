@@ -405,11 +405,9 @@ impl App {
                 ),
                 None => tr!("{p0} no está instalado", p0 = agent.program()),
             };
-            let has_logo = theme::has_agent_logo(agent.program());
-            let glyph = if has_logo { "" } else { icon::ROBOT };
             let row = theme::row(
                 ui,
-                glyph,
+                "",
                 color,
                 &match ws.account_for(agent.program(), None) {
                     Some(a) if ws.has_accounts(agent.program()) => {
@@ -420,13 +418,12 @@ impl App {
                 &detail,
                 false,
             );
-            if has_logo {
-                let at = Rect::from_center_size(
-                    egui::pos2(row.rect.min.x + 17.0, row.rect.center().y),
-                    Vec2::splat(16.0),
-                );
-                theme::agent_logo(ui, agent.program(), at, !installed);
-            }
+            // Su logo del catálogo, o su inicial.
+            let at = Rect::from_center_size(
+                egui::pos2(row.rect.min.x + 17.0, row.rect.center().y),
+                Vec2::splat(16.0),
+            );
+            theme::agent_icon(ui, agent.program(), &agent.name, at, !installed);
             let row = row.on_hover_text(tip);
             if row.clicked() && installed {
                 let new = ui.input(|i| i.modifiers.alt);
