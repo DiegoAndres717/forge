@@ -887,7 +887,9 @@ impl Server<'_> {
             let number = args["task"].as_u64().map(|t| t.saturating_sub(1) as usize);
             let rename = args["task_text"].as_str();
             let remove = args["remove_task"].as_bool() == Some(true);
-            if (rename.is_some() || remove) && number.is_none() {
+            // Renombrar o borrar exige un número válido desde 1: la tarea 0 no se toma por la
+            // primera (como al tachar), porque borraría otra.
+            if (rename.is_some() || remove) && !args["task"].as_u64().is_some_and(|t| t > 0) {
                 return Err(tr!("falta `task`: el número de la tarea dentro de la fase").into());
             }
             // Renombrar o borrar no tacha la tarea, salvo que se pida con task_done.
@@ -1307,6 +1309,11 @@ mod tests {
         );
         let (error, _) = call(json!({"id": id, "phase": 2, "remove_task": true}));
         assert!(error, "borrar sin decir qué tarea es un error");
+        // Las tareas van desde 1: la 0 no es la primera (borraría otra).
+        let (error, _) = call(json!({"id": id, "phase": 2, "task": 0, "remove_task": true}));
+        assert!(error, "la tarea 0 no existe");
+        let (error, _) = call(json!({"id": id, "phase": 2, "task": 0, "task_text": "x"}));
+        assert!(error, "la tarea 0 no existe");
         let after = store.get_idea(Some(dir), id).unwrap().unwrap();
         assert_eq!(after.phases[0], before.phases[0]);
         assert_eq!(

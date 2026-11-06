@@ -1948,8 +1948,8 @@ pub const EN: &[(&str, &str)] = &[
         "usage: forge plans task <id> <phase>.<task> (e.g. 2.3)",
     ),
     (
-        "uso: forge plans task <id> <fase>.<tarea> --rename \"texto\"",
-        "usage: forge plans task <id> <phase>.<task> --rename \"text\"",
+        "uso: forge plans task <id> <fase>.<tarea> --rename \"texto\" | --delete",
+        "usage: forge plans task <id> <phase>.<task> --rename \"text\" | --delete",
     ),
     (
         "uso: forge plans {action} {what}",

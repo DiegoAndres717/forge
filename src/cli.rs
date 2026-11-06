@@ -1408,10 +1408,13 @@ fn plans_cli(
             // --rename "texto" la renombra y --delete la borra (las siguientes de la fase
             // bajan un número); si no, se tacha (o se destacha con --undo).
             let rename = flag(args, "--rename");
-            if rename.is_none() && args.iter().any(|a| a == "--rename") {
-                return Err(
-                    tr!("uso: forge plans task <id> <fase>.<tarea> --rename \"texto\"").into(),
-                );
+            // Sin texto, o con --delete a la vez, no se adivina qué se quería.
+            let has = |f: &str| args.iter().any(|a| a == f);
+            if has("--rename") && (rename.is_none() || has("--delete")) {
+                return Err(tr!(
+                    "uso: forge plans task <id> <fase>.<tarea> --rename \"texto\" | --delete"
+                )
+                .into());
             }
             let change = if args.iter().any(|a| a == "--delete") {
                 forge_core::ideas::PhaseChange {

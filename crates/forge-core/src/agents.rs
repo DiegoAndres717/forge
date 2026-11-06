@@ -564,13 +564,20 @@ pub fn pi_agent_dir(home: Option<&Path>) -> Option<PathBuf> {
     if let Some(home) = home {
         return Some(home.join(".pi/agent"));
     }
-    let home = crate::home_dir();
-    match std::env::var("PI_CODING_AGENT_DIR") {
-        Ok(dir) if !dir.trim().is_empty() => Some(match dir.strip_prefix("~/") {
-            Some(rest) => home?.join(rest),
-            None => PathBuf::from(dir),
-        }),
-        _ => home.map(|h| h.join(".pi/agent")),
+    pi_dir_from(std::env::var("PI_CODING_AGENT_DIR").ok(), crate::home_dir())
+}
+
+/// `PI_CODING_AGENT_DIR` (con `~`, `~/…` o `~\…` como la carpeta personal) o `~/.pi/agent`.
+fn pi_dir_from(var: Option<String>, home: Option<PathBuf>) -> Option<PathBuf> {
+    let Some(dir) = var.filter(|d| !d.trim().is_empty()) else {
+        return home.map(|h| h.join(".pi/agent"));
+    };
+    if dir == "~" {
+        return home;
+    }
+    match dir.strip_prefix("~/").or_else(|| dir.strip_prefix("~\\")) {
+        Some(rest) => home.map(|h| h.join(rest)),
+        None => Some(PathBuf::from(dir)),
     }
 }
 
@@ -1774,6 +1781,18 @@ mod tests {
             broken
         );
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pi_config_folder_follows_its_variable() {
+        let home = Some(PathBuf::from("/h"));
+        let dir = |v: Option<&str>| pi_dir_from(v.map(String::from), home.clone());
+        assert_eq!(dir(None), Some(PathBuf::from("/h/.pi/agent")));
+        assert_eq!(dir(Some(" ")), Some(PathBuf::from("/h/.pi/agent")));
+        assert_eq!(dir(Some("~")), Some(PathBuf::from("/h")));
+        assert_eq!(dir(Some("~/pi")), Some(PathBuf::from("/h/pi")));
+        assert_eq!(dir(Some("~\\pi")), Some(PathBuf::from("/h").join("pi")));
+        assert_eq!(dir(Some("/otra/pi")), Some(PathBuf::from("/otra/pi")));
     }
 
     #[test]
