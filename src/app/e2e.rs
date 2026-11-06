@@ -5229,11 +5229,80 @@ fn the_cross_review_setting_is_in_the_project_settings_tab() {
         h.query_by_label("Revisión de otra marca").is_some(),
         "Este proyecto lo trae"
     );
+    // Sin revisiones medidas, el resumen lo dice (plan #84, fase 3).
+    assert!(
+        h.query_by_label("Aún no hay revisiones medidas").is_some(),
+        "el resumen sin datos"
+    );
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
     h.get_by_label("No ofrecer nunca").click();
     h.run_steps(3);
     let path = ws(h.state()).project.path.clone();
     let store = h.state().store.as_ref().unwrap();
     assert!(!forge_core::cross_review::offers_enabled(store, &path));
+}
+
+/// Plan #84, fase 3: la revisión que abre «Revisar con Codex» anota quién hizo la fase; cada
+/// hallazgo lleva revisor, autor y gravedad; el dueño lo marca como descartado desde la fase y
+/// el resumen por pareja de Ajustes > Este proyecto lo cuenta.
+#[test]
+fn a_dismissed_finding_counts_in_the_review_summary_of_its_pair() {
+    use forge_core::ideas::NewComment;
+    use forge_core::review_stats::{Outcome, Severity};
+    let _serial = serial();
+    let mut h = finished_phase("measure", &["claude", "codex"], |_| {});
+    h.get_by_label_contains("Revisar con Codex").click();
+    wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
+    let path = ws(h.state()).project.path.clone();
+    let plan = ws(h.state()).ideas.items[0].id;
+    // Codex deja un hallazgo por MCP (su cliente se llama así).
+    h.state_mut()
+        .db(|s| {
+            s.add_review_comment(
+                Some(&path),
+                plan,
+                0,
+                NewComment {
+                    text: "[bug/high] Se cobra dos veces",
+                    file: None,
+                    line: None,
+                },
+                "codex-mcp-client",
+            )
+        })
+        .unwrap();
+    ws_mut(h.state_mut()).ideas.open = true;
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "el hallazgo llega al panel", |a| {
+        !ws(a).ideas.comments.is_empty()
+    });
+    h.run_steps(3);
+    let c = ws(h.state()).ideas.comments[0].clone();
+    assert_eq!(
+        (c.author.as_str(), c.reviewer_agent.as_str(), c.severity),
+        ("claude", "codex", Severity::High)
+    );
+    assert_eq!(c.outcome, Outcome::Pending);
+    h.get_by_label("Descartado").click();
+    h.run_steps(2);
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "queda descartado", |a| {
+        ws(a).ideas.comments[0].outcome == Outcome::Dismissed
+    });
+    assert_eq!(ws(h.state()).ideas.comments[0].status, "resolved");
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Project);
+    h.state_mut().settings_open = true;
+    h.run_steps(4);
+    assert!(
+        h.query_by_label(
+            "Claude Code (Anthropic) → Codex (OpenAI): fallos reales 0 · estilo 0 · descartados 1 · pendientes 0 · acierto 0\u{a0}%"
+        )
+        .is_some(),
+        "el resumen de la pareja"
+    );
 }
 
 /// Si el revisor no se puede abrir (no está en el proyecto o no admite un mensaje inicial), no

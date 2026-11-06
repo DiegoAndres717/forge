@@ -504,3 +504,142 @@ fn failure_hint_names_the_known_note_once_per_session() {
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Una sesión MCP de `client` (su nombre de cliente) que hace `calls` y devuelve sus textos.
+fn mcp_session(
+    db: &std::path::Path,
+    project: &str,
+    client: &str,
+    calls: &[(&str, Value)],
+) -> Vec<String> {
+    let mut child = Command::new(FORGE)
+        .args(["mcp", "--project", project])
+        .env("FORGE_DB", db)
+        .env("FORGE_LANG", "es")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut request = |message: Value| -> Value {
+        writeln!(stdin, "{message}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    request(json!({"jsonrpc": "2.0", "id": 0, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": client, "version": "1"}}}));
+    let texts = calls
+        .iter()
+        .enumerate()
+        .map(|(i, (name, args))| {
+            let r = request(
+                json!({"jsonrpc": "2.0", "id": i + 1, "method": "tools/call",
+                "params": {"name": name, "arguments": args}}),
+            );
+            assert_eq!(r["result"]["isError"], false, "{name}: {r}");
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string()
+        })
+        .collect();
+    drop(stdin);
+    let _ = child.wait();
+    texts
+}
+
+/// Plan #84, fase 3: lo que dejan el revisor y el autor por MCP se resume por pareja en
+/// `forge review-stats`; sin revisiones medidas, lo dice.
+#[test]
+fn review_stats_summarize_the_findings_by_author_and_reviewer() {
+    let base = std::env::temp_dir().join(format!("forge-it-review-stats-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(project.join(".forge")).unwrap();
+    let db = base.join("forge.db");
+    let project_arg = project.to_string_lossy().into_owned();
+    let stats = || {
+        let out = Command::new(FORGE)
+            .args(["review-stats", "--project", &project_arg])
+            .env("FORGE_DB", &db)
+            .env("FORGE_LANG", "es")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    assert!(
+        stats().contains("Aún no hay revisiones medidas"),
+        "{}",
+        stats()
+    );
+    // Claude Code hace la fase; Codex la revisa; Claude Code atiende los hallazgos.
+    mcp_session(
+        &db,
+        &project_arg,
+        "claude-code",
+        &[
+            (
+                "plan_add",
+                json!({"title": "Recibos", "phases": [{"title": "Webhook"}]}),
+            ),
+            (
+                "plan_update",
+                json!({"id": 1, "phase": 1, "phase_status": "in_progress"}),
+            ),
+        ],
+    );
+    mcp_session(
+        &db,
+        &project_arg,
+        "codex-mcp-client",
+        &[
+            (
+                "review_comment_add",
+                json!({"plan": 1, "phase": 1, "text": "[bug/high] Se cobra dos veces"}),
+            ),
+            (
+                "review_comment_add",
+                json!({"plan": 1, "phase": 1, "text": "[bug/low] No es un fallo"}),
+            ),
+            (
+                "review_comment_add",
+                json!({"plan": 1, "phase": 1, "text": "[style] Nombre poco claro"}),
+            ),
+            (
+                "review_comment_add",
+                json!({"plan": 1, "phase": 1, "text": "Sin marcador"}),
+            ),
+        ],
+    );
+    mcp_session(
+        &db,
+        &project_arg,
+        "claude-code",
+        &[
+            (
+                "review_comment_resolve",
+                json!({"id": 1, "valid": true, "resolution": "arreglado"}),
+            ),
+            (
+                "review_comment_resolve",
+                json!({"id": 2, "valid": false, "resolution": "ya se comprueba"}),
+            ),
+        ],
+    );
+    let out = stats();
+    assert!(
+        out.contains(
+            "Claude Code (Anthropic) → Codex (OpenAI): fallos reales 1 · estilo 1 · descartados 1 · pendientes 1 · acierto 33\u{a0}%"
+        ),
+        "{out}"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
