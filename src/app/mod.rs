@@ -1837,9 +1837,18 @@ impl eframe::App for App {
             let planner = self.planner(i).map(|(_, name)| name);
             let reviewers = self.reviewers(i);
             let launchers = self.launchers(i);
+            let preferred = self.preferred_agent();
             let ws = &mut self.workspaces[i];
             ws.ideas.reviewers = reviewers;
             ws.ideas.launchers = launchers;
+            // Los agentes que el dueño usa: los de sus terminales y el de serie.
+            let mut in_use = ws.open_agents();
+            if let Some(a) = ws.project.agents.iter().find(|a| a.program() == preferred)
+                && !in_use.contains(&a.id)
+            {
+                in_use.push(a.id.clone());
+            }
+            ws.ideas.in_use = in_use;
             ws.files.autosave = self.autosave;
             ws.tabs_below = self.tabs_below;
             if ws.guard.open || ws.memory.open || ws.ideas.open || ws.git.open || ws.files.open {

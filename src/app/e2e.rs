@@ -2636,6 +2636,48 @@ fn the_review_button_stays_when_no_agent_is_found() {
     );
 }
 
+/// Una fase lista para revisar dice qué revisor le toca y por qué (plan #84): la hizo Claude
+/// Code y hay Codex instalado, así que la revisaría Codex, de otra empresa. Solo texto: no se
+/// abre nada.
+#[test]
+fn a_reviewable_phase_names_its_reviewer_from_another_company() {
+    use forge_core::ideas::Phase;
+    let _serial = serial();
+    let mut h = app(project("cross-reviewer"));
+    // Instalados (simulados) tras la detección de fondo, que si no los pisa.
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    for program in ["claude", "codex"] {
+        h.state().agents.lock().unwrap().insert(
+            program.into(),
+            forge_core::agents::Detection {
+                path: Some(format!("/bin/{program}").into()),
+                version: None,
+            },
+        );
+    }
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Webhook");
+    phase.branch = Some("feat/webhook".into());
+    phase.status = "doing".into();
+    // Quien la marcó en curso, como lo guarda el MCP («claude-code»).
+    phase.worked_by = Some("claude-code".into());
+    h.state_mut()
+        .db(|s| s.add_plan(Some(&path), "Recibos", "", &[phase], "claude-code"))
+        .unwrap();
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    ws_mut(h.state_mut()).ideas.open = true;
+    wait_until(&mut h, "plan cargado", |a| !ws(a).ideas.items.is_empty());
+    h.run_steps(3);
+    assert!(
+        h.query_by_label_contains("Revisor: Codex (otra empresa que Claude Code)")
+            .is_some(),
+        "la fase dice qué revisor le toca y por qué"
+    );
+    assert_eq!(ws(h.state()).panel_count(), 1, "no se abre ningún revisor");
+}
+
 /// Pedirle algo a un agente nunca escribe en la terminal de su revisión (es de solo lectura y
 /// está revisando otra cosa): abre una propia.
 #[test]

@@ -1516,6 +1516,46 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Revisar", "Review"),
     ("Revisar con…", "Review with…"),
+    (
+        "Revisor: {agent} (otra empresa que {author})",
+        "Reviewer: {agent} (a different company than {author})",
+    ),
+    (
+        "Revisor: {agent} (es el único agente instalado que puede revisar)",
+        "Reviewer: {agent} (the only installed agent that can review)",
+    ),
+    (
+        "Revisor: {agent} (no hay instalado ningún agente de otra empresa que {author})",
+        "Reviewer: {agent} (no installed agent is from a different company than {author})",
+    ),
+    (
+        "Revisor: {agent} (no se sabe qué agente hizo la fase)",
+        "Reviewer: {agent} (it is unknown which agent did the phase)",
+    ),
+    (
+        "Revisor: {agent} (no se sabe de qué empresa es {author})",
+        "Reviewer: {agent} (it is unknown which company makes {author})",
+    ),
+    (
+        "según el registro de su worktree",
+        "according to its worktree record",
+    ),
+    (
+        "según su terminal en Forge",
+        "according to its terminal in Forge",
+    ),
+    (
+        "según lo que editó en su worktree",
+        "according to what it edited in its worktree",
+    ),
+    (
+        "según quién marcó la fase en curso",
+        "according to who marked the phase in progress",
+    ),
+    (
+        "Hizo la fase {author}, {from}. Con «Revisar» puedes elegir otro revisor.",
+        "{author} did the phase, {from}. With “Review” you can pick another reviewer.",
+    ),
     ("Revisión", "Review"),
     (
         "Pedirle a otro agente que revise esta fase",

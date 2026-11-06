@@ -345,6 +345,14 @@ pub struct IdeasView {
     /// Lo que se propone recordar de cada revisión abierta (una lista por fase), mientras la
     /// persona elige.
     pub learning: Vec<Learning>,
+    /// Qué agente hizo cada fase (plan, número de fase), para elegir el revisor de otra
+    /// empresa. Se relee con los planes.
+    pub authors: HashMap<(i64, usize), forge_core::cross_review::Author>,
+    /// Agentes que el dueño usa ahora, el primero el más a mano (ids): la terminal enfocada,
+    /// las otras abiertas y el de serie. Los pone la app antes de dibujar.
+    pub in_use: Vec<String>,
+    /// Raíz del worktree principal del proyecto (se pide a Git una vez).
+    pub repo: Option<PathBuf>,
     pub dirty: bool,
     /// Última lectura (los agentes escriben desde otros procesos: se relee cada poco).
     pub loaded: Option<Instant>,
@@ -1979,6 +1987,24 @@ impl Workspace {
     /// Agente de la terminal enfocada (el que el usuario está usando), si es de agente.
     pub fn focused_agent(&self) -> Option<String> {
         self.panels.get(&self.focus)?.agent.clone()
+    }
+
+    /// Los agentes de las terminales abiertas (ids, sin repetir): el de la enfocada primero y
+    /// los demás por orden de apertura.
+    pub fn open_agents(&self) -> Vec<String> {
+        let mut ids: Vec<(&PanelId, &String)> = self
+            .panels
+            .iter()
+            .filter_map(|(id, p)| Some((id, p.agent.as_ref()?)))
+            .collect();
+        ids.sort_by_key(|(id, _)| (**id != self.focus, **id));
+        let mut list: Vec<String> = Vec::new();
+        for (_, agent) in ids {
+            if !list.contains(agent) {
+                list.push(agent.clone());
+            }
+        }
+        list
     }
 
     #[cfg(test)]

@@ -650,7 +650,12 @@ pub fn records(repo: &Path, root: &Path) -> Vec<Record> {
     let Ok(project) = main_root(repo) else {
         return Vec::new();
     };
-    let project = crate::canonical(&project);
+    records_of_main(&project, root)
+}
+
+/// Como `records`, con la raíz del worktree principal ya sabida (sin llamar a Git).
+pub fn records_of_main(project: &Path, root: &Path) -> Vec<Record> {
+    let project = crate::canonical(project);
     let Ok(entries) = std::fs::read_dir(project_dir(&project, root)) else {
         return Vec::new();
     };
