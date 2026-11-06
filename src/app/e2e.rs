@@ -4858,8 +4858,12 @@ fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal()
         2,
         "las dos terminales que editan main.ts"
     );
-    // Sin hooks no inventa qué hace: lo marca como estimado.
-    h.get_by_label("Agente sin hooks · ~ trabajando");
+    // Sin hooks no inventa qué hace: su nombre, o lo estimado por su terminal marcado con «~»
+    // (según lo que haya escrito ya: depende del ritmo de la máquina).
+    h.get_by(|n| {
+        n.label()
+            .is_some_and(|l| l == "Agente sin hooks" || l.starts_with("Agente sin hooks · ~"))
+    });
     // Subagentes plegados de serie; al desplegar, cada uno con su estado.
     assert!(h.query_by_label("explorer: find the login").is_none());
     h.get_by_label_contains("2 subagentes (1 trabajando)")
