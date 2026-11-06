@@ -101,14 +101,14 @@ pub enum Bucket {
     Pending,
 }
 
-/// Descartado gana a todo; luego estilo (lo diga el dueño o el marcador); aceptado es un fallo
-/// real; el resto, pendiente.
+/// Lo decidido manda (descartado, estilo o fallo real); sin decidir, un `[style]` cuenta
+/// como estilo y el resto queda pendiente.
 pub fn bucket(comment: &ReviewComment) -> Bucket {
     match comment.outcome {
         Outcome::Dismissed => Bucket::Dismissed,
         Outcome::Style => Bucket::Style,
-        _ if comment.severity == Severity::Style => Bucket::Style,
         Outcome::Accepted => Bucket::Real,
+        Outcome::Pending if comment.severity == Severity::Style => Bucket::Style,
         Outcome::Pending => Bucket::Pending,
     }
 }
@@ -183,7 +183,7 @@ pub fn render(stats: &[PairStats]) -> Vec<String> {
                 Some(rate) => format!("{rate}\u{a0}%"),
                 None => tr!("sin decidir").to_string(),
             };
-            tr!(
+            let line = tr!(
                 "{author} → {reviewer}: fallos reales {real} · estilo {style} · descartados {dismissed} · pendientes {pending} · acierto {rate}",
                 author = who(&s.author),
                 reviewer = who(&s.reviewer),
@@ -192,7 +192,13 @@ pub fn render(stats: &[PairStats]) -> Vec<String> {
                 dismissed = s.dismissed,
                 pending = s.pending,
                 rate = rate
-            )
+            );
+            // Sin otro agente instalado se revisa a sí mismo: no mide la revisión por otra marca.
+            if s.author == s.reviewer {
+                format!("{line} {}", tr!("(el mismo agente, no otra marca)"))
+            } else {
+                line
+            }
         })
         .collect()
 }
@@ -258,9 +264,10 @@ mod tests {
         assert_eq!(b("[bug/high] x", Accepted), Bucket::Real);
         assert_eq!(b("[bug/low] x", Pending), Bucket::Pending);
         assert_eq!(b("[bug/low] x", Dismissed), Bucket::Dismissed);
-        // Un [style] es estilo aunque se arreglara; un bug que el dueño ve como estilo, también.
-        assert_eq!(b("[style] x", Accepted), Bucket::Style);
+        // Un [style] sin decidir es estilo; un bug que el dueño ve como estilo, también.
         assert_eq!(b("[style] x", Pending), Bucket::Style);
+        // Lo que decide el dueño manda sobre el marcador: un [style] que era un fallo real.
+        assert_eq!(b("[style] x", Accepted), Bucket::Real);
         assert_eq!(b("[bug/medium] x", Style), Bucket::Style);
         // Descartado gana: un [style] rechazado cuenta como descartado.
         assert_eq!(b("[style] x", Dismissed), Bucket::Dismissed);
@@ -342,6 +349,12 @@ mod tests {
                 pending: 1,
                 ..Default::default()
             },
+            PairStats {
+                author: "claude".into(),
+                reviewer: "claude".into(),
+                real: 1,
+                ..Default::default()
+            },
         ];
         let lines = render(&stats);
         assert_eq!(
@@ -351,6 +364,12 @@ mod tests {
         assert_eq!(
             lines[1],
             "autor desconocido → mio: fallos reales 0 · estilo 0 · descartados 0 · pendientes 1 · acierto sin decidir"
+        );
+        // Se revisó a sí mismo (no había otro agente): no es revisión por otra marca, y se dice.
+        assert!(
+            lines[2].ends_with("(el mismo agente, no otra marca)"),
+            "{}",
+            lines[2]
         );
     }
 }

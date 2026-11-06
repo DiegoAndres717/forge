@@ -563,16 +563,28 @@ impl App {
                 },
             );
             // Plan #84, fase 3: si la revisión de otra marca encuentra fallos de verdad.
-            let comments = store
-                .list_project_review_comments(Some(&path))
-                .unwrap_or_default();
-            let lines =
-                forge_core::review_stats::render(&forge_core::review_stats::summarize(&comments));
+            // Se relee como mucho cada 2 s, no en cada fotograma.
+            let id = egui::Id::new(("review-stats", &path));
+            let now = ui.ctx().input(|i| i.time);
+            let cached: Option<(f64, Vec<String>)> = ui.data(|d| d.get_temp(id));
+            let lines = match cached {
+                Some((at, lines)) if now - at < 2.0 => lines,
+                _ => {
+                    let comments = store
+                        .list_project_review_comments(Some(&path))
+                        .unwrap_or_default();
+                    let lines = forge_core::review_stats::render(
+                        &forge_core::review_stats::summarize(&comments),
+                    );
+                    ui.data_mut(|d| d.insert_temp(id, (now, lines.clone())));
+                    lines
+                }
+            };
             row(
                 ui,
                 tr!("Revisiones medidas"),
                 tr!(
-                    "Por cada pareja autor → revisor, cuántos hallazgos fueron fallos reales, cuántos de estilo, cuántos descartaste y cuántos siguen pendientes. Acierto: los fallos reales entre los ya decididos. Lo decides en cada comentario de la fase (Fallo real, Era estilo, Descartado); el agente que hizo la fase también lo dice al atenderlo, y lo tuyo manda. Sirve para ver si la revisión de otra marca encuentra cosas de verdad o solo ruido. También con forge review-stats."
+                    "Por cada pareja autor → revisor, cuántos hallazgos fueron fallos reales, cuántos de estilo, cuántos descartaste y cuántos siguen pendientes. Acierto: los fallos reales entre los ya decididos. Lo decides en cada comentario de la fase (Fallo real, Era estilo, Descartado); el agente que hizo la fase también lo dice al atenderlo (es el autor juzgando a su revisor: revísalo), y lo tuyo manda. Sirve para ver si la revisión de otra marca encuentra cosas de verdad o solo ruido. También con forge review-stats."
                 ),
                 |ui| {
                     for line in &lines {

@@ -1351,9 +1351,11 @@ impl Store {
     ) -> Result<bool, String> {
         self.conn
             .execute(
-                // Reabrir borra también lo decidido: vuelve a estar pendiente.
+                // Reabrir uno descartado o de estilo lo deja pendiente (ya no se da por
+                // resuelto); un fallo real reabierto sigue siéndolo.
                 "UPDATE phase_comments SET status = ?3, resolution = ?4,
-                     outcome = CASE WHEN ?3 = 'open' THEN '' ELSE outcome END
+                     outcome = CASE WHEN ?3 = 'open' AND outcome IN ('dismissed', 'style')
+                                    THEN '' ELSE outcome END
                  WHERE project = ?1 AND id = ?2",
                 params![
                     self.list_key(project),
@@ -1377,8 +1379,12 @@ impl Store {
     ) -> Result<bool, String> {
         self.conn
             .execute(
-                "UPDATE phase_comments SET outcome = ?3,
-                     status = CASE WHEN ?3 IN ('dismissed', 'style') THEN 'resolved' ELSE status END
+                // Descartado o estilo lo resuelven; deshacerlos (a pendiente) lo reabre.
+                "UPDATE phase_comments SET
+                     status = CASE WHEN ?3 IN ('dismissed', 'style') THEN 'resolved'
+                                   WHEN ?3 = '' AND outcome IN ('dismissed', 'style') THEN 'open'
+                                   ELSE status END,
+                     outcome = ?3
                  WHERE project = ?1 AND id = ?2",
                 params![self.list_key(project), id, outcome.as_str()],
             )
@@ -1388,7 +1394,8 @@ impl Store {
 
     /// El veredicto del agente autor al atender un hallazgo (`review_comment_resolve` con
     /// `valid`): lo arregló (fallo real) o no era un fallo (descartado). Solo si el dueño aún
-    /// no decidió nada: lo que diga el dueño manda.
+    /// no decidió nada: lo que diga el dueño manda. Es el autor juzgando a su revisor: por eso
+    /// el dueño puede cambiarlo, y la ayuda del resumen lo dice.
     pub fn agent_review_verdict(
         &self,
         project: Option<&Path>,
@@ -1402,8 +1409,10 @@ impl Store {
         };
         self.conn
             .execute(
+                // Arreglar un [style] no lo hace fallo real: sigue contando como estilo.
                 "UPDATE phase_comments SET outcome = ?3
-                 WHERE project = ?1 AND id = ?2 AND outcome = ''",
+                 WHERE project = ?1 AND id = ?2 AND outcome = ''
+                   AND NOT (?3 = 'accepted' AND severity = 'style')",
                 params![self.list_key(project), id, outcome.as_str()],
             )
             .map(|n| n > 0)
@@ -2907,11 +2916,23 @@ mod tests {
             (get(c).outcome, get(c).status.as_str()),
             (Outcome::Style, "resolved")
         );
-        // Volver a pendiente, y reabrir un comentario borra lo decidido.
+        // Reabrir un fallo real no borra que lo era (falta arreglarlo); volver a pendiente sí.
+        store.resolve_review_comment(p, a, true, "").unwrap();
+        store.resolve_review_comment(p, a, false, "").unwrap();
+        assert_eq!(get(a).outcome, Outcome::Accepted);
         assert!(store.set_review_outcome(p, a, Outcome::Pending).unwrap());
         assert_eq!(get(a).outcome, Outcome::Pending);
+        // Reabrir uno descartado: ya no está descartado.
         store.resolve_review_comment(p, b, false, "").unwrap();
         assert_eq!(get(b).outcome, Outcome::Pending);
+        // Deshacer «descartado» desde los botones lo reabre: vuelve a pedir arreglo.
+        let d = finding(&store, p, plan, "[bug/low] d", "codex");
+        store.set_review_outcome(p, d, Outcome::Dismissed).unwrap();
+        store.set_review_outcome(p, d, Outcome::Pending).unwrap();
+        assert_eq!(
+            (get(d).outcome, get(d).status.as_str()),
+            (Outcome::Pending, "open")
+        );
         // Resolver desde el panel (sin decir nada) no cambia lo decidido.
         store.resolve_review_comment(p, c, true, "").unwrap();
         assert_eq!(get(c).outcome, Outcome::Style);
@@ -2940,6 +2961,10 @@ mod tests {
         assert_eq!(get(fixed), Outcome::Accepted);
         assert_eq!(get(wrong), Outcome::Dismissed);
         assert_eq!(get(owned), Outcome::Style, "manda el dueño");
+        // Arreglar un [style] no lo vuelve fallo real: sigue contando como estilo.
+        let style = finding(&store, p, plan, "[style] d", "codex");
+        store.agent_review_verdict(p, style, true).unwrap();
+        assert_eq!(get(style), Outcome::Pending);
     }
 
     #[test]
