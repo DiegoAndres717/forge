@@ -1747,10 +1747,22 @@ pub const EN: &[(&str, &str)] = &[
         "Added to the backlog as #{id}.",
     ),
     (
-        "Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas; Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado.",
-        "Moves a plan forward: when starting a phase mark it in_progress (and create its branch and set it), tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it done yourself only if it has no branch). The plan completes on its own when all phases are done. Also plans a backlog idea (phases), changes the status of an idea without phases, or fixes title and note. Returns the updated plan.",
+        "Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas (y renombra o borra una sola con task + task_text o remove_task, sin reemplazar las fases); Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado.",
+        "Moves a plan forward: when starting a phase mark it in_progress (and create its branch and set it), tick tasks as you finish them (and rename or delete a single one with task + task_text or remove_task, without replacing the phases); Forge marks the phase done once its branch reaches main (mark it done yourself only if it has no branch). The plan completes on its own when all phases are done. Also plans a backlog idea (phases), changes the status of an idea without phases, or fixes title and note. Returns the updated plan.",
     ),
     ("Añade una tarea a la fase", "Adds a task to the phase"),
+    (
+        "Texto nuevo de la tarea `task` (la renombra sin tacharla)",
+        "New text for task `task` (renames it without ticking it)",
+    ),
+    (
+        "Borra la tarea `task` de la fase; las siguientes de esa fase bajan un número (la 2.3 pasa a ser la 2.2) y las demás fases, sus ramas y estados no cambian",
+        "Deletes task `task` from the phase; the later tasks of that phase move up one number (2.3 becomes 2.2) and the other phases, their branches and statuses don't change",
+    ),
+    (
+        "falta `task`: el número de la tarea dentro de la fase",
+        "missing `task`: the task's number within the phase",
+    ),
     ("Backlog:", "Backlog:"),
     (
         "Borra un plan o idea descartada (por id). Si se hizo, mejor márcalo done.",
@@ -1845,6 +1857,14 @@ pub const EN: &[(&str, &str)] = &[
         "phase {n} has {tasks} tasks; task {t} doesn't exist",
     ),
     ("las fases se numeran desde 1", "phases are numbered from 1"),
+    (
+        "el texto nuevo de la tarea está vacío",
+        "the task's new text is empty",
+    ),
+    (
+        "borra la tarea en un cambio aparte: los números de las siguientes cambian",
+        "delete the task in a separate change: the numbers of the ones after it shift",
+    ),
     ("En progreso", "In progress"),
     ("Completado", "Completed"),
     ("Añadir fase", "Add phase"),
@@ -1926,6 +1946,10 @@ pub const EN: &[(&str, &str)] = &[
     (
         "uso: forge plans task <id> <fase>.<tarea> (p. ej. 2.3)",
         "usage: forge plans task <id> <phase>.<task> (e.g. 2.3)",
+    ),
+    (
+        "uso: forge plans task <id> <fase>.<tarea> --rename \"texto\" | --delete",
+        "usage: forge plans task <id> <phase>.<task> --rename \"text\" | --delete",
     ),
     (
         "uso: forge plans {action} {what}",

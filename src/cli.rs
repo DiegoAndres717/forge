@@ -44,6 +44,8 @@ Uso:
   forge plans start|done|backlog|delete <id>
   forge plans phase <id> <n> start|done|backlog
   forge plans task <id> <fase>.<tarea> [--undo]   tacha (o destacha) una tarea
+  forge plans task <id> <fase>.<tarea> --rename \"texto\" | --delete
+                                           renombra o borra una tarea (las demás fases no cambian)
      (--general: la lista general; `forge ideas` también vale)
   forge worktrees                       worktrees del repositorio: rama, estado y tamaño
   forge worktrees clean [--apply]       quita los fusionados o subidos y sin cambios (sin --apply, solo simula)
@@ -98,6 +100,8 @@ Usage:
   forge plans start|done|backlog|delete <id>
   forge plans phase <id> <n> start|done|backlog
   forge plans task <id> <phase>.<task> [--undo]   ticks (or unticks) a task
+  forge plans task <id> <phase>.<task> --rename \"text\" | --delete
+                                           renames or deletes a task (other phases don't change)
      (--general: the general list; `forge ideas` works too)
   forge worktrees                       repository worktrees: branch, state and size
   forge worktrees clean [--apply]       removes merged or pushed ones with no changes (without --apply, only simulates)
@@ -179,6 +183,7 @@ fn positional(args: &[String]) -> Vec<&str> {
                 | "--kind"
                 | "--tags"
                 | "--from"
+                | "--rename"
         ) {
             skip = true;
         } else if !a.starts_with("--") {
@@ -1400,9 +1405,32 @@ fn plans_cli(
                 .ok_or_else(|| {
                     tr!("uso: forge plans task <id> <fase>.<tarea> (p. ej. 2.3)").to_string()
                 })?;
-            let change = forge_core::ideas::PhaseChange {
-                task: Some((task - 1, !args.iter().any(|a| a == "--undo"))),
-                ..Default::default()
+            // --rename "texto" la renombra y --delete la borra (las siguientes de la fase
+            // bajan un número); si no, se tacha (o se destacha con --undo).
+            let rename = flag(args, "--rename");
+            // Sin texto, o con --delete a la vez, no se adivina qué se quería.
+            let has = |f: &str| args.iter().any(|a| a == f);
+            if has("--rename") && (rename.is_none() || has("--delete")) {
+                return Err(tr!(
+                    "uso: forge plans task <id> <fase>.<tarea> --rename \"texto\" | --delete"
+                )
+                .into());
+            }
+            let change = if args.iter().any(|a| a == "--delete") {
+                forge_core::ideas::PhaseChange {
+                    remove_task: Some(task - 1),
+                    ..Default::default()
+                }
+            } else if let Some(text) = &rename {
+                forge_core::ideas::PhaseChange {
+                    rename_task: Some((task - 1, text.as_str())),
+                    ..Default::default()
+                }
+            } else {
+                forge_core::ideas::PhaseChange {
+                    task: Some((task - 1, !args.iter().any(|a| a == "--undo"))),
+                    ..Default::default()
+                }
             };
             if !store.update_phase(list, id, phase - 1, change, "usuario")? {
                 return Err(missing(id));

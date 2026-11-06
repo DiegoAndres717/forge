@@ -43,6 +43,10 @@ pub enum McpStyle {
     /// `~/.gemini/config/mcp_config.json`: Antigravity CLI lee sus servidores MCP de
     /// su configuración de usuario; Forge añade o actualiza el servidor `forge` sin tocar el resto.
     AgyConfig,
+    /// `~/.pi/agent/mcp.json` (o `$PI_CODING_AGENT_DIR/mcp.json`): Pi 1.0+ lee de ahí sus
+    /// servidores MCP, uno para todos los proyectos, como agy. Forge pone `forge mcp` y deja
+    /// lo demás (otros servidores y lo que el usuario cambió de `forge` en `/mcp`).
+    PiConfig,
 }
 
 /// Servidor MCP que se conecta a los agentes (la memoria de Forge u otro proveedor).
@@ -224,6 +228,17 @@ impl AgentSpec {
                 }
                 return command.to_string();
             }
+            McpStyle::PiConfig => {
+                // Igual que agy: otro proveedor de memoria no se deja en la configuración global.
+                if let Some(dir) = pi_agent_dir(home) {
+                    let _ = if server.name == "forge" {
+                        ensure_pi_mcp(&dir, server)
+                    } else {
+                        remove_pi_mcp(&dir)
+                    };
+                }
+                return command.to_string();
+            }
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -287,8 +302,10 @@ impl AgentSpec {
                 }
                 return command.to_string();
             }
-            // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
-            Some(McpStyle::OpenCodeEnv) | None => return command.to_string(),
+            // OpenCode y Pi no tienen hooks de aviso: Forge los detecta por la salida.
+            Some(McpStyle::OpenCodeEnv | McpStyle::PiConfig) | None => {
+                return command.to_string();
+            }
         };
         match command.split_once(' ') {
             Some((program, rest)) => format!("{program} {flags} {rest}"),
@@ -541,7 +558,60 @@ pub fn remove_agy_mcp(home: &Path) -> Result<(), String> {
     )
 }
 
-/// Cambia el objeto `key` de un archivo JSON de configuración de un agente (agy, Gemini).
+/// La carpeta de configuración de Pi: la de `home` en las pruebas; si no,
+/// `PI_CODING_AGENT_DIR` (la misma variable que lee Pi) o `~/.pi/agent`.
+pub fn pi_agent_dir(home: Option<&Path>) -> Option<PathBuf> {
+    if let Some(home) = home {
+        return Some(home.join(".pi/agent"));
+    }
+    pi_dir_from(std::env::var("PI_CODING_AGENT_DIR").ok(), crate::home_dir())
+}
+
+/// `PI_CODING_AGENT_DIR` (con `~`, `~/…` o `~\…` como la carpeta personal) o `~/.pi/agent`.
+fn pi_dir_from(var: Option<String>, home: Option<PathBuf>) -> Option<PathBuf> {
+    let Some(dir) = var.filter(|d| !d.trim().is_empty()) else {
+        return home.map(|h| h.join(".pi/agent"));
+    };
+    if dir == "~" {
+        return home;
+    }
+    match dir.strip_prefix("~/").or_else(|| dir.strip_prefix("~\\")) {
+        Some(rest) => home.map(|h| h.join(rest)),
+        None => Some(PathBuf::from(dir)),
+    }
+}
+
+/// Conecta el servidor MCP de Forge a Pi en su `mcp.json` (formato `mcpServers` →
+/// command/args). Solo se fijan `command` y `args`: lo que el usuario cambió de `forge` en
+/// `/mcp` (exposición, apagado) y los demás servidores se quedan.
+pub fn ensure_pi_mcp(dir: &Path, server: &McpServer) -> Result<(), String> {
+    let command = serde_json::Value::from(server.command.clone());
+    let args = serde_json::json!(["mcp"]);
+    edit_json(&dir.join("mcp.json"), "mcpServers", |servers| {
+        let entry = servers
+            .entry(server.name.clone())
+            .or_insert_with(|| serde_json::json!({}));
+        let Some(entry) = entry.as_object_mut() else {
+            return false;
+        };
+        let changed = entry.get("command") != Some(&command) || entry.get("args") != Some(&args);
+        entry.insert("command".into(), command);
+        entry.insert("args".into(), args);
+        entry.entry("description").or_insert_with(|| {
+            "Forge: the project's memory, plans and backlog, and what other agents are doing".into()
+        });
+        changed
+    })
+}
+
+/// Quita el servidor `forge` del `mcp.json` de Pi (memoria apagada u otro proveedor).
+pub fn remove_pi_mcp(dir: &Path) -> Result<(), String> {
+    edit_json(&dir.join("mcp.json"), "mcpServers", |servers| {
+        servers.remove("forge").is_some()
+    })
+}
+
+/// Cambia el objeto `key` de un archivo JSON de configuración de un agente (agy, Gemini, Pi).
 /// Si el archivo no se entiende (p. ej. con comentarios) no se toca: reescribirlo perdería
 /// lo que el usuario tenga ahí.
 fn edit_json(
@@ -1710,6 +1780,74 @@ mod tests {
             std::fs::read_to_string(cfg_dir.join("mcp_config.json")).unwrap(),
             broken
         );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pi_config_folder_follows_its_variable() {
+        let home = Some(PathBuf::from("/h"));
+        let dir = |v: Option<&str>| pi_dir_from(v.map(String::from), home.clone());
+        assert_eq!(dir(None), Some(PathBuf::from("/h/.pi/agent")));
+        assert_eq!(dir(Some(" ")), Some(PathBuf::from("/h/.pi/agent")));
+        assert_eq!(dir(Some("~")), Some(PathBuf::from("/h")));
+        assert_eq!(dir(Some("~/pi")), Some(PathBuf::from("/h/pi")));
+        assert_eq!(dir(Some("~\\pi")), Some(PathBuf::from("/h").join("pi")));
+        assert_eq!(dir(Some("/otra/pi")), Some(PathBuf::from("/otra/pi")));
+    }
+
+    #[test]
+    fn pi_gets_forges_mcp_in_its_own_config_next_to_the_users() {
+        // Pi (1.0+) lee sus servidores MCP de ~/.pi/agent/mcp.json, uno para todos los
+        // proyectos, como agy: Forge guarda solo `forge mcp` y el proyecto llega por el entorno.
+        let home = std::env::temp_dir().join(format!("forge-pi-mcp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let file = home.join(".pi/agent/mcp.json");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        // Lo del usuario: otro servidor y la exposición que eligió para `forge` en /mcp.
+        let existing = serde_json::json!({
+            "mcpServers": {
+                "sqlite": {"command": "sqlite-mcp"},
+                "forge": {"command": "/old/forge", "args": ["mcp"], "exposure": "direct"}
+            },
+            "autoEnableCodemode": false
+        });
+        std::fs::write(&file, existing.to_string()).unwrap();
+        let pi = builtins().into_iter().find(|a| a.id == "pi").unwrap();
+        let server = McpServer {
+            name: "forge".into(),
+            command: "/Apps/Forge/forge".into(),
+            args: vec!["mcp".into(), "--project".into(), "/p".into()],
+        };
+        let command = pi.with_mcp_at("pi", &server, false, Some(&home));
+        assert_eq!(command, "pi");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(json["mcpServers"]["forge"]["command"], "/Apps/Forge/forge");
+        assert_eq!(
+            json["mcpServers"]["forge"]["args"],
+            serde_json::json!(["mcp"])
+        );
+        assert_eq!(json["mcpServers"]["forge"]["exposure"], "direct");
+        assert_eq!(json["mcpServers"]["sqlite"]["command"], "sqlite-mcp");
+        assert_eq!(json["autoEnableCodemode"], false);
+
+        // Otro proveedor de memoria: `forge` se quita (la configuración es de todos los
+        // proyectos) y lo demás queda.
+        let other = McpServer {
+            name: "engram".into(),
+            ..server.clone()
+        };
+        pi.with_mcp_at("pi", &other, false, Some(&home));
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(json["mcpServers"].get("forge").is_none());
+        assert_eq!(json["mcpServers"]["sqlite"]["command"], "sqlite-mcp");
+
+        // Un archivo que no se entiende no se pisa.
+        let broken = "{ // comentario\n \"mcpServers\": {} }";
+        std::fs::write(&file, broken).unwrap();
+        pi.with_mcp_at("pi", &server, false, Some(&home));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), broken);
         let _ = std::fs::remove_dir_all(&home);
     }
 

@@ -10,7 +10,7 @@ Plans and the backlog live in Forge (not in the repo) and are read and changed o
 ## Tools
 - `plans_list`: plans in progress with their phases, branches and tasks, plus the backlog. Use it when starting work or when asked what's left.
 - `plan_add`: creates a plan. With `phases` (each with `title`, optional `branch` and `tasks`) it's a phased plan; without phases, a backlog idea.
-- `plan_update`: changes a plan. `phase` + `phase_status` (`in_progress`, `done`); `phase` + `task` + `task_done` to tick a task; `phase` + `add_task` to add one; `phases` to replace them all.
+- `plan_update`: changes a plan. `phase` + `phase_status` (`in_progress`, `done`); `phase` + `task` + `task_done` to tick a task; `phase` + `add_task` to add one; `phase` + `task` + `task_text` to rename one and `phase` + `task` + `remove_task` to delete one (the later tasks of that phase move up one number; other phases, branches and statuses stay); `phases` to replace them all, only when the plan itself changes.
 - `plan_delete`: deletes a plan or an idea.
 
 ## Working a phase
