@@ -39,9 +39,6 @@ impl App {
             self.settings_nav(ui, rect, cmds);
             return;
         }
-        let detected = self.agents.lock().unwrap().clone();
-        let detecting = self.detecting.load(Ordering::Relaxed);
-        let preferred = self.preferred_agent();
         let body = Rect::from_min_max(
             rect.min + Vec2::new(10.0, 8.0),
             rect.max - Vec2::new(10.0, 8.0),
@@ -65,6 +62,36 @@ impl App {
         ui.spacing_mut().item_spacing.y = 1.0;
         let ui = &mut ui;
         theme::section(ui, "Workspaces");
+        // «+» a la derecha del título (como en Orca): el diálogo «Nuevo agente».
+        if self.active.is_some() {
+            let title = ui.min_rect();
+            let at = Rect::from_center_size(
+                egui::pos2(ui.max_rect().max.x - 12.0, title.max.y - 7.0),
+                Vec2::splat(20.0),
+            );
+            let plus = ui.interact(at, egui::Id::new("new-agent-plus"), Sense::click());
+            let color = if plus.hovered() {
+                theme::TEXT
+            } else {
+                theme::TEXT_3
+            };
+            ui.painter().text(
+                at.center(),
+                egui::Align2::CENTER_CENTER,
+                icon::PLUS,
+                FontId::proportional(14.0),
+                color,
+            );
+            plus.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tr!("Nuevo agente"))
+            });
+            if plus
+                .on_hover_text(tr!("Abrir un agente en el proyecto o en un worktree nuevo"))
+                .clicked()
+            {
+                cmds.push(UiCmd::NewAgentOpen);
+            }
+        }
         if theme::row(
             ui,
             icon::HOUSE,
@@ -239,7 +266,7 @@ impl App {
                     // El proyecto activo despliega lo suyo dentro de su tarjeta.
                     if selected {
                         ui.indent(("project-body", i), |ui| {
-                            self.project_body(ui, i, &detected, detecting, &preferred, cmds);
+                            self.project_body(ui, i, cmds);
                         });
                         ui.add_space(6.0);
                     }
@@ -359,47 +386,10 @@ impl App {
         open != row.clicked()
     }
 
-    /// Lo del proyecto activo, dentro de su tarjeta: nuevo agente, comandos, planes y
-    /// worktrees, plegados de serie y recordando cuáles abrió el dueño.
-    fn project_body(
-        &mut self,
-        ui: &mut egui::Ui,
-        i: usize,
-        detected: &HashMap<String, agents::Detection>,
-        detecting: bool,
-        preferred: &str,
-        cmds: &mut Vec<UiCmd>,
-    ) {
-        // «Nuevo agente ▾»: los instalados, con todas sus acciones de siempre.
-        let open = self.fold(
-            ui,
-            "agents",
-            tr!("Nuevo agente"),
-            "",
-            tr!("Abrir un agente en este proyecto (la lista completa y sus cuentas están en Ajustes → Agentes)"),
-        );
-        let header = ui.min_rect();
-        let at = Rect::from_center_size(
-            egui::pos2(header.max.x - 14.0, header.max.y - 13.0),
-            Vec2::splat(20.0),
-        );
-        if detecting {
-            ui.put(at, egui::Spinner::new().size(12.0));
-        } else if ui
-            .put(
-                at,
-                egui::Button::new(RichText::new(icon::ARROW_CLOCKWISE).color(theme::TEXT_4))
-                    .frame(false),
-            )
-            .on_hover_text(tr!("Volver a detectar agentes"))
-            .clicked()
-        {
-            cmds.push(UiCmd::DetectAgents);
-        }
-        if open {
-            let ws = &mut self.workspaces[i];
-            Self::agents_ui(ws, detected, preferred, ui, cmds);
-        }
+    /// Lo del proyecto activo, dentro de su tarjeta: comandos y worktrees, plegados de serie
+    /// y recordando cuáles abrió el dueño. Los agentes nuevos salen del «+» (diálogo «Nuevo
+    /// agente») y Planes, de su icono de arriba.
+    fn project_body(&mut self, ui: &mut egui::Ui, i: usize, cmds: &mut Vec<UiCmd>) {
         let commands = self.workspaces[i].project.config.commands.clone();
         if !commands.is_empty()
             && self.fold(
@@ -418,30 +408,12 @@ impl App {
                 }
             }
         }
-        // Planes abre su panel; los procesos se abren desde ⌘K.
-        let ws = &self.workspaces[i];
-        let open = match ws.ideas.open_count {
-            0 => String::new(),
-            n => n.to_string(),
-        };
-        if theme::row(
-            ui,
-            icon::LIST_CHECKS,
-            theme::ACCENT,
-            tr!("Planes"),
-            &open,
-            ws.ideas.open,
-        )
-        .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
-        .clicked()
-        {
-            cmds.push(UiCmd::ToggleIdeas);
-        }
         self.worktrees_ui(ui, i);
     }
 
-    /// «Nuevo agente ▾»: instalados y configurados. Clic: a su terminal abierta, o reanuda su
-    /// última sesión, o una nueva; + o ⌥-clic: sesión nueva; clic derecho: más.
+    /// Los agentes instalados y configurados (en «Avanzado» del diálogo «Nuevo agente»). Clic: a
+    /// su terminal abierta, o reanuda su última sesión, o una nueva; + o ⌥-clic: sesión nueva;
+    /// clic derecho: más.
     pub(super) fn agents_ui(
         ws: &mut Workspace,
         detected: &HashMap<String, agents::Detection>,

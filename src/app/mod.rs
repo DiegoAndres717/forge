@@ -41,6 +41,7 @@ mod guard_panel;
 mod ideas_panel;
 mod memory_panel;
 mod menu;
+mod new_agent;
 mod notify;
 mod palette;
 mod parallel_launch;
@@ -190,6 +191,10 @@ fn shortcut_for(key: Key, m: Modifiers, mac: bool) -> Option<Action> {
 /// Acciones pedidas desde la UI (inicio y barra lateral); se aplican al final del frame.
 enum UiCmd {
     Home,
+    /// El «+» de la barra lateral: el diálogo «Nuevo agente».
+    NewAgentOpen,
+    /// Crear lo pedido en el diálogo «Nuevo agente».
+    NewAgentCreate,
     /// Pastilla de actualización: descargar o reiniciar con la versión nueva.
     Update,
     /// Buscar actualizaciones ahora (⌘K, Ajustes).
@@ -468,6 +473,8 @@ pub struct App {
     semantic: semantic::Semantic,
     /// Paso de la bienvenida que se muestra (la primera vez, o desde ⌘K).
     welcome: Option<usize>,
+    /// El diálogo «Nuevo agente» abierto.
+    new_agent: Option<new_agent::NewAgent>,
 }
 
 impl App {
@@ -521,6 +528,7 @@ impl App {
             ram_checked: None,
             palette: None,
             welcome: None,
+            new_agent: None,
             update: Arc::default(),
             semantic: semantic::Semantic::new(),
             events_checked: None,
@@ -945,6 +953,8 @@ impl App {
             UiCmd::Update => self.run_update(ctx),
             UiCmd::CheckUpdates => self.check_updates(ctx, true),
             UiCmd::Activate(i) => self.active = Some(i),
+            UiCmd::NewAgentOpen => self.open_new_agent(),
+            UiCmd::NewAgentCreate => self.create_new_agent(ctx, area),
             UiCmd::Close(i) => self.close_project(i),
             UiCmd::MoveProject(from, to) => self.move_project(from, to),
             UiCmd::OpenInEditor(i, bundle) => {
@@ -1754,7 +1764,10 @@ impl eframe::App for App {
             }
         }
 
-        // Los atajos se retiran de la cola para que no lleguen al shell.
+        // Los atajos se retiran de la cola para que no lleguen al shell. Con el diálogo «Nuevo
+        // agente» abierto no actúan detrás de él (cerrarían o cambiarían lo que tiene debajo):
+        // solo ⌘↩ sigue en la cola, para el diálogo.
+        let dialog = self.new_agent.is_some();
         let actions = ctx.input_mut(|i| {
             let mut actions = Vec::new();
             i.events.retain(|event| match event {
@@ -1764,7 +1777,7 @@ impl eframe::App for App {
                     modifiers,
                     ..
                 } if *key == Key::Tab && modifiers.ctrl && !modifiers.mac_cmd => {
-                    if *pressed {
+                    if *pressed && !dialog {
                         // ⌃Tab / ⌃⇧Tab: terminal siguiente / anterior del panel, como las
                         // pestañas de un navegador; con ⌥ (⌃⌥Tab), el proyecto usado antes.
                         actions.push(if modifiers.alt {
@@ -1781,6 +1794,7 @@ impl eframe::App for App {
                     modifiers,
                     ..
                 } => match shortcut(*key, *modifiers) {
+                    Some(_) if dialog => *key == Key::Enter,
                     Some(action) => {
                         if *pressed {
                             actions.push(action);
@@ -2060,6 +2074,7 @@ impl eframe::App for App {
         let mut from_settings = Vec::new();
         self.settings_ui(&ctx, area, &mut from_settings);
         self.welcome_ui(&ctx, &mut from_settings);
+        self.new_agent_ui(&ctx, &mut from_settings);
         for cmd in from_settings {
             self.apply(&ctx, cmd, area);
         }

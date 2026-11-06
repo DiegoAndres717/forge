@@ -1790,7 +1790,8 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     let mut h = app(project("settingsnav"));
     // Guard y Memoria ya no están en la barra lateral (están arriba); Planes sí; Ajustes, abajo.
     assert_eq!(h.query_all_by_label("Memoria").count(), 0);
-    assert_eq!(h.query_all_by_label("Planes").count(), 1);
+    // Planes no está en la barra lateral: tiene su icono arriba.
+    assert_eq!(h.query_all_by_label("Planes").count(), 0);
     h.get_by_label("Ajustes").click();
     h.run_steps(3);
     assert!(h.state().settings_open);
@@ -1804,7 +1805,7 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     h.get_by_label("Volver").click();
     h.run_steps(3);
     assert!(!h.state().settings_open);
-    // Planes está en la barra lateral y también arriba: cualquiera lo abre.
+    // Planes se abre desde su icono de arriba.
     h.query_all_by_label_contains("Planes")
         .next()
         .expect("botón de Planes")
@@ -4952,44 +4953,114 @@ fn clicking_an_agent_rows_status_line_goes_to_its_terminal() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Plan #202, fase 3: lo del proyecto activo va plegado en su tarjeta y se recuerda; «Nuevo
-/// agente» despliega los agentes con sus acciones de siempre.
+/// El «+» de la barra lateral abre el diálogo «Nuevo agente» (como «Create worktree» de
+/// Orca): con un nombre de rama nueva crea el worktree, lo registra y abre ahí el agente.
 #[test]
-fn project_sections_start_folded_and_are_remembered() {
+fn the_new_agent_dialog_opens_an_agent_in_a_new_worktree() {
     let _serial = serial();
-    let dir = project("folds");
-    std::fs::write(
-        dir.join(".forge/agents.toml"),
-        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
-    )
-    .unwrap();
+    let (dir, root) = parallel_plan("new-agent");
     let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
+    // Solo el de la prueba: los agentes instalados de verdad en esta máquina no cuentan.
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = a.id == "fake";
+    }
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let fake = if cfg!(windows) { "Write-Host" } else { "echo" };
+    h.state().agents.lock().unwrap().insert(
+        fake.into(),
+        forge_core::agents::Detection {
+            path: Some(format!("/bin/{fake}").into()),
+            version: None,
+        },
+    );
+    h.run_steps(2);
+    // Ni «Planes» (ya está arriba) ni la lista plegable de agentes en la tarjeta.
+    assert_eq!(h.query_all_by_label("Planes").count(), 0);
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    assert!(h.state().new_agent.is_some(), "el + abre el diálogo");
+    assert_eq!(
+        h.state().new_agent.as_ref().unwrap().agent.as_deref(),
+        Some("fake"),
+        "el agente instalado viene elegido"
+    );
+    h.get_by_label("Nuevo worktree").click();
+    h.run_steps(2);
+    h.get_by_label("Nombre").click();
+    h.run_steps(2);
+    let field = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("feat/")));
+    field.focus();
+    field.type_text("feat/dialogo");
+    h.run_steps(2);
+    h.get_by_label_contains("Crear y abrir agente").click();
+    wait_until(&mut h, "el agente se abre", |a| {
+        ws(a).agent_panels("fake").len() == 1
+    });
+    assert!(h.state().new_agent.is_none(), "sin «Crear más» se cierra");
+    let records = forge_core::worktrees::records(&dir, &root);
+    assert_eq!(records.len(), 1, "worktree registrado");
+    assert_eq!(records[0].branch, "feat/dialogo");
+    assert_eq!(records[0].origin.as_deref(), Some("Agente de prueba"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// ⌘↩ crea desde el diálogo (en el proyecto, sesión nueva) y no maximiza la terminal de
+/// detrás: con el diálogo abierto los atajos de la ventana no actúan.
+#[test]
+fn cmd_enter_creates_from_the_new_agent_dialog_and_nothing_behind_it() {
+    let _serial = serial();
+    let (dir, root) = parallel_plan("new-agent-enter");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root);
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = a.id == "fake";
+    }
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let fake = if cfg!(windows) { "Write-Host" } else { "echo" };
+    h.state().agents.lock().unwrap().insert(
+        fake.into(),
+        forge_core::agents::Detection {
+            path: Some(format!("/bin/{fake}").into()),
+            version: None,
+        },
+    );
+    h.run_steps(2);
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, egui::Key::Enter);
+    wait_until(&mut h, "el agente se abre", |a| {
+        ws(a).agent_panels("fake").len() == 1
+    });
+    assert!(h.state().new_agent.is_none());
+    assert!(ws(h.state()).maximized().is_none(), "⌘↩ no maximiza detrás");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Esc cierra el diálogo sin crear nada.
+#[test]
+fn escape_closes_the_new_agent_dialog_without_side_effects() {
+    let _serial = serial();
+    let (dir, root) = parallel_plan("new-agent-esc");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
     wait_until(&mut h, "detección de agentes", |a| {
         !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
     });
     h.run_steps(2);
-    assert!(h.query_by_label_contains("Agente de prueba").is_none());
+    let panels = ws(h.state()).panel_count();
     h.get_by_label("Nuevo agente").click();
     h.run_steps(3);
-    h.get_by_label_contains("Agente de prueba").click();
+    assert!(h.state().new_agent.is_some());
+    h.key_press(egui::Key::Escape);
     h.run_steps(3);
-    assert_eq!(
-        ws(h.state()).agent_panels("fake").len(),
-        1,
-        "un clic lo abre"
-    );
-    let saved = h
-        .state()
-        .store
-        .as_ref()
-        .unwrap()
-        .setting("sidebar.open_sections")
-        .unwrap();
-    assert_eq!(saved.as_deref(), Some("agents"));
-    h.get_by_label("Nuevo agente").click();
-    h.run_steps(3);
-    // Plegado otra vez: solo queda la fila de su terminal abierta.
-    assert_eq!(h.query_all_by_label_contains("Agente de prueba").count(), 1);
+    assert!(h.state().new_agent.is_none(), "Esc lo cierra");
+    assert_eq!(ws(h.state()).panel_count(), panels, "no abre nada");
+    assert!(forge_core::worktrees::records(&dir, &root).is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 

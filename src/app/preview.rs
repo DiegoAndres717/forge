@@ -777,15 +777,25 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12l2-agentes-estrecho");
     harness.set_size(Vec2::new(1440.0, 880.0));
-    // «Nuevo agente ▾» desplegado en la tarjeta del proyecto.
+    // El «+» abre el diálogo «Nuevo agente»: en un worktree nuevo desde una tarea.
     harness
         .get_by_label(forge_core::tr!("Nuevo agente"))
         .click();
     settle(&mut harness);
-    save(&mut harness, &out, "12m-nuevo-agente");
     harness
-        .get_by_label(forge_core::tr!("Nuevo agente"))
+        .get_by_label(forge_core::tr!("Nuevo worktree"))
         .click();
+    if let Some(d) = harness.state_mut().new_agent.as_mut() {
+        d.task = "Añadir cupones al checkout".into();
+    }
+    settle(&mut harness);
+    save(&mut harness, &out, "12m-nuevo-agente");
+    harness.set_size(Vec2::new(560.0, 880.0));
+    settle(&mut harness);
+    save(&mut harness, &out, "12m2-nuevo-agente-estrecho");
+    harness.set_size(Vec2::new(1440.0, 880.0));
+    harness.state_mut().new_agent = None;
+    settle(&mut harness);
     // Fuera las terminales de demostración (las capturas de después no las llevan).
     for panel in panels {
         harness
