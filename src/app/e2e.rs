@@ -5298,6 +5298,11 @@ fn a_finished_phase_offers_a_cross_review_that_only_starts_when_clicked() {
         h.query_by_label_contains("Revisar con Codex").is_some(),
         "se ofrece el revisor de otra empresa"
     );
+    assert_eq!(
+        manual_review_buttons(&h),
+        0,
+        "con la oferta, un solo botón de revisar (cambiar revisor va en la oferta)"
+    );
     // Sin pulsar: nada se abre ni se escribe.
     h.run_steps(10);
     assert_eq!(ws(h.state()).panel_count(), 1, "no se abre ningún revisor");
@@ -5329,6 +5334,7 @@ fn a_dismissed_cross_review_offer_stays_hidden() {
     wait_until(&mut h, "se relee", |a| !ws(a).ideas.dirty);
     h.run_steps(3);
     assert!(h.query_by_label_contains("Revisar con Codex").is_none());
+    assert_eq!(manual_review_buttons(&h), 1, "sin oferta vuelve «Revisar»");
     let path = ws(h.state()).project.path.clone();
     let store = h.state().store.as_ref().unwrap();
     assert_eq!(forge_core::cross_review::dismissed(store, &path).len(), 1);
@@ -5344,10 +5350,13 @@ fn with_offers_off_only_the_manual_review_button_remains() {
         forge_core::cross_review::set_offers(a.store.as_ref().unwrap(), &path, false).unwrap();
     });
     assert!(h.query_by_label_contains("Revisar con Codex").is_none());
-    assert!(
-        h.get_all_by_label_contains("Revisar").count() >= 1,
-        "«Revisar» sigue"
-    );
+    assert_eq!(manual_review_buttons(&h), 1, "«Revisar» sigue");
+}
+
+/// Los botones pequeños «Revisar» (el menú para elegir revisor) visibles.
+fn manual_review_buttons(h: &Harness<'static, App>) -> usize {
+    let label = format!("{} Revisar", crate::theme::icon::MAGNIFYING_GLASS);
+    h.query_all_by_label(&label).count()
 }
 
 /// Si el revisor que tocaría (Gemini CLI, de otra empresa) no admite un mensaje inicial, se

@@ -1041,6 +1041,9 @@ fn phase_row(
         .unwrap_or(current || open_comments > 0 || learning_here);
     let (glyph, color) = status_style(&phase.status);
     let next = next_status(&phase.status);
+    // Con la oferta «Revisar con <revisor>» a la vista, ese es el único botón de revisar (su
+    // «Cambiar revisor ▾» elige otro); sin ella queda el menú pequeño «Revisar».
+    let offer = offered_reviewer(idea.id, index, phase, ctx);
     ui.horizontal_top(|ui| {
         let tip = tr!(
             "{status}: pasar a {next}",
@@ -1076,7 +1079,7 @@ fn phase_row(
                 if let Some(branch) = &phase.branch {
                     branch_chip(ui, branch);
                 }
-                if phase.reviewable() {
+                if phase.reviewable() && offer.is_none() {
                     if ctx.reviewers.is_empty() {
                         no_reviewer_button(ui, cmds);
                     } else {
@@ -1160,8 +1163,8 @@ fn phase_row(
                     }
                 }
             });
-            if let Some(agent) = offered_reviewer(idea.id, index, phase, ctx) {
-                offer_row(ui, idea.id, index, phase, &agent, ctx, cmds);
+            if let Some(agent) = &offer {
+                offer_row(ui, idea.id, index, phase, agent, ctx, cmds);
             }
             if phase.reviewable()
                 && let Some((line, hover, note)) = reviewer_line(idea.id, index, phase, ctx)
