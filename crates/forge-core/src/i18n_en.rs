@@ -3193,7 +3193,7 @@ pub const EN: &[(&str, &str)] = &[
         "What each agent and subagent of the project is doing now, across its worktrees, from each agent's hooks",
     ),
     ("✓ terminó: {r}", "✓ finished: {r}"),
-    ("✓ terminó", "✓ finished"),
+    ("terminó", "finished"),
     ("{n} archivos cambiados", "{n} files changed"),
     ("1 archivo cambiado", "1 file changed"),
     ("subagente", "subagent"),

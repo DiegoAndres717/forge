@@ -4848,26 +4848,28 @@ fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal()
     h.run_steps(3);
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
     let card = h.get_by_label(&name).rect();
-    let row = h.get_by_label("Codex").rect();
+    // Una línea por agente: lo que hace ahora es su texto.
+    let row = h.get_by_label("Codex · editando main.ts").rect();
     assert!(row.min.y > card.min.y, "la fila va bajo su proyecto");
-    h.get_by_label("corriendo npm run build");
-    h.get_by_label("editando main.ts");
+    h.get_by_label("Claude Code · corriendo npm run build");
     assert_eq!(
         h.query_all_by_label_contains("⚠ se pisa en main.ts")
             .count(),
         2,
         "las dos terminales que editan main.ts"
     );
-    h.get_by_label("Agente sin hooks");
+    // Sin hooks no inventa qué hace: lo marca como estimado.
+    h.get_by_label("Agente sin hooks · ~ trabajando");
     // Subagentes plegados de serie; al desplegar, cada uno con su estado.
     assert!(h.query_by_label("explorer: find the login").is_none());
     h.get_by_label_contains("2 subagentes (1 trabajando)")
         .click();
     h.run_steps(3);
     assert!(h.state().agent_rows.open_subs.contains(&sid(claude)));
+    // Uno por línea; lo que hace cada uno va en su aviso, no en otra línea.
     h.get_by_label("explorer: find the login");
-    h.get_by_label("corriendo cargo test -p x");
-    h.get_by_label("✓ terminó: All 12 tests pass");
+    h.get_by_label("reviewer: run the suite");
+    assert!(h.query_by_label("corriendo cargo test -p x").is_none());
     assert!(
         h.query_by_label_contains("resultado viejo").is_none(),
         "lo terminado hace rato caduca"
@@ -4875,9 +4877,74 @@ fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal()
     // Un clic en la fila lleva a su terminal.
     h.state_mut().apply(&ctx, UiCmd::GoToPanel(claude), area);
     h.run_steps(2);
-    h.get_by_label("Codex").click();
+    h.get_by_label("Codex · editando main.ts").click();
     h.run_steps(3);
     assert_eq!(ws(h.state()).focused(), codex);
+    // El aviso de que se pisa es parte del bloque de su fila: también lleva a su terminal (el
+    // primero es el de Claude Code, su primera fila).
+    h.query_all_by_label_contains("⚠ se pisa en main.ts")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), claude);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Un clic en cualquier línea de la fila de un agente (no solo en su nombre) lleva a su
+/// terminal: el dueño pulsó la línea de estado esperando abrirla.
+#[test]
+fn clicking_an_agent_rows_status_line_goes_to_its_terminal() {
+    let _serial = serial();
+    let dir = project("agent-row-click");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Claude Code\"\ncommand = \"sleep 60\"\n\
+         [[agents]]\nid = \"fake2\"\nname = \"Codex\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    for id in ["fake", "fake2"] {
+        h.state_mut()
+            .apply(&ctx, UiCmd::AgentClick(id.into(), false), area);
+        h.run_steps(2);
+    }
+    let (claude, codex) = (
+        ws(h.state()).agent_panels("fake")[0],
+        ws(h.state()).agent_panels("fake2")[0],
+    );
+    let now = forge_core::store::now();
+    {
+        let store = h.state().store.as_ref().unwrap();
+        let e = forge_core::activity::Event {
+            kind: "tool".into(),
+            tool: Some("Bash".into()),
+            target: Some("npm run build".into()),
+            origin: Some("Claude Code".into()),
+            ..Default::default()
+        };
+        let session = forge_core::store::session_id_for_panel(std::process::id(), claude);
+        store
+            .record_activity(&dir, &session, &e, Some(&dir), now - 5)
+            .unwrap();
+    }
+    h.state_mut().agent_rows.refresh();
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(codex), area);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), codex);
+    h.get_by_label("Claude Code · corriendo npm run build")
+        .click();
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).focused(),
+        claude,
+        "la línea de estado lleva a su terminal"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 

@@ -182,8 +182,11 @@ pub fn row(
     response.on_hover_cursor(CursorIcon::Default)
 }
 
+/// Fondo de la tarjeta del proyecto activo.
+pub const CARD_SELECTED: Color32 = Color32::from_rgba_premultiplied(0x3a, 0x3a, 0x3e, 0xc0);
+
 /// Tarjeta de un proyecto (barra lateral): punto de estado, nombre, rama debajo y un detalle
-/// a la derecha; resaltada al pasar el ratón y cuando está seleccionada.
+/// a la derecha; resaltada al pasar el ratón (la seleccionada la pinta quien la llama).
 pub fn project_card(
     ui: &mut Ui,
     dot: Color32,
@@ -196,13 +199,8 @@ pub fn project_card(
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
     let painter = ui.painter();
-    if selected {
-        painter.rect_filled(
-            rect,
-            8.0,
-            Color32::from_rgba_premultiplied(0x3a, 0x3a, 0x3e, 0xc0),
-        );
-    } else if response.hovered() {
+    // La tarjeta seleccionada la pinta quien la llama: abarca también las filas de debajo.
+    if !selected && response.hovered() {
         painter.rect_filled(rect, 8.0, SELECTED);
     }
     let mid = rect.center().y;

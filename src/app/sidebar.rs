@@ -136,6 +136,8 @@ impl App {
                         (_, true) => theme::GREEN,
                         _ => theme::TEXT_3,
                     };
+                    // El fondo de la tarjeta activa va por detrás de ella y de sus agentes.
+                    let card_bg = ui.painter().add(egui::Shape::Noop);
                     let row = theme::project_card(
                         ui,
                         dot,
@@ -224,6 +226,16 @@ impl App {
                         now,
                         cmds,
                     );
+                    if selected {
+                        let card = Rect::from_min_max(
+                            row.rect.min,
+                            egui::pos2(row.rect.max.x, ui.min_rect().max.y),
+                        );
+                        ui.painter().set(
+                            card_bg,
+                            egui::Shape::rect_filled(card, 8.0, theme::CARD_SELECTED),
+                        );
+                    }
                     // El proyecto activo despliega lo suyo dentro de su tarjeta.
                     if selected {
                         ui.indent(("project-body", i), |ui| {
