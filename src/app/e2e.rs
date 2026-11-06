@@ -5187,7 +5187,7 @@ fn with_offers_off_only_the_manual_review_button_remains() {
     });
     assert!(h.query_by_label_contains("Revisar con Codex").is_none());
     assert!(
-        h.query_by_label_contains("Revisar").is_some(),
+        h.get_all_by_label_contains("Revisar").count() >= 1,
         "«Revisar» sigue"
     );
 }
@@ -5234,4 +5234,27 @@ fn the_cross_review_setting_is_in_the_project_settings_tab() {
     let path = ws(h.state()).project.path.clone();
     let store = h.state().store.as_ref().unwrap();
     assert!(!forge_core::cross_review::offers_enabled(store, &path));
+}
+
+/// Si el revisor no se puede abrir (no está en el proyecto o no admite un mensaje inicial), no
+/// se anota una revisión: si no, la oferta desaparecería sin haberse abierto nada.
+#[test]
+fn a_review_that_cannot_open_is_not_recorded() {
+    let _serial = serial();
+    let mut h = finished_phase("offer-cannot-open", &["claude", "gemini"], |_| {});
+    let plan = ws(h.state()).ideas.items[0].id;
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    for agent in ["gemini", "nadie"] {
+        h.state_mut()
+            .apply(&ctx, UiCmd::ReviewPhase(plan, 0, agent.into()), area);
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "se relee", |a| !ws(a).ideas.dirty);
+    assert!(ws(h.state()).ideas.runs.is_empty(), "no se anota revisión");
+    assert_eq!(ws(h.state()).panel_count(), 1);
+    assert!(
+        h.query_by_label_contains("Revisar con Claude Code")
+            .is_some()
+    );
 }

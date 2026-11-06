@@ -571,19 +571,15 @@ mod tests {
     fn a_reviewer_that_cannot_start_with_a_message_is_not_offered_first() {
         // Gemini CLI es de otra empresa y el dueño lo usa, pero no puede recibir la fase.
         let installed = [("claude", true), ("gemini", false), ("codex", true)];
-        let offer = offer(Some("claude"), &installed, &["gemini", "claude"]).unwrap();
-        assert_eq!(offer.choice.agent, "codex");
-        assert_eq!(offer.choice.why, Why::OtherCompany("claude".into()));
-        assert_eq!(
-            offer.unable.as_deref(),
-            Some("gemini"),
-            "se dice por qué no"
-        );
+        let got = offer(Some("claude"), &installed, &["gemini", "claude"]).unwrap();
+        assert_eq!(got.choice.agent, "codex");
+        assert_eq!(got.choice.why, Why::OtherCompany("claude".into()));
+        assert_eq!(got.unable.as_deref(), Some("gemini"), "se dice por qué no");
         // Si el que toca sí puede, nada que decir.
-        let offer = super::offer(Some("claude"), &installed, &["codex"]).unwrap();
-        assert_eq!((offer.choice.agent.as_str(), offer.unable), ("codex", None));
+        let got = offer(Some("claude"), &installed, &["codex"]).unwrap();
+        assert_eq!((got.choice.agent.as_str(), got.unable), ("codex", None));
         // Nadie que pueda recibir la fase: no hay oferta.
-        assert!(super::offer(Some("claude"), &[("gemini", false)], &[]).is_none());
+        assert!(offer(Some("claude"), &[("gemini", false)], &[]).is_none());
     }
 
     #[test]

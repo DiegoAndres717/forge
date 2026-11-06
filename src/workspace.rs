@@ -1312,15 +1312,22 @@ impl Workspace {
 
     /// Abre un agente como revisor en un panel nuevo (nunca reutiliza el de quien trabaja): con
     /// su modo de solo lectura si lo tiene, y `prompt` como primer mensaje.
-    pub fn review_agent(&mut self, ctx: &egui::Context, id: &str, prompt: &str, area: Rect) {
+    /// `false` si no se pudo abrir (agente que no está o que no admite un mensaje inicial).
+    pub fn review_agent(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        prompt: &str,
+        area: Rect,
+    ) -> bool {
         let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
-            return;
+            return false;
         };
         let launch = spec
             .read_only(&spec.command)
             .unwrap_or_else(|| spec.command.clone());
         let Some(command) = spec.with_prompt(&launch, prompt) else {
-            return;
+            return false;
         };
         let state = PanelState {
             name: Some(format!("{} · {}", spec.name, tr!("Revisión"))),
@@ -1337,7 +1344,9 @@ impl Workspace {
             self.reviewing.push(self.focus); // el panel nuevo toma el foco
             #[cfg(test)]
             self.review_launches.push((spec.id.clone(), command));
+            return true;
         }
+        false
     }
 
     /// La sesión (`FORGE_SESSION_ID`) que tendrá la próxima terminal que se abra: el registro

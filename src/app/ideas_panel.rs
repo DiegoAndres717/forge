@@ -697,8 +697,16 @@ impl App {
             return;
         };
         let path = ws.project.path.clone();
+        if !ws.review_agent(ctx, agent, &prompt, area) {
+            // Sin terminal no hay revisión: ni se anota (la oferta seguiría oculta) ni se calla.
+            let reason = match ws.project.agents.iter().find(|a| a.id == agent) {
+                Some(spec) => crate::workspace::no_prompt(&spec.name),
+                None => tr!("No encuentro el agente {id} en este proyecto.", id = agent),
+            };
+            self.error = Some(reason);
+            return;
+        }
         ws.ideas.open = false; // que se vea al revisor trabajando
-        ws.review_agent(ctx, agent, &prompt, area);
         // Queda anotado cuándo empieza: de ahí salen el tiempo y la estimación de la fase.
         self.db(|s| s.start_review_run(Some(&path), id, phase, agent));
         self.workspaces[i].ideas.dirty = true;
@@ -1492,8 +1500,9 @@ fn reviewer_line(
         .to_string()
     });
     if let Some(picked) = picked_reviewer(plan, phase, ctx) {
+        // Elegido a mano: la propuesta automática (y su nota) ya no cuenta.
         let line = tr!("Revisor: {agent} (elegido por ti)", agent = name(picked));
-        return Some((line.to_string(), None, note));
+        return Some((line.to_string(), None, None));
     }
     let line = match &choice.why {
         Why::OtherCompany(a) => tr!(
