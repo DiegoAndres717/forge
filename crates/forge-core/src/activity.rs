@@ -162,30 +162,12 @@ fn is_shell(tool: &str) -> bool {
     )
 }
 
-/// ¿Cuánto cuenta este agente por sus hooks? Por nombre (`FORGE_ORIGIN`, el de la terminal).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Live {
-    /// Claude Code (mod de Forge): subagentes, herramientas y archivos editados.
-    Full,
-    /// Codex, Gemini CLI y Antigravity: el hook previo de Guard ve comandos y lecturas, no
-    /// las ediciones; los archivos cambiados salen de `git status` de su worktree.
-    Commands,
-    /// Sin hook que Forge use (OpenCode, Qwen Code, otros).
-    None,
-}
+/// ¿Cuánto cuenta este agente por sus hooks? Del catálogo único (`catalog::Live`).
+pub use crate::catalog::Live;
 
+/// Por nombre (`FORGE_ORIGIN`, el de la terminal).
 pub fn live_data(agent: &str) -> Live {
-    let name = agent.to_lowercase();
-    if name.contains("claude") {
-        Live::Full
-    } else if ["codex", "gemini", "antigravity", "agy"]
-        .iter()
-        .any(|n| name.contains(n))
-    {
-        Live::Commands
-    } else {
-        Live::None
-    }
+    crate::catalog::live(agent)
 }
 
 impl Activity {

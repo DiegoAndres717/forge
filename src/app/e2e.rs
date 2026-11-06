@@ -4686,6 +4686,16 @@ fn worktrees_are_listed_and_cleaned_only_after_a_preview() {
         dir.join("wt/done/c").is_file(),
         "la vista previa no toca nada"
     );
+    // Se puede cerrar sin aplicar.
+    h.get_by_label("Cerrar").click();
+    h.run_steps(2);
+    assert!(h.state().worktrees.preview.is_none());
+    assert!(h.query_by_label("Aplicar limpieza").is_none());
+    h.get_by_label("Vista previa de limpieza").click();
+    wait_until(&mut h, "la vista previa otra vez", |a| {
+        a.worktrees.preview.is_some()
+    });
+    h.run_steps(2);
     h.get_by_label("Aplicar limpieza").click();
     wait_until(&mut h, "la limpieza", |a| {
         a.worktrees.applied.is_some() && a.worktrees.loading.is_none()
@@ -4740,94 +4750,175 @@ fn forge_offers_to_clean_a_registered_worktree_once_merged() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Plan #194, fase 3: «Agentes en marcha» con datos simulados de los hooks: un subagente
-/// trabajando, otro que terminó con su resultado, dos terminales que se pisan en un archivo y
-/// un agente sin hooks, que lo dice en vez de inventar.
+/// Plan #202, fases 2 a 4: cada terminal de agente es una fila bajo su proyecto, con lo que
+/// hace ahora (de los hooks), los archivos que se pisan con otra, sus subagentes desplegables
+/// (los terminados hace rato ya no salen) y un agente sin hooks que no inventa nada. Un clic
+/// lleva a su terminal.
 #[test]
-fn running_agents_show_what_they_do_their_overlaps_and_honest_gaps() {
+fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal() {
     let _serial = serial();
-    let dir = project("agents-board");
-    let store = Store::in_memory().unwrap();
-    let now = forge_core::store::now();
-    let event = |kind: &str, agent_id: &str, tool: Option<&str>, target: Option<String>| {
-        forge_core::activity::Event {
-            kind: kind.into(),
-            agent_id: agent_id.into(),
-            tool: tool.map(str::to_string),
-            target,
-            origin: Some("Claude Code".into()),
-            ..Default::default()
-        }
-    };
-    let file = dir.join("main.ts").to_string_lossy().into_owned();
-    let record = |session: &str, e: &forge_core::activity::Event, at: i64| {
-        store
-            .record_activity(&dir, session, e, Some(&dir), at)
-            .unwrap()
-    };
-    record(
-        "1:1",
-        &event("tool", "", Some("Edit"), Some(file.clone())),
-        now - 300,
-    );
-    record(
-        "1:2",
-        &event("tool", "", Some("Edit"), Some(file.clone())),
-        now - 60,
-    );
-    let explorer = forge_core::activity::Event {
-        name: Some("explorer: find the login".into()),
-        ..event("start", "a1", None, None)
-    };
-    record("1:1", &explorer, now - 120);
-    record(
-        "1:1",
-        &event("tool", "a1", Some("Bash"), Some("cargo test -p x".into())),
-        now - 100,
-    );
-    let reviewer = forge_core::activity::Event {
-        name: Some("reviewer: run the suite".into()),
-        ..event("start", "a2", None, None)
-    };
-    record("1:1", &reviewer, now - 200);
-    let done = forge_core::activity::Event {
-        result: Some("All 12 tests pass".into()),
-        ..event("stop", "a2", None, None)
-    };
-    record("1:1", &done, now - 30);
-    // Sus terminales siguen abiertas (sin ellas, lo callado hace rato no sigue «en marcha»).
-    for (session, agent) in [
-        ("1:1", "Claude Code"),
-        ("1:2", "Claude Code"),
-        ("1:9", "OpenCode"),
-    ] {
-        store
-            .register_agent_session(session, &dir, "main", agent, None)
-            .unwrap();
-    }
-    let mut h = app_with(store, Some(dir.clone()));
-    // La detección de agentes en segundo plano cambia el alto de la sección AGENTES al
-    // terminar: si acaba entre la consulta y el clic, el clic cae donde ya no está la fila
-    // (pasó en el CI de Linux). Primero, que termine.
+    let dir = project("agent-rows");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Claude Code\"\ncommand = \"sleep 60\"\n\
+         [[agents]]\nid = \"fake2\"\nname = \"Codex\"\ncommand = \"sleep 60\"\n\
+         [[agents]]\nid = \"fake3\"\nname = \"Agente sin hooks\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    // La detección cambia la altura de la barra al terminar: primero, que termine.
     wait_until(&mut h, "detección de agentes", |a| {
         !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
     });
-    h.run_steps(2);
-    h.get_by_label("Agentes en marcha").click();
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    for id in ["fake", "fake2", "fake3"] {
+        h.state_mut()
+            .apply(&ctx, UiCmd::AgentClick(id.into(), false), area);
+        h.run_steps(2);
+    }
+    let (claude, codex) = (
+        ws(h.state()).agent_panels("fake")[0],
+        ws(h.state()).agent_panels("fake2")[0],
+    );
+    let sid = |p| forge_core::store::session_id_for_panel(std::process::id(), p);
+    let now = forge_core::store::now();
+    {
+        use forge_core::activity::Event;
+        let store = h.state().store.as_ref().unwrap();
+        let file = dir.join("main.ts").to_string_lossy().into_owned();
+        let at = |session: &str, e: Event, ago: i64| {
+            store
+                .record_activity(&dir, session, &e, Some(&dir), now - ago)
+                .unwrap()
+        };
+        let ev = |kind: &str, id: &str, tool: Option<&str>, target: Option<&str>| Event {
+            kind: kind.into(),
+            agent_id: id.into(),
+            tool: tool.map(str::to_string),
+            target: target.map(str::to_string),
+            origin: Some("Claude Code".into()),
+            ..Default::default()
+        };
+        let a = sid(claude);
+        at(&a, ev("tool", "", Some("Edit"), Some(&file)), 300);
+        at(&a, ev("tool", "", Some("Bash"), Some("npm run build")), 250);
+        let named = |name: &str, e: Event| Event {
+            name: Some(name.into()),
+            ..e
+        };
+        at(
+            &a,
+            named("explorer: find the login", ev("start", "a1", None, None)),
+            120,
+        );
+        at(
+            &a,
+            ev("tool", "a1", Some("Bash"), Some("cargo test -p x")),
+            100,
+        );
+        at(
+            &a,
+            named("reviewer: run the suite", ev("start", "a2", None, None)),
+            200,
+        );
+        let done = Event {
+            result: Some("All 12 tests pass".into()),
+            ..ev("stop", "a2", None, None)
+        };
+        at(&a, done, 30);
+        // Uno que terminó hace más de lo que se enseña un ✓: ya no sale su resultado.
+        at(
+            &a,
+            named("old: long ago", ev("start", "a3", None, None)),
+            3000,
+        );
+        let old = Event {
+            result: Some("resultado viejo".into()),
+            ..ev("stop", "a3", None, None)
+        };
+        at(&a, old, forge_core::live::DONE_SHOWN + 10);
+        let b = Event {
+            origin: Some("Codex".into()),
+            ..ev("tool", "", Some("Edit"), Some(&file))
+        };
+        at(&sid(codex), b, 60);
+    }
+    h.state_mut().agent_rows.refresh();
     h.run_steps(3);
-    assert!(h.state().agents_board.open, "el clic abre la sección");
-    h.get_by_label("explorer: find the login");
-    h.get_by_label("corriendo cargo test -p x");
-    h.get_by_label("✓ terminó: All 12 tests pass");
+    let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+    let card = h.get_by_label(&name).rect();
+    let row = h.get_by_label("Codex").rect();
+    assert!(row.min.y > card.min.y, "la fila va bajo su proyecto");
+    h.get_by_label("corriendo npm run build");
+    h.get_by_label("editando main.ts");
     assert_eq!(
         h.query_all_by_label_contains("⚠ se pisa en main.ts")
             .count(),
         2,
         "las dos terminales que editan main.ts"
     );
-    // (OpenCode también puede salir en la lista de agentes instalados.)
-    assert!(h.query_all_by_label("OpenCode").count() >= 1);
-    h.get_by_label("sin datos en vivo para este agente");
+    h.get_by_label("Agente sin hooks");
+    // Subagentes plegados de serie; al desplegar, cada uno con su estado.
+    assert!(h.query_by_label("explorer: find the login").is_none());
+    h.get_by_label_contains("2 subagentes (1 trabajando)")
+        .click();
+    h.run_steps(3);
+    assert!(h.state().agent_rows.open_subs.contains(&sid(claude)));
+    h.get_by_label("explorer: find the login");
+    h.get_by_label("corriendo cargo test -p x");
+    h.get_by_label("✓ terminó: All 12 tests pass");
+    assert!(
+        h.query_by_label_contains("resultado viejo").is_none(),
+        "lo terminado hace rato caduca"
+    );
+    // Un clic en la fila lleva a su terminal.
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(claude), area);
+    h.run_steps(2);
+    h.get_by_label("Codex").click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), codex);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Plan #202, fase 3: lo del proyecto activo va plegado en su tarjeta y se recuerda; «Nuevo
+/// agente» despliega los agentes con sus acciones de siempre.
+#[test]
+fn project_sections_start_folded_and_are_remembered() {
+    let _serial = serial();
+    let dir = project("folds");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("Agente de prueba").is_none());
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    h.get_by_label_contains("Agente de prueba").click();
+    h.run_steps(3);
+    assert_eq!(
+        ws(h.state()).agent_panels("fake").len(),
+        1,
+        "un clic lo abre"
+    );
+    let saved = h
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .setting("sidebar.open_sections")
+        .unwrap();
+    assert_eq!(saved.as_deref(), Some("agents"));
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    // Plegado otra vez: solo queda la fila de su terminal abierta.
+    assert_eq!(h.query_all_by_label_contains("Agente de prueba").count(), 1);
     let _ = std::fs::remove_dir_all(dir);
 }
 

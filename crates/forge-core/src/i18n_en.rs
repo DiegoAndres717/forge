@@ -3339,4 +3339,48 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Ofrecer siempre", "Always offer"),
     ("No ofrecer nunca", "Never offer"),
+    // Plan #202: filas de agentes en la barra lateral.
+    ("ahora", "now"),
+    ("trabajando", "working"),
+    (
+        "espera tu permiso o respuesta",
+        "waiting for your permission or reply",
+    ),
+    ("llegó a su límite de uso", "hit its usage limit"),
+    (
+        "Estado estimado por la salida de su terminal: sin datos de los hooks del agente",
+        "State estimated from its terminal output: no data from the agent's hooks",
+    ),
+    ("{c} 1 subagente", "{c} 1 subagent"),
+    ("{c} {n} subagentes", "{c} {n} subagents"),
+    (
+        "{c} {n} subagentes ({w} trabajando)",
+        "{c} {n} subagents ({w} working)",
+    ),
+    ("Nuevo agente", "New agent"),
+    (
+        "Abrir un agente en este proyecto (la lista completa y sus cuentas están en Ajustes → Agentes)",
+        "Open an agent in this project (the full list and its accounts are in Settings → Agents)",
+    ),
+    (
+        "Qué haría la limpieza con cada worktree. No toca nada hasta «Aplicar limpieza».",
+        "What the cleanup would do with each worktree. Nothing changes until \"Apply cleanup\".",
+    ),
+    (
+        "Cerrar la vista previa sin aplicar nada (Esc)",
+        "Close the preview without applying anything (Esc)",
+    ),
+    ("{p0}  Nueva terminal", "{p0}  New terminal"),
+    ("{p0}  Nuevo {p1}", "{p0}  New {p1}"),
+    (
+        "{p}: cópialos o bórralos si sobran",
+        "{p}: copy them or delete them if not needed",
+    ),
+    ("{n} commits sin subir", "{n} unpushed commits"),
+    ("súbela o fusiónala primero", "push or merge it first"),
+    (
+        "haz commit o descártalos primero",
+        "commit or discard them first",
+    ),
+    ("cierra esa terminal primero", "close that terminal first"),
 ];

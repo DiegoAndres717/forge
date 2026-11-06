@@ -34,3 +34,10 @@ Before starting a task, check the "When" column and read the matching skill (it 
 - `claude-plugin/`: the Claude Code mod (TypeScript hooks, embedded in the binary).
 - `tests/`: integration tests against the real binary (Git hooks, MCP server).
 - `scripts/`: app install, DMG build, the `curl | sh` installer and the Homebrew recipe.
+
+## Adding a supported agent
+
+Everything Forge knows about an agent it can launch is one entry in `CATALOG` (`crates/forge-core/src/catalog.rs`): id, name, company, launch/resume/headless commands, MCP style, install hint, how it takes a first message (`Prompt`), its icon (`Icon::Logo` or `Icon::Letter`) and where its live state comes from (`Live::Full` hooks, `Live::Commands` Guard's pre-tool hook, `Live::None` terminal only), plus whether it reports subagents.
+1. Add the entry. `agents::builtins`, the cross-company reviewer, the sidebar row and `work_status` read it from there.
+2. Icon: with `Icon::Logo`, add a small PNG (32×32 or 64×64) to `assets/agents/<id>.png` and its line in `logo_art` (`src/theme.rs`); only ship a logo whose use as a product label is allowed, otherwise use `Icon::Letter`.
+3. `cargo test -p forge-core catalog` and `cargo test --bin forge every_catalog_logo` fail if the entry or its art is missing.

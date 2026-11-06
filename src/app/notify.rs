@@ -294,6 +294,12 @@ impl App {
                     {
                         ws.limit_reached(panel);
                     }
+                    // El estado de la fila de esa terminal en la barra lateral.
+                    if let Some(panel) = event.panel
+                        && matches!(event.kind.as_str(), "waiting" | "stop" | "limit")
+                    {
+                        ws.panel_event(panel, &event.kind);
+                    }
                     // Mucho contexto: una franja en esa terminal, sin notificación.
                     if event.kind == "compact" {
                         if let Some(panel) = event.panel {
