@@ -1408,7 +1408,8 @@ impl Workspace {
     }
 
     /// Abre el agente `id` en una terminal nueva en `cwd` (nunca reutiliza otra: cada fase en
-    /// paralelo tiene la suya), con `prompt` como primer mensaje. Dice por qué no si no puede.
+    /// paralelo tiene la suya), con `prompt` como primer mensaje (si no está vacío). Dice por
+    /// qué no si no puede.
     pub fn launch_agent_in(
         &mut self,
         ctx: &egui::Context,
@@ -1425,9 +1426,13 @@ impl Workspace {
             .find(|a| a.id == id)
             .cloned()
             .ok_or_else(|| tr!("No encuentro el agente {id} en este proyecto.", id = id))?;
-        let command = spec
-            .with_prompt(&spec.command, prompt)
-            .ok_or_else(|| no_prompt(&spec.name))?;
+        // Sin mensaje: el agente tal cual.
+        let command = if prompt.is_empty() {
+            spec.command.clone()
+        } else {
+            spec.with_prompt(&spec.command, prompt)
+                .ok_or_else(|| no_prompt(&spec.name))?
+        };
         let state = PanelState {
             name: Some(name),
             cwd,

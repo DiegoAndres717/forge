@@ -1790,7 +1790,8 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     let mut h = app(project("settingsnav"));
     // Guard y Memoria ya no están en la barra lateral (están arriba); Planes sí; Ajustes, abajo.
     assert_eq!(h.query_all_by_label("Memoria").count(), 0);
-    assert_eq!(h.query_all_by_label("Planes").count(), 1);
+    // Planes no está en la barra lateral: tiene su icono arriba.
+    assert_eq!(h.query_all_by_label("Planes").count(), 0);
     h.get_by_label("Ajustes").click();
     h.run_steps(3);
     assert!(h.state().settings_open);
@@ -1804,7 +1805,7 @@ fn settings_open_from_the_sidebar_footer_and_the_sidebar_becomes_their_index() {
     h.get_by_label("Volver").click();
     h.run_steps(3);
     assert!(!h.state().settings_open);
-    // Planes está en la barra lateral y también arriba: cualquiera lo abre.
+    // Planes se abre desde su icono de arriba.
     h.query_all_by_label_contains("Planes")
         .next()
         .expect("botón de Planes")
@@ -4848,26 +4849,32 @@ fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal()
     h.run_steps(3);
     let name = dir.file_name().unwrap().to_string_lossy().into_owned();
     let card = h.get_by_label(&name).rect();
-    let row = h.get_by_label("Codex").rect();
+    // Una línea por agente: lo que hace ahora es su texto.
+    let row = h.get_by_label("Codex · editando main.ts").rect();
     assert!(row.min.y > card.min.y, "la fila va bajo su proyecto");
-    h.get_by_label("corriendo npm run build");
-    h.get_by_label("editando main.ts");
+    h.get_by_label("Claude Code · corriendo npm run build");
     assert_eq!(
         h.query_all_by_label_contains("⚠ se pisa en main.ts")
             .count(),
         2,
         "las dos terminales que editan main.ts"
     );
-    h.get_by_label("Agente sin hooks");
+    // Sin hooks no inventa qué hace: su nombre, o lo estimado por su terminal marcado con «~»
+    // (según lo que haya escrito ya: depende del ritmo de la máquina).
+    h.get_by(|n| {
+        n.label()
+            .is_some_and(|l| l == "Agente sin hooks" || l.starts_with("Agente sin hooks · ~"))
+    });
     // Subagentes plegados de serie; al desplegar, cada uno con su estado.
     assert!(h.query_by_label("explorer: find the login").is_none());
     h.get_by_label_contains("2 subagentes (1 trabajando)")
         .click();
     h.run_steps(3);
     assert!(h.state().agent_rows.open_subs.contains(&sid(claude)));
+    // Uno por línea; lo que hace cada uno va en su aviso, no en otra línea.
     h.get_by_label("explorer: find the login");
-    h.get_by_label("corriendo cargo test -p x");
-    h.get_by_label("✓ terminó: All 12 tests pass");
+    h.get_by_label("reviewer: run the suite");
+    assert!(h.query_by_label("corriendo cargo test -p x").is_none());
     assert!(
         h.query_by_label_contains("resultado viejo").is_none(),
         "lo terminado hace rato caduca"
@@ -4875,50 +4882,185 @@ fn agent_rows_sit_under_their_project_with_live_state_and_go_to_their_terminal()
     // Un clic en la fila lleva a su terminal.
     h.state_mut().apply(&ctx, UiCmd::GoToPanel(claude), area);
     h.run_steps(2);
-    h.get_by_label("Codex").click();
+    h.get_by_label("Codex · editando main.ts").click();
     h.run_steps(3);
     assert_eq!(ws(h.state()).focused(), codex);
+    // El aviso de que se pisa es parte del bloque de su fila: también lleva a su terminal (el
+    // primero es el de Claude Code, su primera fila).
+    h.query_all_by_label_contains("⚠ se pisa en main.ts")
+        .next()
+        .unwrap()
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).focused(), claude);
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// Plan #202, fase 3: lo del proyecto activo va plegado en su tarjeta y se recuerda; «Nuevo
-/// agente» despliega los agentes con sus acciones de siempre.
+/// Un clic en cualquier línea de la fila de un agente (no solo en su nombre) lleva a su
+/// terminal: el dueño pulsó la línea de estado esperando abrirla.
 #[test]
-fn project_sections_start_folded_and_are_remembered() {
+fn clicking_an_agent_rows_status_line_goes_to_its_terminal() {
     let _serial = serial();
-    let dir = project("folds");
+    let dir = project("agent-row-click");
     std::fs::write(
         dir.join(".forge/agents.toml"),
-        "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"sleep 60\"\n",
+        "[[agents]]\nid = \"fake\"\nname = \"Claude Code\"\ncommand = \"sleep 60\"\n\
+         [[agents]]\nid = \"fake2\"\nname = \"Codex\"\ncommand = \"sleep 60\"\n",
     )
     .unwrap();
     let mut h = app(dir.clone());
     wait_until(&mut h, "detección de agentes", |a| {
         !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
     });
-    h.run_steps(2);
-    assert!(h.query_by_label_contains("Agente de prueba").is_none());
-    h.get_by_label("Nuevo agente").click();
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    for id in ["fake", "fake2"] {
+        h.state_mut()
+            .apply(&ctx, UiCmd::AgentClick(id.into(), false), area);
+        h.run_steps(2);
+    }
+    let (claude, codex) = (
+        ws(h.state()).agent_panels("fake")[0],
+        ws(h.state()).agent_panels("fake2")[0],
+    );
+    let now = forge_core::store::now();
+    {
+        let store = h.state().store.as_ref().unwrap();
+        let e = forge_core::activity::Event {
+            kind: "tool".into(),
+            tool: Some("Bash".into()),
+            target: Some("npm run build".into()),
+            origin: Some("Claude Code".into()),
+            ..Default::default()
+        };
+        let session = forge_core::store::session_id_for_panel(std::process::id(), claude);
+        store
+            .record_activity(&dir, &session, &e, Some(&dir), now - 5)
+            .unwrap();
+    }
+    h.state_mut().agent_rows.refresh();
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(codex), area);
     h.run_steps(3);
-    h.get_by_label_contains("Agente de prueba").click();
+    assert_eq!(ws(h.state()).focused(), codex);
+    h.get_by_label("Claude Code · corriendo npm run build")
+        .click();
     h.run_steps(3);
     assert_eq!(
-        ws(h.state()).agent_panels("fake").len(),
-        1,
-        "un clic lo abre"
+        ws(h.state()).focused(),
+        claude,
+        "la línea de estado lleva a su terminal"
     );
-    let saved = h
-        .state()
-        .store
-        .as_ref()
-        .unwrap()
-        .setting("sidebar.open_sections")
-        .unwrap();
-    assert_eq!(saved.as_deref(), Some("agents"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// El «+» de la barra lateral abre el diálogo «Nuevo agente» (como «Create worktree» de
+/// Orca): con un nombre de rama nueva crea el worktree, lo registra y abre ahí el agente.
+#[test]
+fn the_new_agent_dialog_opens_an_agent_in_a_new_worktree() {
+    let _serial = serial();
+    let (dir, root) = parallel_plan("new-agent");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
+    // Solo el de la prueba: los agentes instalados de verdad en esta máquina no cuentan.
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = a.id == "fake";
+    }
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let fake = if cfg!(windows) { "Write-Host" } else { "echo" };
+    h.state().agents.lock().unwrap().insert(
+        fake.into(),
+        forge_core::agents::Detection {
+            path: Some(format!("/bin/{fake}").into()),
+            version: None,
+        },
+    );
+    h.run_steps(2);
+    // Ni «Planes» (ya está arriba) ni la lista plegable de agentes en la tarjeta.
+    assert_eq!(h.query_all_by_label("Planes").count(), 0);
     h.get_by_label("Nuevo agente").click();
     h.run_steps(3);
-    // Plegado otra vez: solo queda la fila de su terminal abierta.
-    assert_eq!(h.query_all_by_label_contains("Agente de prueba").count(), 1);
+    assert!(h.state().new_agent.is_some(), "el + abre el diálogo");
+    assert_eq!(
+        h.state().new_agent.as_ref().unwrap().agent.as_deref(),
+        Some("fake"),
+        "el agente instalado viene elegido"
+    );
+    h.get_by_label("Nuevo worktree").click();
+    h.run_steps(2);
+    h.get_by_label("Nombre").click();
+    h.run_steps(2);
+    let field = h.get_by(|n| n.placeholder().is_some_and(|p| p.starts_with("feat/")));
+    field.focus();
+    field.type_text("feat/dialogo");
+    h.run_steps(2);
+    h.get_by_label_contains("Crear y abrir agente").click();
+    wait_until(&mut h, "el agente se abre", |a| {
+        ws(a).agent_panels("fake").len() == 1
+    });
+    assert!(h.state().new_agent.is_none(), "sin «Crear más» se cierra");
+    let records = forge_core::worktrees::records(&dir, &root);
+    assert_eq!(records.len(), 1, "worktree registrado");
+    assert_eq!(records[0].branch, "feat/dialogo");
+    assert_eq!(records[0].origin.as_deref(), Some("Agente de prueba"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// ⌘↩ crea desde el diálogo (en el proyecto, sesión nueva) y no maximiza la terminal de
+/// detrás: con el diálogo abierto los atajos de la ventana no actúan.
+#[test]
+fn cmd_enter_creates_from_the_new_agent_dialog_and_nothing_behind_it() {
+    let _serial = serial();
+    let (dir, root) = parallel_plan("new-agent-enter");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root);
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = a.id == "fake";
+    }
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let fake = if cfg!(windows) { "Write-Host" } else { "echo" };
+    h.state().agents.lock().unwrap().insert(
+        fake.into(),
+        forge_core::agents::Detection {
+            path: Some(format!("/bin/{fake}").into()),
+            version: None,
+        },
+    );
+    h.run_steps(2);
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    h.key_press_modifiers(CMD, egui::Key::Enter);
+    wait_until(&mut h, "el agente se abre", |a| {
+        ws(a).agent_panels("fake").len() == 1
+    });
+    assert!(h.state().new_agent.is_none());
+    assert!(ws(h.state()).maximized().is_none(), "⌘↩ no maximiza detrás");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Esc cierra el diálogo sin crear nada.
+#[test]
+fn escape_closes_the_new_agent_dialog_without_side_effects() {
+    let _serial = serial();
+    let (dir, root) = parallel_plan("new-agent-esc");
+    let mut h = app(dir.clone());
+    h.state_mut().worktrees.root = Some(root.clone());
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.run_steps(2);
+    let panels = ws(h.state()).panel_count();
+    h.get_by_label("Nuevo agente").click();
+    h.run_steps(3);
+    assert!(h.state().new_agent.is_some());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(3);
+    assert!(h.state().new_agent.is_none(), "Esc lo cierra");
+    assert_eq!(ws(h.state()).panel_count(), panels, "no abre nada");
+    assert!(forge_core::worktrees::records(&dir, &root).is_empty());
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -5231,6 +5373,11 @@ fn a_finished_phase_offers_a_cross_review_that_only_starts_when_clicked() {
         h.query_by_label_contains("Revisar con Codex").is_some(),
         "se ofrece el revisor de otra empresa"
     );
+    assert_eq!(
+        manual_review_buttons(&h),
+        0,
+        "con la oferta, un solo botón de revisar (cambiar revisor va en la oferta)"
+    );
     // Sin pulsar: nada se abre ni se escribe.
     h.run_steps(10);
     assert_eq!(ws(h.state()).panel_count(), 1, "no se abre ningún revisor");
@@ -5262,6 +5409,7 @@ fn a_dismissed_cross_review_offer_stays_hidden() {
     wait_until(&mut h, "se relee", |a| !ws(a).ideas.dirty);
     h.run_steps(3);
     assert!(h.query_by_label_contains("Revisar con Codex").is_none());
+    assert_eq!(manual_review_buttons(&h), 1, "sin oferta vuelve «Revisar»");
     let path = ws(h.state()).project.path.clone();
     let store = h.state().store.as_ref().unwrap();
     assert_eq!(forge_core::cross_review::dismissed(store, &path).len(), 1);
@@ -5277,10 +5425,13 @@ fn with_offers_off_only_the_manual_review_button_remains() {
         forge_core::cross_review::set_offers(a.store.as_ref().unwrap(), &path, false).unwrap();
     });
     assert!(h.query_by_label_contains("Revisar con Codex").is_none());
-    assert!(
-        h.get_all_by_label_contains("Revisar").count() >= 1,
-        "«Revisar» sigue"
-    );
+    assert_eq!(manual_review_buttons(&h), 1, "«Revisar» sigue");
+}
+
+/// Los botones pequeños «Revisar» (el menú para elegir revisor) visibles.
+fn manual_review_buttons(h: &Harness<'static, App>) -> usize {
+    let label = format!("{} Revisar", crate::theme::icon::MAGNIFYING_GLASS);
+    h.query_all_by_label(&label).count()
 }
 
 /// Si el revisor que tocaría (Gemini CLI, de otra empresa) no admite un mensaje inicial, se
