@@ -661,8 +661,41 @@ fn ui_preview() {
     settle(&mut harness);
     save(&mut harness, &out, "12k-worktrees");
     harness.get_by_label(forge_core::tr!("Worktrees")).click();
-    // Agentes en marcha: un subagente trabajando, otro que terminó, dos terminales que se
-    // pisan en un archivo y un agente sin hooks.
+    // Agentes bajo el proyecto (plan #202): Claude Code con subagentes, Codex que se pisa con
+    // él en un archivo y OpenCode sin hooks (estado estimado por su terminal).
+    let ctx = harness.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1200.0, 800.0));
+    let demo = [
+        ("demo-claude", "Claude Code"),
+        ("demo-codex", "Codex"),
+        ("demo-opencode", "OpenCode"),
+    ];
+    let mut panels = Vec::new();
+    for (id, name) in demo {
+        harness.state_mut().workspaces[0]
+            .project
+            .agents
+            .push(forge_core::agents::AgentSpec {
+                id: id.into(),
+                name: name.into(),
+                command: "sleep 600".into(),
+                resume: None,
+                headless: None,
+                mcp: false,
+                mcp_style: None,
+                install_hint: None,
+                enabled: true,
+                default: false,
+                configured: true,
+                environment: HashMap::new(),
+            });
+        harness
+            .state_mut()
+            .apply(&ctx, UiCmd::AgentClick(id.into(), false), area);
+        settle(&mut harness);
+        panels.push(harness.state().workspaces[0].agent_panels(id)[0]);
+    }
+    let sid = |p| forge_core::store::session_id_for_panel(std::process::id(), p);
     {
         use forge_core::activity::Event;
         let now = forge_core::store::now();
@@ -686,18 +719,19 @@ fn ui_preview() {
             target: target.map(str::to_string),
             ..Default::default()
         };
-        at("1:1", ev("tool", "", Some("Edit"), Some(&coupons)), 540);
+        let claude = sid(panels[0]);
+        at(&claude, ev("tool", "", Some("Edit"), Some(&coupons)), 2940);
         at(
-            "1:1",
+            &claude,
             Event {
                 name: Some("explorer: where are taxes computed".into()),
                 ..ev("start", "a1", None, None)
             },
             90,
         );
-        at("1:1", ev("tool", "a1", Some("Grep"), Some("src")), 20);
+        at(&claude, ev("tool", "a1", Some("Grep"), Some("src")), 20);
         at(
-            "1:1",
+            &claude,
             Event {
                 name: Some("reviewer: run the test suite".into()),
                 ..ev("start", "a2", None, None)
@@ -705,15 +739,16 @@ fn ui_preview() {
             400,
         );
         at(
-            "1:1",
+            &claude,
             Event {
                 result: Some("All 48 tests pass".into()),
                 ..ev("stop", "a2", None, None)
             },
             60,
         );
+        let codex = sid(panels[1]);
         at(
-            "1:2",
+            &codex,
             Event {
                 origin: Some("Codex".into()),
                 ..ev("tool", "", Some("Edit"), Some(&coupons))
@@ -721,31 +756,50 @@ fn ui_preview() {
             200,
         );
         at(
-            "1:2",
+            &codex,
             Event {
                 origin: Some("Codex".into()),
                 ..ev("tool", "", Some("Bash"), Some("npm test -- coupons"))
             },
             15,
         );
-        for (session, agent) in [
-            ("1:1", "Claude Code"),
-            ("1:2", "Codex"),
-            ("1:3", "OpenCode"),
-        ] {
-            let _ = store.register_agent_session(session, &project, "main", agent, None);
-        }
     }
-    // Worktrees ya plegado: la fila está en su sitio de ahora.
-    settle(&mut harness);
     harness
-        .get_by_label(forge_core::tr!("Agentes en marcha"))
-        .click();
+        .state_mut()
+        .agent_rows
+        .open_subs
+        .insert(sid(panels[0]));
+    harness.state_mut().agent_rows.refresh();
     settle(&mut harness);
     save(&mut harness, &out, "12l-agentes");
+    // Ventana estrecha: la barra no cambia de ancho, el texto se recorta.
+    harness.set_size(Vec2::new(560.0, 880.0));
+    settle(&mut harness);
+    save(&mut harness, &out, "12l2-agentes-estrecho");
+    harness.set_size(Vec2::new(1440.0, 880.0));
+    // «Nuevo agente ▾» desplegado en la tarjeta del proyecto.
     harness
-        .get_by_label(forge_core::tr!("Agentes en marcha"))
+        .get_by_label(forge_core::tr!("Nuevo agente"))
         .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "12m-nuevo-agente");
+    harness
+        .get_by_label(forge_core::tr!("Nuevo agente"))
+        .click();
+    // Fuera las terminales de demostración (las capturas de después no las llevan).
+    for panel in panels {
+        harness
+            .state_mut()
+            .apply(&ctx, UiCmd::GoToPanel(panel), area);
+        harness.run_steps(2);
+        harness.key_press_modifiers(super::e2e::CMD, egui::Key::W);
+        harness.run_steps(2);
+    }
+    harness.state_mut().workspaces[0]
+        .project
+        .agents
+        .retain(|a| !a.id.starts_with("demo-"));
+    settle(&mut harness);
     // Árbol de archivos con una carpeta abierta y el cambio de arriba marcado.
     std::fs::create_dir_all(project.join("docs")).unwrap();
     std::fs::write(project.join("docs/notas.md"), "# Notas\n").unwrap();

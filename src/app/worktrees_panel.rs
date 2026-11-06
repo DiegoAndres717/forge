@@ -144,6 +144,15 @@ impl WorktreesView {
 impl App {
     /// Fila «Worktrees» y, abierta, la lista y la limpieza (debajo de Planes).
     pub(super) fn worktrees_ui(&mut self, ui: &mut egui::Ui, active: usize) {
+        // Plegada o abierta como la dejó el dueño (se recuerda entre sesiones).
+        let remembered = self.section_open("worktrees");
+        self.worktrees_body(ui, active, remembered);
+        if self.worktrees.open != remembered {
+            self.set_section_open("worktrees", self.worktrees.open);
+        }
+    }
+
+    fn worktrees_body(&mut self, ui: &mut egui::Ui, active: usize, remembered: bool) {
         let project = self.workspaces[active].project.path.clone();
         // Carpetas de todas las terminales y proyectos abiertos (también otros worktrees);
         // solo al pedir la limpieza: leer la carpeta de cada terminal en cada fotograma sobra.
@@ -154,8 +163,15 @@ impl App {
         if view.project != project {
             *view = WorktreesView {
                 project: project.clone(),
+                open: remembered,
                 ..Default::default()
             };
+            if remembered {
+                let repo = project.clone();
+                view.spawn(ui.ctx(), move |send| {
+                    send(Loaded::List(worktrees::list(&repo)))
+                });
+            }
         }
         view.poll();
         // Las sesiones y carpetas solo cuando toca mirar (no en cada fotograma).
@@ -171,17 +187,15 @@ impl App {
             .as_ref()
             .map(|l| l.iter().filter(|w| !w.main).count().to_string())
             .unwrap_or_default();
-        let row = theme::row(
-            ui,
-            icon::TREE_STRUCTURE,
-            theme::TEXT_3,
-            tr!("Worktrees"),
-            &others,
-            view.open,
-        )
-        .on_hover_text(tr!(
-            "Las copias de trabajo del repositorio (git worktree): rama, estado y lo que ocupan"
-        ));
+        let caret = if view.open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        };
+        let row = theme::row(ui, caret, theme::TEXT_3, tr!("Worktrees"), &others, false)
+            .on_hover_text(tr!(
+                "Las copias de trabajo del repositorio (git worktree): rama, estado y lo que ocupan"
+            ));
         if row.clicked() {
             view.open = !view.open;
             if view.open && view.loading.is_none() {
@@ -244,7 +258,21 @@ impl App {
         } else if theme::secondary(ui, tr!("Vista previa de limpieza")).clicked() {
             view.start_preview(ui.ctx(), project.clone(), in_use());
         }
+        // Se cierra sin aplicar: «Cerrar» o Esc con el ratón sobre la barra lateral (así Esc
+        // no se le quita a la terminal, donde interrumpe al agente).
+        let esc = view.preview.is_some()
+            && ui.rect_contains_pointer(ui.clip_rect())
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        if esc {
+            view.preview = None;
+        }
         if let Some(plan) = &view.preview {
+            small(
+                ui,
+                tr!("Qué haría la limpieza con cada worktree. No toca nada hasta «Aplicar limpieza».")
+                    .into(),
+                theme::TEXT_3,
+            );
             for c in plan.iter().filter(|c| !c.worktree.main) {
                 let color = if acts(c) {
                     theme::TEXT_2
@@ -253,16 +281,31 @@ impl App {
                 };
                 small(
                     ui,
-                    format!("{}: {}", c.worktree.label(), c.describe()),
+                    format!("{}: {}", c.worktree.label(), c.explain()),
                     color,
-                );
+                )
+                .on_hover_text(format!(
+                    "{}\n{}",
+                    tilde(&c.worktree.path),
+                    c.worktree.state()
+                ));
             }
             let approved: Vec<Cleanup> = plan.iter().filter(|c| acts(c)).cloned().collect();
-            if approved.is_empty() {
-                small(ui, tr!("No hay nada que limpiar").into(), theme::TEXT_3);
-            } else if view.loading.is_none()
-                && theme::secondary(ui, tr!("Aplicar limpieza")).clicked()
-            {
+            let mut apply = false;
+            ui.horizontal_wrapped(|ui| {
+                if approved.is_empty() {
+                    small(ui, tr!("No hay nada que limpiar").into(), theme::TEXT_3);
+                } else if view.loading.is_none() {
+                    apply = theme::secondary(ui, tr!("Aplicar limpieza")).clicked();
+                }
+                if theme::secondary(ui, tr!("Cerrar"))
+                    .on_hover_text(tr!("Cerrar la vista previa sin aplicar nada (Esc)"))
+                    .clicked()
+                {
+                    view.preview = None;
+                }
+            });
+            if apply {
                 view.preview = None;
                 view.offer.clear();
                 let (repo, in_use) = (project.clone(), in_use());

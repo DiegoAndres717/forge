@@ -4,6 +4,8 @@ use forge_core::tr;
 
 /// Con más proyectos que esto, la lista se compacta.
 const COMPACT_AFTER: usize = 6;
+/// Ajuste con las secciones de la tarjeta del proyecto que el dueño dejó abiertas.
+const SECTIONS_KEY: &str = "sidebar.open_sections";
 
 impl App {
     /// Proyectos a mostrar: todos, o (con muchos) el activo, los que tienen aviso y los
@@ -61,40 +63,54 @@ impl App {
         }
         let mut ui = ui.new_child(egui::UiBuilder::new().max_rect(body));
         ui.spacing_mut().item_spacing.y = 1.0;
+        let ui = &mut ui;
+        theme::section(ui, "Workspaces");
+        if theme::row(
+            ui,
+            icon::HOUSE,
+            theme::TEXT_2,
+            tr!("Inicio"),
+            &forge_core::i18n::keys("⌘⇧H"),
+            self.active.is_none(),
+        )
+        .clicked()
+        {
+            cmds.push(UiCmd::Home);
+        }
+        let attention: Vec<_> = self.workspaces.iter().map(|w| w.attention()).collect();
+        // La rama de cada proyecto (se relee cada 2 s).
+        let branches: Vec<Option<String>> =
+            self.workspaces.iter_mut().map(|w| w.branch()).collect();
+        let visible = self.visible_workspaces(&attention);
+        let ram = self.ram.lock().map(|r| r.clone()).unwrap_or_default();
+        // Las filas de agentes de cada proyecto a la vista (los dormidos no tienen terminales).
+        let now = forge_core::store::now();
+        let mut agent_rows = Vec::new();
+        for (i, ws) in self.workspaces.iter_mut().enumerate() {
+            let terms = if visible.contains(&i) && !ws.is_dormant() {
+                ws.agent_terminals(now)
+            } else {
+                Vec::new()
+            };
+            let (panels, infos): (Vec<PanelId>, Vec<_>) = terms.into_iter().unzip();
+            let (rows, overlaps) =
+                self.agent_rows
+                    .rows(self.store.as_ref(), &ws.project.path, &infos, now);
+            agent_rows.push((panels, rows, overlaps));
+        }
+        // La lista de proyectos ocupa el alto sobrante, con su propio scroll.
         egui::ScrollArea::vertical()
             .id_salt("sidebar-scroll")
             .auto_shrink([false, false])
-            .show(&mut ui, |ui| {
-                theme::section(ui, "Workspaces");
-                if theme::row(
-                    ui,
-                    icon::HOUSE,
-                    theme::TEXT_2,
-                    tr!("Inicio"),
-                    &forge_core::i18n::keys("⌘⇧H"),
-                    self.active.is_none(),
-                )
-                .clicked()
-                {
-                    cmds.push(UiCmd::Home);
-                }
-                let attention: Vec<_> = self.workspaces.iter().map(|w| w.attention()).collect();
-                // La rama de cada proyecto (se relee cada 2 s) y los agentes abiertos del activo.
-                let branches: Vec<Option<String>> =
-                    self.workspaces.iter_mut().map(|w| w.branch()).collect();
-                let open_agents: Vec<_> = self
-                    .active
-                    .map(|a| self.workspaces[a].active_agent_panels())
-                    .unwrap_or_default();
-                let visible = self.visible_workspaces(&attention);
-                let ram = self.ram.lock().map(|r| r.clone()).unwrap_or_default();
+            .show(ui, |ui| {
                 // Filas dibujadas y el arrastre en curso (desde, ¿soltado?).
                 let mut rows: Vec<(usize, Rect)> = Vec::new();
                 let mut drag = None;
-                for (i, ws) in self.workspaces.iter().enumerate() {
+                for i in 0..self.workspaces.len() {
                     if !visible.contains(&i) {
                         continue;
                     }
+                    let ws = &self.workspaces[i];
                     let selected = self.active == Some(i);
                     let dormant = ws.is_dormant();
                     let running = ws.processes.active_count();
@@ -196,27 +212,24 @@ impl App {
                             cmds.push(UiCmd::Close(i));
                         }
                     });
-                    // Los agentes abiertos del proyecto elegido, debajo de su tarjeta.
+                    // Sus agentes, debajo de su tarjeta: qué hace cada uno ahora.
+                    let (panels, live_rows, overlaps) = &agent_rows[i];
+                    super::agent_rows::agent_rows_ui(
+                        ui,
+                        live_rows,
+                        panels,
+                        overlaps,
+                        &ws.unread,
+                        &mut self.agent_rows.open_subs,
+                        now,
+                        cmds,
+                    );
+                    // El proyecto activo despliega lo suyo dentro de su tarjeta.
                     if selected {
-                        for (panel, name, _) in &open_agents {
-                            let unread = ws.unread.contains(panel);
-                            let dot = if unread { theme::ORANGE } else { theme::GREEN };
-                            let row = theme::sub_row(ui, dot, name, "");
-                            if row.clicked() {
-                                cmds.push(UiCmd::GoToPanel(*panel));
-                            }
-                            row.context_menu(|ui| {
-                                let label = if unread {
-                                    tr!("Marcar como leído")
-                                } else {
-                                    tr!("Marcar como no leído")
-                                };
-                                if ui.button(label).clicked() {
-                                    cmds.push(UiCmd::ToggleUnread(*panel));
-                                    ui.close();
-                                }
-                            });
-                        }
+                        ui.indent(("project-body", i), |ui| {
+                            self.project_body(ui, i, &detected, detecting, &preferred, cmds);
+                        });
+                        ui.add_space(6.0);
                     }
                 }
                 if let Some((from, dropped)) = drag
@@ -272,77 +285,158 @@ impl App {
                 {
                     cmds.push(UiCmd::OpenFolder);
                 }
-
-                let Some(i) = self.active else { return };
-                let ws = &mut self.workspaces[i];
-                ui.add_space(12.0);
-                Self::agents_ui(ws, &detected, detecting, &preferred, ui, cmds);
-
-                if !ws.project.config.commands.is_empty() {
-                    ui.add_space(12.0);
-                    theme::section(ui, tr!("Comandos"));
-                    for command in &ws.project.config.commands {
-                        let row =
-                            theme::row(ui, icon::PLAY, theme::TEXT_3, &command.name, "", false)
-                                .on_hover_text(&command.command);
-                        if row.clicked() {
-                            cmds.push(UiCmd::RunCommand(command.clone()));
-                        }
-                    }
-                }
-
-                // Planes, donde siempre estuvo; los procesos se abren desde ⌘K.
-                ui.add_space(12.0);
-                let open = match ws.ideas.open_count {
-                    0 => String::new(),
-                    n => n.to_string(),
-                };
-                if theme::row(
-                    ui,
-                    icon::LIST_CHECKS,
-                    theme::ACCENT,
-                    tr!("Planes"),
-                    &open,
-                    ws.ideas.open,
-                )
-                .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
-                .clicked()
-                {
-                    cmds.push(UiCmd::ToggleIdeas);
-                }
-                self.worktrees_ui(ui, i);
-                self.agents_board_ui(ui, i);
             });
     }
 
-    /// Sección AGENTES: instalados y configurados. Clic: a su terminal abierta, o reanuda su
+    /// ¿Está desplegada esa sección de la tarjeta del proyecto? Se recuerda entre sesiones.
+    pub(super) fn section_open(&mut self, key: &str) -> bool {
+        self.sidebar_open().contains(key)
+    }
+
+    fn sidebar_open(&mut self) -> &mut HashSet<String> {
+        let store = self.store.as_ref();
+        self.sidebar_sections.get_or_insert_with(|| {
+            store
+                .and_then(|s| s.setting(SECTIONS_KEY).ok().flatten())
+                .map(|v| {
+                    v.split(',')
+                        .filter(|k| !k.is_empty())
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+    }
+
+    pub(super) fn set_section_open(&mut self, key: &str, open: bool) {
+        let set = self.sidebar_open();
+        if open {
+            set.insert(key.to_string());
+        } else {
+            set.remove(key);
+        }
+        let mut keys: Vec<&String> = set.iter().collect();
+        keys.sort();
+        let value = keys
+            .into_iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(",");
+        if let Some(store) = &self.store {
+            let _ = store.set_setting(SECTIONS_KEY, &value);
+        }
+    }
+
+    /// Cabecera plegable de una sección de la tarjeta (con su flecha); devuelve si está abierta.
+    fn fold(&mut self, ui: &mut egui::Ui, key: &str, label: &str, detail: &str, tip: &str) -> bool {
+        let open = self.section_open(key);
+        let caret = if open {
+            icon::CARET_DOWN
+        } else {
+            icon::CARET_RIGHT
+        };
+        let row = theme::row(ui, caret, theme::TEXT_3, label, detail, false);
+        let row = if tip.is_empty() {
+            row
+        } else {
+            row.on_hover_text(tip)
+        };
+        if row.clicked() {
+            self.set_section_open(key, !open);
+        }
+        open != row.clicked()
+    }
+
+    /// Lo del proyecto activo, dentro de su tarjeta: nuevo agente, comandos, planes y
+    /// worktrees, plegados de serie y recordando cuáles abrió el dueño.
+    fn project_body(
+        &mut self,
+        ui: &mut egui::Ui,
+        i: usize,
+        detected: &HashMap<String, agents::Detection>,
+        detecting: bool,
+        preferred: &str,
+        cmds: &mut Vec<UiCmd>,
+    ) {
+        // «Nuevo agente ▾»: los instalados, con todas sus acciones de siempre.
+        let open = self.fold(
+            ui,
+            "agents",
+            tr!("Nuevo agente"),
+            "",
+            tr!("Abrir un agente en este proyecto (la lista completa y sus cuentas están en Ajustes → Agentes)"),
+        );
+        let header = ui.min_rect();
+        let at = Rect::from_center_size(
+            egui::pos2(header.max.x - 14.0, header.max.y - 13.0),
+            Vec2::splat(20.0),
+        );
+        if detecting {
+            ui.put(at, egui::Spinner::new().size(12.0));
+        } else if ui
+            .put(
+                at,
+                egui::Button::new(RichText::new(icon::ARROW_CLOCKWISE).color(theme::TEXT_4))
+                    .frame(false),
+            )
+            .on_hover_text(tr!("Volver a detectar agentes"))
+            .clicked()
+        {
+            cmds.push(UiCmd::DetectAgents);
+        }
+        if open {
+            let ws = &mut self.workspaces[i];
+            Self::agents_ui(ws, detected, preferred, ui, cmds);
+        }
+        let commands = self.workspaces[i].project.config.commands.clone();
+        if !commands.is_empty()
+            && self.fold(
+                ui,
+                "commands",
+                tr!("Comandos"),
+                &commands.len().to_string(),
+                "",
+            )
+        {
+            for command in &commands {
+                let row = theme::row(ui, icon::PLAY, theme::TEXT_3, &command.name, "", false)
+                    .on_hover_text(&command.command);
+                if row.clicked() {
+                    cmds.push(UiCmd::RunCommand(command.clone()));
+                }
+            }
+        }
+        // Planes abre su panel; los procesos se abren desde ⌘K.
+        let ws = &self.workspaces[i];
+        let open = match ws.ideas.open_count {
+            0 => String::new(),
+            n => n.to_string(),
+        };
+        if theme::row(
+            ui,
+            icon::LIST_CHECKS,
+            theme::ACCENT,
+            tr!("Planes"),
+            &open,
+            ws.ideas.open,
+        )
+        .on_hover_text(forge_core::i18n::keys("⌘⇧I").into_owned())
+        .clicked()
+        {
+            cmds.push(UiCmd::ToggleIdeas);
+        }
+        self.worktrees_ui(ui, i);
+    }
+
+    /// «Nuevo agente ▾»: instalados y configurados. Clic: a su terminal abierta, o reanuda su
     /// última sesión, o una nueva; + o ⌥-clic: sesión nueva; clic derecho: más.
     pub(super) fn agents_ui(
         ws: &mut Workspace,
         detected: &HashMap<String, agents::Detection>,
-        detecting: bool,
         preferred: &str,
         ui: &mut egui::Ui,
         cmds: &mut Vec<UiCmd>,
     ) {
-        ui.horizontal(|ui| {
-            theme::section(ui, tr!("Agentes"));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if detecting {
-                    ui.spinner();
-                } else if theme::icon_button_sized(
-                    ui,
-                    icon::ARROW_CLOCKWISE,
-                    tr!("Volver a detectar agentes"),
-                    20.0,
-                    theme::TEXT_4,
-                )
-                .clicked()
-                {
-                    cmds.push(UiCmd::DetectAgents);
-                }
-            });
-        });
         let default = agents::default_agent_with(&ws.project.agents, detected, preferred)
             .map(|a| a.id.clone());
         let mut missing = Vec::new();

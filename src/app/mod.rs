@@ -1,6 +1,6 @@
 // Ventana principal: inicio con proyectos recientes, barra lateral y workspaces abiertos.
 use forge_core::tr;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, channel};
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, FontId, Key, Modifiers, Rect, RichText, Sense, Vec2};
 
-use crate::layout::{Dir, Toward};
+use crate::layout::{Dir, PanelId, Toward};
 use crate::processes;
 use crate::theme::{self, icon};
 use crate::workspace::{AllowForm, NoteForm, Workspace, WsAction, tilde, tone_color};
@@ -29,7 +29,7 @@ const GUARD_WIDTH: f32 = 440.0;
 const DRAWER_MIN: f32 = 240.0;
 const WORKSPACE_MIN: f32 = 320.0;
 
-mod agents_board;
+mod agent_rows;
 mod approvals;
 mod chrome;
 mod editors;
@@ -428,7 +428,9 @@ pub struct App {
     /// Barra lateral con todos los proyectos (con muchos se compacta).
     show_all: bool,
     worktrees: worktrees_panel::WorktreesView,
-    agents_board: agents_board::AgentsBoard,
+    agent_rows: agent_rows::AgentRows,
+    /// Secciones abiertas de la tarjeta del proyecto (`None`: aún sin leer del almacén).
+    sidebar_sections: Option<HashSet<String>>,
     /// Notificaciones de macOS (desactivadas en tests).
     notifications: bool,
     /// Próxima búsqueda de actualizaciones (solo la app real; los tests no salen a la red).
@@ -545,7 +547,8 @@ impl App {
             merging: Arc::default(),
             show_all: false,
             worktrees: Default::default(),
-            agents_board: Default::default(),
+            agent_rows: Default::default(),
+            sidebar_sections: None,
             general: crate::workspace::IdeasView {
                 dirty: true,
                 ..Default::default()

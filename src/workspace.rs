@@ -91,6 +91,34 @@ enum Content {
     Process(String),
 }
 
+/// Lo que se sabe de una terminal de agente aparte de su salida (ver `agent_terminals`).
+#[derive(Default)]
+struct PanelLive {
+    /// Modelo con que se abrió (el elegido en Forge o el `--model` de su comando).
+    model: Option<String>,
+    opened_at: i64,
+    /// Último aviso del agente para ella (`waiting`, `stop`, `limit`) y cuándo.
+    event: Option<(String, i64)>,
+    /// Desde cuándo escribe sin parar (respaldo sin hooks).
+    busy_since: Option<i64>,
+}
+
+/// El modelo de un comando (`claude --model opus` → `opus`).
+fn model_in(command: &str) -> Option<String> {
+    let mut words = command.split_whitespace();
+    while let Some(w) = words.next() {
+        if let Some(m) = w.strip_prefix("--model=") {
+            return Some(m.trim_matches(['"', '\'']).to_string());
+        }
+        if w == "--model" || w == "-m" {
+            return words
+                .next()
+                .map(|m| m.trim_matches(['"', '\'']).to_string());
+        }
+    }
+    None
+}
+
 struct Panel {
     content: Content,
     /// Nombre puesto por el usuario o por el layout.
@@ -409,6 +437,8 @@ enum HeaderAction {
     Maximize,
     /// Nueva terminal en este panel.
     NewTab,
+    /// Abrir ese agente (menú del +).
+    OpenAgent(String),
     ShowTab(PanelId),
     CloseTab(PanelId),
     /// Reordenar: la terminal pasa a esta posición de su grupo.
@@ -465,6 +495,8 @@ pub struct Workspace {
     limited: Vec<PanelId>,
     /// La lista de terminales del panel va abajo, en una fila de pestañas (Ajustes).
     pub tabs_below: bool,
+    /// Estado en vivo de cada terminal de agente (para su fila en la barra lateral).
+    live: HashMap<PanelId, PanelLive>,
     /// Terminales abiertas como revisor (solo lectura): `ask_agent` no escribe en ellas.
     reviewing: Vec<PanelId>,
     /// Revisores abiertos: (agente, comando con el mensaje). Para las pruebas.
@@ -605,6 +637,7 @@ impl Workspace {
             launch: HashMap::new(),
             limited: Vec::new(),
             tabs_below: false,
+            live: HashMap::new(),
             reviewing: Vec::new(),
             #[cfg(test)]
             review_launches: Vec::new(),
@@ -1190,6 +1223,17 @@ impl Workspace {
         let typed = match (&spec, typed, forge) {
             (Some(spec), Some(command), Some(forge)) => {
                 let (model, effort) = self.launch.get(spec.program()).cloned().unwrap_or_default();
+                let chosen = Some(model.clone())
+                    .filter(|m| !m.is_empty())
+                    .or_else(|| model_in(&command));
+                self.live.insert(
+                    id,
+                    PanelLive {
+                        model: chosen,
+                        opened_at: forge_core::store::now(),
+                        ..Default::default()
+                    },
+                );
                 let command = spec.with_launch(&command, &model, &effort);
                 let command = spec.with_permission(&command, self.accept_edits);
                 Some(spec.with_events(&command, &forge.to_string_lossy(), has_mod))
@@ -2072,6 +2116,70 @@ impl Workspace {
         self.unread.iter().any(|id| self.panels.contains_key(id))
     }
 
+    /// Aviso de un agente para una de sus terminales (`waiting`, `stop`, `limit`).
+    pub fn panel_event(&mut self, panel: PanelId, kind: &str) {
+        if self.panels.contains_key(&panel) {
+            let live = self.live.entry(panel).or_default();
+            live.event = Some((kind.to_string(), forge_core::store::now()));
+        }
+    }
+
+    /// Las terminales de agente abiertas con lo que se sabe de ellas, para su fila en la
+    /// barra lateral (`forge_core::live::rows`).
+    pub fn agent_terminals(&mut self, now: i64) -> Vec<(PanelId, forge_core::live::TerminalInfo)> {
+        let mut out = Vec::new();
+        let mut ids: Vec<PanelId> = self.panels.keys().copied().collect();
+        ids.sort_unstable();
+        for id in ids {
+            let panel = &self.panels[&id];
+            let (Some(agent), Content::Shell(term)) = (&panel.agent, &panel.content) else {
+                continue;
+            };
+            if term.exited() {
+                continue;
+            }
+            let spec = self.project.agents.iter().find(|a| &a.id == agent);
+            let output_at = term
+                .last_output()
+                .map(|t| now - t.elapsed().as_secs() as i64);
+            let live = self.live.entry(id).or_default();
+            if live.opened_at == 0 {
+                live.opened_at = now;
+            }
+            // Escribiendo ahora: desde cuándo (se olvida al callarse).
+            match output_at {
+                Some(o) if now - o < 4 => {
+                    live.busy_since.get_or_insert(o);
+                }
+                _ => live.busy_since = None,
+            }
+            out.push((
+                id,
+                forge_core::live::TerminalInfo {
+                    session: forge_core::store::session_id_for_panel(std::process::id(), id),
+                    // El id del catálogo si lo es; si no, su programa (un `claude` propio).
+                    // Uno propio que firma como uno conocido («Claude Code») lleva su logo.
+                    agent_id: match spec {
+                        Some(s) if forge_core::catalog::get(&s.id).is_some() => s.id.clone(),
+                        Some(s) => forge_core::catalog::get(s.program())
+                            .or_else(|| forge_core::catalog::by_name(&s.name))
+                            .map_or_else(|| s.program().to_string(), |a| a.id.to_string()),
+                        None => agent.clone(),
+                    },
+                    agent: spec.map_or(agent.clone(), |s| s.name.clone()),
+                    model: live.model.clone(),
+                    title: term.title.clone(),
+                    event: live.event.clone(),
+                    output_at,
+                    busy_since: live.busy_since,
+                    opened_at: live.opened_at,
+                },
+            ));
+        }
+        self.live.retain(|id, _| self.panels.contains_key(id));
+        out
+    }
+
     pub fn active_agent_panels(&mut self) -> Vec<(PanelId, String, Option<u32>)> {
         let mut list = Vec::new();
         for (&id, panel) in &mut self.panels {
@@ -2541,6 +2649,10 @@ impl Workspace {
                     self.focus = id;
                     self.new_tab(&ctx);
                 }
+                HeaderAction::OpenAgent(agent) => {
+                    self.focus = id;
+                    self.open_agent(&ctx, &agent, false, area);
+                }
                 HeaderAction::ShowTab(tab) => self.show_tab(tab),
                 HeaderAction::CloseTab(tab) => self.close(tab),
                 HeaderAction::MoveTab(tab, to) => {
@@ -2946,6 +3058,26 @@ impl Workspace {
         ) {
             actions.push(HeaderAction::NewTab);
         }
+        // Clic derecho en el +: abrir un agente en vez de una terminal vacía.
+        if let Some(plus) = ui.ctx().read_response(egui::Id::new(("new-tab", &key, id))) {
+            plus.context_menu(|ui| {
+                if ui
+                    .button(tr!("{p0}  Nueva terminal", p0 = icon::TERMINAL_WINDOW))
+                    .clicked()
+                {
+                    actions.push(HeaderAction::NewTab);
+                }
+                ui.separator();
+                for agent in self.project.agents.iter().filter(|a| a.enabled) {
+                    if ui
+                        .button(tr!("{p0}  Nuevo {p1}", p0 = icon::ROBOT, p1 = agent.name))
+                        .clicked()
+                    {
+                        actions.push(HeaderAction::OpenAgent(agent.id.clone()));
+                    }
+                }
+            });
+        }
         if self.panels.len() > 1 {
             let (glyph, hint) = if self.maximized == Some(id) {
                 (icon::ARROWS_IN, tr!("Restaurar (⌘Enter)"))
@@ -3347,6 +3479,14 @@ fn alacritty_background() -> alacritty_terminal::vte::ansi::Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_model_is_read_from_the_launch_command() {
+        assert_eq!(model_in("claude --model opus").as_deref(), Some("opus"));
+        assert_eq!(model_in("codex -m gpt-5 --x").as_deref(), Some("gpt-5"));
+        assert_eq!(model_in("agy --model='flash'").as_deref(), Some("flash"));
+        assert_eq!(model_in("opencode"), None);
+    }
     use forge_core::store::Store;
 
     // Holgado: con la suite en paralelo los shells de login tardan en arrancar.

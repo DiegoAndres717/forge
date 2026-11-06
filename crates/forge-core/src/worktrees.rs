@@ -146,6 +146,30 @@ impl Cleanup {
     }
 }
 
+impl Cleanup {
+    /// `describe` con el porqué concreto cuando se queda: qué archivos ignorados, cuántos
+    /// commits sin subir… para que se sepa qué hacer si se quiere quitar.
+    pub fn explain(&self) -> String {
+        let w = &self.worktree;
+        let more = match self.action {
+            Action::Keep(Keep::Ignored) if !w.ignored.is_empty() => {
+                tr!(
+                    "{p}: cópialos o bórralos si sobran",
+                    p = w.ignored.join(", ")
+                )
+            }
+            Action::Keep(Keep::Unsaved) => match w.unpushed {
+                Some(n) if n > 0 => tr!("{n} commits sin subir", n = n),
+                _ => tr!("súbela o fusiónala primero").to_string(),
+            },
+            Action::Keep(Keep::Dirty) => tr!("haz commit o descártalos primero").to_string(),
+            Action::Keep(Keep::InUse) => tr!("cierra esa terminal primero").to_string(),
+            _ => return self.describe(),
+        };
+        format!("{} ({more})", self.describe())
+    }
+}
+
 /// Los worktrees del repositorio en `repo`, con su estado y lo que ocupan.
 pub fn list(repo: &Path) -> Result<Vec<Worktree>, String> {
     list_with(repo, true)
@@ -906,6 +930,35 @@ pub fn stray_copy_in_command(command: &str, cwd: &Path, project: &Path) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_kept_worktree_says_what_blocks_it() {
+        let c = |keep, worktree| Cleanup {
+            worktree,
+            action: Action::Keep(keep),
+            result: None,
+        };
+        let ignored = Worktree {
+            branch: Some("feat/x".into()),
+            ignored: vec![".env".into(), "db.sqlite".into()],
+            ..Default::default()
+        };
+        let text = c(Keep::Ignored, ignored).explain();
+        assert!(text.contains(".env, db.sqlite"), "{text}");
+        let unsaved = Worktree {
+            unpushed: Some(3),
+            ..Default::default()
+        };
+        assert!(
+            c(Keep::Unsaved, unsaved)
+                .explain()
+                .contains("3 commits sin subir")
+        );
+        assert_eq!(
+            c(Keep::Main, Worktree::default()).explain(),
+            c(Keep::Main, Worktree::default()).describe()
+        );
+    }
     use crate::git::test_repo;
 
     fn words(s: &str) -> Vec<String> {

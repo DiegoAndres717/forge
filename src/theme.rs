@@ -261,28 +261,29 @@ pub fn sub_row(ui: &mut Ui, dot: Color32, label: &str, detail: &str) -> Response
     }
     let mid = rect.center().y;
     painter.circle_filled(egui::pos2(rect.min.x + 30.0, mid), 3.0, dot);
-    let galley = painter.layout(
+    // Estrecho: sin el detalle (queda en el aviso de quien llama) y el nombre recortado.
+    let mut right = rect.max.x - 10.0;
+    if !detail.is_empty() && rect.width() >= 180.0 {
+        let galley = painter.layout_no_wrap(detail.to_string(), FontId::proportional(11.0), TEXT_3);
+        right -= galley.size().x;
+        painter.galley(
+            egui::pos2(right, mid - galley.size().y / 2.0),
+            galley,
+            TEXT_3,
+        );
+        right -= 8.0;
+    }
+    let mut job = egui::text::LayoutJob::single_section(
         label.to_string(),
-        FontId::proportional(12.0),
-        TEXT_2,
-        f32::INFINITY,
+        egui::TextFormat::simple(FontId::proportional(12.0), TEXT_2),
     );
+    job.wrap = egui::text::TextWrapping::truncate_at_width((right - rect.min.x - 42.0).max(10.0));
+    let galley = painter.layout_job(job);
     painter.galley(
         egui::pos2(rect.min.x + 42.0, mid - galley.size().y / 2.0),
         galley,
         TEXT_2,
     );
-    if !detail.is_empty() {
-        let galley = painter.layout_no_wrap(detail.to_string(), FontId::proportional(11.0), TEXT_3);
-        painter.galley(
-            egui::pos2(
-                rect.max.x - 10.0 - galley.size().x,
-                mid - galley.size().y / 2.0,
-            ),
-            galley,
-            TEXT_3,
-        );
-    }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
     response.on_hover_cursor(CursorIcon::Default)
 }
