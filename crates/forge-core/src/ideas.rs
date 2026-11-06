@@ -127,10 +127,20 @@ pub fn client_agent_id(client: &str) -> Option<&'static str> {
     })
 }
 
+/// Lo que Forge sabe de quién hizo una fase y dónde, para el mensaje del revisor.
+#[derive(Default)]
+pub struct ReviewContext<'a> {
+    /// Nombre del agente que la hizo («Claude Code»).
+    pub author: Option<&'a str>,
+    /// Worktree donde está su rama.
+    pub worktree: Option<&'a Path>,
+}
+
 /// El mensaje para el agente que revisa la fase `index` de un plan (texto para agentes, en
-/// inglés). Solo lectura: quien corrige es el agente que hizo la fase. `None` si la fase no
-/// existe o no tiene rama.
-pub fn review_prompt(idea: &Idea, index: usize) -> Option<String> {
+/// inglés), el mismo para «Revisar» y para la oferta al terminarla: qué cambió y dónde, cuándo
+/// está hecha, qué buscar y separar fallos reales del estilo. Solo lectura: quien corrige es el
+/// agente que hizo la fase. `None` si la fase no existe o no tiene rama.
+pub fn review_prompt(idea: &Idea, index: usize, context: &ReviewContext) -> Option<String> {
     let phase = idea.phases.get(index)?;
     let branch = phase.branch.as_deref()?;
     let tasks: String = phase
@@ -143,11 +153,31 @@ pub fn review_prompt(idea: &Idea, index: usize) -> Option<String> {
     } else {
         format!("Phase notes: {}\n", phase.notes)
     };
+    let author = context
+        .author
+        .map(|a| format!(" It was written by {a}: look at it with fresh eyes, as someone who did not write it."))
+        .unwrap_or_default();
+    let worktree = context
+        .worktree
+        .map(|w| {
+            format!(
+                " The branch is checked out in the worktree `{}`: read its files there.",
+                w.display()
+            )
+        })
+        .unwrap_or_default();
+    let criterion = if phase.notes.is_empty() {
+        "every task above is really done and works"
+    } else {
+        "every task above is really done and works, and the phase notes hold"
+    };
     Some(format!(
-        "You are a code reviewer. Review phase {n} (\"{title}\") of plan #{id} (\"{plan}\") in Forge's plans, on branch `{branch}`.\n\
+        "You are a code reviewer. Review phase {n} (\"{title}\") of plan #{id} (\"{plan}\") in Forge's plans, on branch `{branch}`.{author}\n\
          {notes}Tasks of the phase:\n{tasks}\n\
-         This review is READ-ONLY. Do NOT edit files, and do NOT run git checkout, switch, stash, reset, commit or anything else that changes the working tree or the branch: another agent may be working in this folder. Read the changes with `git diff main...{branch}` and `git log main..{branch}` (use the repository's default branch if it is not main), and read files with your normal read tools.\n\
-         Check, in this order: 1) bugs and wrong behavior; 2) every task above is really done; 3) tests that cannot fail or are missing; 4) the project's conventions (read them with project_context and memory_search from Forge's MCP tools). Tell Forge how far you are with its MCP tool review_progress (plan={id}, phase={n}): call it once when you start with the total number of steps you expect (step=0), after each step with step and total, and at the end with done=true, so the person can see how long is left. For every finding call Forge's MCP tool review_comment_add (plan={id}, phase={n}, text, and file and line when you have them) so it is saved in the phase, one call per finding, ordered by severity; the text says what is wrong and why. Then summarize your findings in your reply (if the tool is not available, list them there with file and line). If you find nothing, say so. Do not fix anything: the agent that wrote the phase will fix what you report.",
+         Done criterion: the phase is done when {criterion}.\n\
+         This review is READ-ONLY. Do NOT edit files, and do NOT run git checkout, switch, stash, reset, commit or anything else that changes the working tree or the branch: another agent may be working in this folder. Read the changes with `git diff main...{branch}` and `git log main..{branch}` (use the repository's default branch if it is not main), and read files with your normal read tools.{worktree}\n\
+         Check, in this order: 1) bugs and wrong behavior; 2) every task above is really done; 3) tests that cannot fail or are missing; 4) the project's conventions (read them with project_context and memory_search from Forge's MCP tools). Tell Forge how far you are with its MCP tool review_progress (plan={id}, phase={n}): call it once when you start with the total number of steps you expect (step=0), after each step with step and total, and at the end with done=true, so the person can see how long is left. For every finding call Forge's MCP tool review_comment_add (plan={id}, phase={n}, text, and file and line when you have them) so it is saved in the phase, one call per finding, ordered by severity; the text says what is wrong and why.\n\
+         Separate real bugs from style. Start the text of each finding with its label: [bug/high], [bug/medium] or [bug/low] for something that is really wrong (wrong behavior, a crash, lost data, a security hole, a task not really done, a test that cannot fail), or [style] for style and nitpicks that do not change behavior. Report real bugs first and do not pad the review with style findings. Then summarize your findings in your reply (if the tool is not available, list them there with file and line). If you find no real bug, say so plainly. Do not fix anything: the agent that wrote the phase will fix what you report.",
         n = index + 1,
         title = phase.title,
         id = idea.id,
@@ -165,6 +195,12 @@ impl Phase {
     pub fn reviewable(&self) -> bool {
         let left = self.tasks.iter().filter(|t| !t.done).count();
         self.branch.is_some() && self.status == "doing" && left <= 1
+    }
+
+    /// ¿Terminada, como para ofrecer su revisión sin que nadie la pida? Se puede revisar y
+    /// tiene todas sus tareas tachadas (sin tareas no se sabe cuándo acaba: no se ofrece).
+    pub fn offer_ready(&self) -> bool {
+        self.reviewable() && !self.tasks.is_empty() && self.tasks.iter().all(|t| t.done)
     }
 
     pub fn new(title: &str) -> Self {
@@ -2337,6 +2373,68 @@ mod tests {
     }
 
     #[test]
+    fn the_review_brief_names_the_author_the_worktree_and_asks_to_separate_bugs_from_style() {
+        let mut phase = Phase::new("Webhook");
+        phase.branch = Some("feat/webhook".into());
+        phase.notes = "Hecha cuando el webhook reintenta.".into();
+        phase.tasks = vec![Task {
+            text: "Reintentos".into(),
+            done: true,
+        }];
+        let store = Store::in_memory().unwrap();
+        let p = Some(Path::new("/p/forge"));
+        let id = store
+            .add_plan(p, "Recibos", "", &[phase], "claude-code")
+            .unwrap();
+        let plan = store.get_idea(p, id).unwrap().unwrap();
+        let worktree = Path::new("/wt/feat-webhook");
+        let context = ReviewContext {
+            author: Some("Claude Code"),
+            worktree: Some(worktree),
+        };
+        let prompt = review_prompt(&plan, 0, &context).unwrap();
+        assert!(prompt.contains("written by Claude Code"), "{prompt}");
+        assert!(prompt.contains("/wt/feat-webhook"), "{prompt}");
+        // El criterio de hecho: las tareas y las notas de la fase.
+        assert!(prompt.contains("Done criterion"), "{prompt}");
+        assert!(prompt.contains("Hecha cuando el webhook reintenta."));
+        // Fallos reales con su gravedad, aparte del estilo.
+        assert!(
+            prompt.contains("[bug/high]") && prompt.contains("[style]"),
+            "{prompt}"
+        );
+        assert!(prompt.contains(&format!("review_comment_add (plan={id}, phase=1")));
+        assert!(prompt.contains("Do NOT edit files"));
+        // Sin contexto, nada inventado.
+        let bare = review_prompt(&plan, 0, &ReviewContext::default()).unwrap();
+        assert!(
+            !bare.contains("written by") && !bare.contains("worktree `"),
+            "{bare}"
+        );
+    }
+
+    #[test]
+    fn a_phase_is_offered_for_review_once_all_its_tasks_are_ticked() {
+        let task = |done| Task {
+            text: "t".into(),
+            done,
+        };
+        let mut p = Phase::new("Webhook");
+        p.status = "doing".into();
+        p.branch = Some("feat/x".into());
+        assert!(!p.offer_ready(), "sin tareas no se sabe cuándo acaba");
+        p.tasks = vec![task(true), task(false)];
+        assert!(p.reviewable() && !p.offer_ready(), "le queda una");
+        p.tasks[1].done = true;
+        assert!(p.offer_ready());
+        p.branch = None;
+        assert!(!p.offer_ready(), "sin rama no hay qué revisar");
+        p.branch = Some("feat/x".into());
+        p.status = "done".into();
+        assert!(!p.offer_ready(), "ya está en main");
+    }
+
+    #[test]
     fn the_review_prompt_asks_for_a_read_only_review_of_the_phase_branch() {
         let store = Store::in_memory().unwrap();
         let p = Some(Path::new("/p/forge"));
@@ -2357,7 +2455,7 @@ mod tests {
             .add_plan(p, "Revisión de fases", "", &[phase], "claude-code")
             .unwrap();
         let plan = store.get_idea(p, id).unwrap().unwrap();
-        let prompt = review_prompt(&plan, 0).unwrap();
+        let prompt = review_prompt(&plan, 0, &ReviewContext::default()).unwrap();
         assert!(prompt.contains("feat/plans-review-button"));
         assert!(prompt.contains("git diff"));
         assert!(prompt.contains("- [x] Botón en la fase"));
@@ -2373,8 +2471,8 @@ mod tests {
             .add_plan(p, "Otro", "", &[Phase::new("Sin rama")], "claude-code")
             .unwrap();
         let plan2 = store.get_idea(p, id2).unwrap().unwrap();
-        assert!(review_prompt(&plan2, 0).is_none());
-        assert!(review_prompt(&plan, 5).is_none());
+        assert!(review_prompt(&plan2, 0, &ReviewContext::default()).is_none());
+        assert!(review_prompt(&plan, 5, &ReviewContext::default()).is_none());
     }
 
     #[test]

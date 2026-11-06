@@ -575,6 +575,49 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].ideas.parallel = None;
     harness.state_mut().workspaces[0].ideas.toggled.clear();
     settle(&mut harness);
+    // Fase terminada (todas sus tareas tachadas): Forge ofrece revisarla con un agente de otra
+    // empresa, sin abrir nada hasta que se pulse (plan #84).
+    let finished = {
+        use forge_core::ideas::{Phase, Task};
+        let mut phase = Phase::new("PDF invoices");
+        phase.status = "doing".into();
+        phase.branch = Some("feat/pdf-invoices".into());
+        phase.worked_by = Some("claude-code".into());
+        phase.tasks = vec![
+            Task {
+                text: "Render the invoice".into(),
+                done: true,
+            },
+            Task {
+                text: "Attach it to the email".into(),
+                done: true,
+            },
+        ];
+        harness
+            .state()
+            .store
+            .as_ref()
+            .unwrap()
+            .add_plan(Some(&project), "Invoices", "", &[phase], "claude-code")
+            .unwrap()
+    };
+    let ideas = &mut harness.state_mut().workspaces[0].ideas;
+    for idea in &ideas.items {
+        ideas.toggled.insert(idea.id, false);
+    }
+    ideas.dirty = true;
+    settle(&mut harness);
+    save(&mut harness, &out, "8f-ideas-oferta-revision");
+    harness
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .delete_idea(Some(&project), finished)
+        .unwrap();
+    harness.state_mut().workspaces[0].ideas.toggled.clear();
+    harness.state_mut().workspaces[0].ideas.dirty = true;
+    settle(&mut harness);
     // Panel de Git con un cambio sin preparar.
     std::fs::write(
         project.join("README.md"),

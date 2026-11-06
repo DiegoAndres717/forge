@@ -351,6 +351,14 @@ pub struct IdeasView {
     /// Agentes que el dueño usa ahora, el primero el más a mano (ids): la terminal enfocada,
     /// las otras abiertas y el de serie. Los pone la app antes de dibujar.
     pub in_use: Vec<String>,
+    /// «Revisión de otra marca» (plan #84): se ofrece «Revisar con…» al terminar una fase.
+    /// Ajuste del proyecto; se relee con los planes.
+    pub offers: bool,
+    /// Ofertas de revisión descartadas (`cross_review::offer_id`). Se releen con los planes.
+    pub dismissed: std::collections::BTreeSet<String>,
+    /// Revisor cambiado a mano en la oferta de una fase: `offer_id` → agente. Solo mientras
+    /// Forge sigue abierto.
+    pub picked: HashMap<String, String>,
     /// Raíz del worktree principal del proyecto (se pide a Git una vez).
     pub repo: Option<PathBuf>,
     pub dirty: bool,
@@ -459,6 +467,9 @@ pub struct Workspace {
     pub tabs_below: bool,
     /// Terminales abiertas como revisor (solo lectura): `ask_agent` no escribe en ellas.
     reviewing: Vec<PanelId>,
+    /// Revisores abiertos: (agente, comando con el mensaje). Para las pruebas.
+    #[cfg(test)]
+    pub review_launches: Vec<(String, String)>,
     /// Terminales a las que se ofrece compactar (mucho contexto).
     compacting: Vec<PanelId>,
     /// Pasar la conversación de una terminal a otra cuenta: (terminal, cuenta). Lo
@@ -595,6 +606,8 @@ impl Workspace {
             limited: Vec::new(),
             tabs_below: false,
             reviewing: Vec::new(),
+            #[cfg(test)]
+            review_launches: Vec::new(),
             compacting: Vec::new(),
             handoff_request: None,
             agent_handoff_request: None,
@@ -1299,20 +1312,27 @@ impl Workspace {
 
     /// Abre un agente como revisor en un panel nuevo (nunca reutiliza el de quien trabaja): con
     /// su modo de solo lectura si lo tiene, y `prompt` como primer mensaje.
-    pub fn review_agent(&mut self, ctx: &egui::Context, id: &str, prompt: &str, area: Rect) {
+    /// `false` si no se pudo abrir (agente que no está o que no admite un mensaje inicial).
+    pub fn review_agent(
+        &mut self,
+        ctx: &egui::Context,
+        id: &str,
+        prompt: &str,
+        area: Rect,
+    ) -> bool {
         let Some(spec) = self.project.agents.iter().find(|a| a.id == id).cloned() else {
-            return;
+            return false;
         };
         let launch = spec
             .read_only(&spec.command)
             .unwrap_or_else(|| spec.command.clone());
         let Some(command) = spec.with_prompt(&launch, prompt) else {
-            return;
+            return false;
         };
         let state = PanelState {
             name: Some(format!("{} · {}", spec.name, tr!("Revisión"))),
             cwd: self.project.root(),
-            command: Some(command),
+            command: Some(command.clone()),
             process: None,
             agent: Some(spec.id.clone()),
             account: None,
@@ -1322,7 +1342,11 @@ impl Workspace {
         self.add_panel(ctx, dir, state);
         if self.panels.len() > before {
             self.reviewing.push(self.focus); // el panel nuevo toma el foco
+            #[cfg(test)]
+            self.review_launches.push((spec.id.clone(), command));
+            return true;
         }
+        false
     }
 
     /// La sesión (`FORGE_SESSION_ID`) que tendrá la próxima terminal que se abra: el registro
@@ -1965,6 +1989,15 @@ impl Workspace {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Terminales de revisión (solo lectura) abiertas (tests).
+    #[cfg(test)]
+    pub fn review_panel_count(&self) -> usize {
+        self.reviewing
+            .iter()
+            .filter(|id| self.panels.contains_key(id))
+            .count()
     }
 
     /// Orientación de la división del panel enfocado (tests).

@@ -537,6 +537,38 @@ impl App {
         self.sync_accounts();
     }
 
+    /// «Revisión de otra marca» (plan #84, en «Este proyecto»): si al terminar una fase Forge
+    /// ofrece revisarla con un agente de otra empresa. Nunca la abre solo.
+    fn cross_review_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(i) = self.active else { return };
+        let path = self.workspaces[i].project.path.clone();
+        let Some(store) = self.store.as_ref() else {
+            return;
+        };
+        let on = forge_core::cross_review::offers_enabled(store, &path);
+        let mut chosen = on;
+        theme::section(ui, tr!("Revisión de fases"));
+        theme::card(ui, |ui| {
+            row(
+                ui,
+                tr!("Revisión de otra marca"),
+                tr!(
+                    "Al terminar una fase (todas sus tareas tachadas), Forge ofrece un botón «Revisar con…» que la abre en una revisión de solo lectura con un agente de otra empresa: modelos distintos fallan en cosas distintas. Nunca empieza sola: si no lo pulsas, no pasa nada. Con «No ofrecer nunca» no aparece el botón, pero «Revisar» sigue en cada fase. Solo para este proyecto y en este ordenador."
+                ),
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.selectable_value(&mut chosen, true, tr!("Ofrecer siempre"));
+                        ui.selectable_value(&mut chosen, false, tr!("No ofrecer nunca"));
+                    });
+                },
+            );
+        });
+        if chosen != on {
+            self.db(|s| forge_core::cross_review::set_offers(s, &path, chosen));
+            self.workspaces[i].ideas.offers = chosen;
+        }
+    }
+
     /// Autoguardado del editor de archivos: guarda tras una pausa sin escribir.
     fn autosave_ui(&mut self, ui: &mut egui::Ui) {
         let mut on = self.autosave;
@@ -1033,6 +1065,7 @@ impl App {
                 }
             });
         });
+        self.cross_review_ui(ui);
         self.processes_form_ui(ui, cmds);
         self.guard_form_ui(ui, cmds);
         self.agents_form_ui(ui, cmds);
