@@ -25,6 +25,7 @@ pub mod parallel;
 pub mod ports;
 pub mod pr;
 pub mod project;
+pub mod review_stats;
 pub mod reviewers;
 pub mod router;
 pub mod secrets;

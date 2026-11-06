@@ -319,6 +319,8 @@ enum UiCmd {
     CommentSet(IdeasTarget, i64, bool),
     /// Borrar un comentario de revisión.
     CommentDelete(IdeasTarget, i64),
+    /// Lo que el dueño decide de un hallazgo: fallo real, estilo, descartado o pendiente.
+    CommentOutcome(IdeasTarget, i64, forge_core::review_stats::Outcome),
     MemorySave,
     /// Abre la memoria con el formulario de nota nueva.
     NewNote,
@@ -1225,6 +1227,7 @@ impl App {
             | UiCmd::PhaseAdd(..)
             | UiCmd::CommentSet(..)
             | UiCmd::CommentDelete(..)
+            | UiCmd::CommentOutcome(..)
             | UiCmd::LearnOpen(..)
             | UiCmd::LearnSave(..)
             | UiCmd::LearnDiscard(..)

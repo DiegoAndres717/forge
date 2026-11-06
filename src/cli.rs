@@ -19,6 +19,7 @@ Uso:
   forge guard commit|push|pr            comprueba si el proyecto está listo
   forge review                          Guard del commit con revisión con IA, aunque rules.toml no la pida
   forge review --judgment               lo mismo con el Juicio: dos jueces a ciegas que leen el proyecto
+  forge review-stats                    revisión por otra marca: fallos reales, estilo y descartados por pareja autor → revisor
   forge guard status                    reglas, hooks y excepciones del proyecto
   forge guard explain [commit|push|pr]  qué se exige en cada etapa
   forge guard allow <regla> --reason \"motivo\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -72,6 +73,7 @@ Usage:
   forge guard commit|push|pr            checks whether the project is ready
   forge review                          commit Guard with the AI review, even if rules.toml doesn't ask for it
   forge review --judgment               the same with the Judgment: two blind judges that read the project
+  forge review-stats                    cross-company review: real bugs, style and dismissed per author → reviewer pair
   forge guard status                    project rules, hooks and exceptions
   forge guard explain [commit|push|pr]  what each stage requires
   forge guard allow <rule> --reason \"reason\" [--scope commit|pull-request|session] [--stage commit|push|pr]
@@ -223,6 +225,7 @@ pub const COMMANDS: &[&str] = &[
     "memory",
     "plans",
     "review",
+    "review-stats",
     "secret",
     "status",
     "work-status",
@@ -314,6 +317,7 @@ pub fn run(args: &[String]) -> i32 {
         }),
         (Some("memory"), Some(action)) => memory_cli(&out, &project, action, &pos[2..], args),
         (Some("status"), _) => status_json(&project),
+        (Some("review-stats"), _) => review_stats(&out, &project),
         // Qué agente está en qué worktree y qué toca; con `--main-check`, el aviso del hook
         // cuando la rama principal cambió algo que esta sesión toca (una vez por cambio).
         (Some("work-status"), _) => open_store().map(|store| {
@@ -1762,6 +1766,18 @@ fn explain(out: &Out, project: &Path, only: Option<Stage>) -> Result<i32, String
                 "  revisión de seguridad (pendiente: aún no disponible)"
             ));
         }
+    }
+    Ok(0)
+}
+
+/// Revisión por otra empresa (plan #84, fase 3): cuántos hallazgos de cada pareja
+/// autor → revisor fueron fallos reales, estilo, descartados o siguen pendientes.
+fn review_stats(out: &Out, project: &Path) -> Result<i32, String> {
+    let store = open_store()?;
+    let comments = store.list_project_review_comments(Some(project))?;
+    let stats = forge_core::review_stats::summarize(&comments);
+    for line in forge_core::review_stats::render(&stats) {
+        out.line(&line);
     }
     Ok(0)
 }

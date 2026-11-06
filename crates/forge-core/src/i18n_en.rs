@@ -1446,6 +1446,33 @@ pub const EN: &[(&str, &str)] = &[
         "How it was resolved, or why it was not a mistake",
     ),
     (
+        "true si el comentario tenía razón (era un fallo y lo arreglaste); false si no era un fallo",
+        "true if the comment was right (it was a mistake and you fixed it); false if it was not a mistake",
+    ),
+    ("Aún no hay revisiones medidas", "No measured reviews yet"),
+    ("autor desconocido", "unknown author"),
+    ("Fallo real", "Real bug"),
+    ("Era estilo", "Just style"),
+    ("Descartado", "Dismissed"),
+    (
+        "Qué fue este hallazgo. Cuenta en el resumen de Ajustes > Este proyecto, que mide si la revisión de otra marca encuentra fallos de verdad. Descartado o estilo lo dan por resuelto.",
+        "What this finding turned out to be. It counts in the summary in Settings > This project, which measures whether the cross-company review finds real bugs. Dismissed or style marks it resolved.",
+    ),
+    ("Revisiones medidas", "Measured reviews"),
+    (
+        "Por cada pareja autor → revisor, cuántos hallazgos fueron fallos reales, cuántos de estilo, cuántos descartaste y cuántos siguen pendientes. Acierto: los fallos reales entre los ya decididos. Lo decides en cada comentario de la fase (Fallo real, Era estilo, Descartado); el agente que hizo la fase también lo dice al atenderlo (es el autor juzgando a su revisor: revísalo), y lo tuyo manda. Sirve para ver si la revisión de otra marca encuentra cosas de verdad o solo ruido. También con forge review-stats.",
+        "For each author → reviewer pair, how many findings were real bugs, how many were style, how many you dismissed and how many are still pending. Hit rate: real bugs among the ones already decided. You decide it on each comment of the phase (Real bug, Just style, Dismissed); the agent that did the phase also says so when it handles it (that is the author judging its reviewer: check it), and yours wins. It shows whether the cross-company review finds real things or just noise. Also with forge review-stats.",
+    ),
+    ("sin decidir", "undecided"),
+    (
+        "(el mismo agente, no otra marca)",
+        "(the same agent, not another company)",
+    ),
+    (
+        "{author} → {reviewer}: fallos reales {real} · estilo {style} · descartados {dismissed} · pendientes {pending} · acierto {rate}",
+        "{author} → {reviewer}: real bugs {real} · style {style} · dismissed {dismissed} · pending {pending} · hit rate {rate}",
+    ),
+    (
         "Comentario #{id} dejado en la fase {phase} del plan #{plan}.",
         "Comment #{id} left on phase {phase} of plan #{plan}.",
     ),

@@ -23,6 +23,20 @@ pub enum Company {
     Pi,
 }
 
+impl Company {
+    /// Su nombre (propio: no se traduce).
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Anthropic => "Anthropic",
+            Self::OpenAI => "OpenAI",
+            Self::Google => "Google",
+            Self::Alibaba => "Alibaba",
+            Self::OpenCode => "OpenCode",
+            Self::Pi => "Pi",
+        }
+    }
+}
+
 /// La empresa de cada agente que Forge sabe lanzar (`agents::builtins`), en un solo sitio.
 /// Un agente nuevo sin fila aquí hace fallar `every_launchable_agent_has_a_company`.
 const COMPANIES: &[(&str, Company)] = &[

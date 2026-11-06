@@ -372,6 +372,7 @@ impl App {
             UiCmd::IdeaSet(t, ..) | UiCmd::IdeaDelete(t, _) => *t,
             UiCmd::PhaseSet(t, ..) | UiCmd::TaskToggle(t, ..) | UiCmd::PhaseAdd(t, _) => *t,
             UiCmd::CommentSet(t, ..) | UiCmd::CommentDelete(t, _) => *t,
+            UiCmd::CommentOutcome(t, ..) => *t,
             UiCmd::LearnOpen(t, ..)
             | UiCmd::LearnSave(t, ..)
             | UiCmd::LearnDiscard(t, ..)
@@ -513,6 +514,9 @@ impl App {
             }
             UiCmd::CommentDelete(_, id) => {
                 self.db(|s| s.delete_review_comment(project, id));
+            }
+            UiCmd::CommentOutcome(_, id, outcome) => {
+                self.db(|s| s.set_review_outcome(project, id, outcome));
             }
             UiCmd::PhaseAdd(_, id) => {
                 let Some((_, title)) = view.phase_input.take() else {
@@ -697,6 +701,8 @@ impl App {
             return;
         };
         let path = ws.project.path.clone();
+        // Quién hizo la fase queda con la revisión: cada hallazgo lo lleva (plan #84, fase 3).
+        let author_id = ws.ideas.authors.get(&(id, phase)).map(|a| a.agent.clone());
         if !ws.review_agent(ctx, agent, &prompt, area) {
             // Sin terminal no hay revisión: ni se anota (la oferta seguiría oculta) ni se calla.
             let reason = match ws.project.agents.iter().find(|a| a.id == agent) {
@@ -708,7 +714,7 @@ impl App {
         }
         ws.ideas.open = false; // que se vea al revisor trabajando
         // Queda anotado cuándo empieza: de ahí salen el tiempo y la estimación de la fase.
-        self.db(|s| s.start_review_run(Some(&path), id, phase, agent));
+        self.db(|s| s.start_review_run(Some(&path), id, phase, agent, author_id.as_deref()));
         self.workspaces[i].ideas.dirty = true;
     }
 
@@ -1354,6 +1360,7 @@ fn review_comment_row(
                     .wrap(),
                 );
             }
+            outcome_row(ui, comment, target, cmds);
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
             if theme::icon_button_sized(
@@ -1368,6 +1375,42 @@ fn review_comment_row(
                 cmds.push(UiCmd::CommentDelete(target, comment.id));
             }
         });
+    });
+}
+
+/// Lo que el dueño decide del hallazgo (plan #84, fase 3): fallo real, era estilo o
+/// descartado. Pulsar el elegido lo deja pendiente otra vez.
+fn outcome_row(
+    ui: &mut egui::Ui,
+    comment: &forge_core::ideas::ReviewComment,
+    target: IdeasTarget,
+    cmds: &mut Vec<UiCmd>,
+) {
+    use forge_core::review_stats::Outcome;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        for (outcome, label) in [
+            (Outcome::Accepted, tr!("Fallo real")),
+            (Outcome::Style, tr!("Era estilo")),
+            (Outcome::Dismissed, tr!("Descartado")),
+        ] {
+            let chosen = comment.outcome == outcome;
+            let text = RichText::new(label).size(10.5).color(if chosen {
+                theme::TEXT
+            } else {
+                theme::TEXT_3
+            });
+            let clicked = ui
+                .selectable_label(chosen, text)
+                .on_hover_text(tr!(
+                    "Qué fue este hallazgo. Cuenta en el resumen de Ajustes > Este proyecto, que mide si la revisión de otra marca encuentra fallos de verdad. Descartado o estilo lo dan por resuelto."
+                ))
+                .clicked();
+            if clicked {
+                let next = if chosen { Outcome::Pending } else { outcome };
+                cmds.push(UiCmd::CommentOutcome(target, comment.id, next));
+            }
+        }
     });
 }
 
