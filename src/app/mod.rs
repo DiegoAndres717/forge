@@ -296,6 +296,10 @@ enum UiCmd {
     PlanWithAgent(i64),
     /// Revisar una fase con el agente elegido: (plan, fase, id del agente).
     ReviewPhase(i64, usize, String),
+    /// Cambiar el revisor que se ofrece al terminar una fase: (plan, id de la fase, agente).
+    ReviewOfferPick(i64, String, String),
+    /// Descartar la oferta de revisión de una fase (se recuerda): (plan, id de la fase).
+    ReviewOfferDismiss(i64, String),
     /// Mandar los comentarios abiertos de una fase al agente elegido para que los corrija:
     /// (plan, fase, id del agente).
     FixPhase(i64, usize, String),
@@ -1227,6 +1231,20 @@ impl App {
             | UiCmd::LearnClose(..) => self.apply_idea(cmd),
             UiCmd::PlanWithAgent(id) => self.plan_with_agent(ctx, id, area),
             UiCmd::ReviewPhase(id, phase, agent) => self.review_phase(ctx, id, phase, &agent, area),
+            UiCmd::ReviewOfferPick(plan, phase, agent) => {
+                if let Some(i) = self.active {
+                    let id = forge_core::cross_review::offer_id(plan, &phase);
+                    self.workspaces[i].ideas.picked.insert(id, agent);
+                }
+            }
+            UiCmd::ReviewOfferDismiss(plan, phase) => {
+                if let Some(i) = self.active {
+                    let path = self.workspaces[i].project.path.clone();
+                    self.db(|s| forge_core::cross_review::dismiss(s, &path, plan, &phase));
+                    let id = forge_core::cross_review::offer_id(plan, &phase);
+                    self.workspaces[i].ideas.dismissed.insert(id);
+                }
+            }
             UiCmd::FixPhase(id, phase, agent) => self.fix_phase(ctx, id, phase, &agent, area),
             UiCmd::LaunchParallel(id, phases, agent) => {
                 self.launch_parallel(ctx, id, &phases, &agent, area)

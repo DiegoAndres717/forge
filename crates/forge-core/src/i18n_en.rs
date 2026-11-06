@@ -3285,4 +3285,31 @@ pub const EN: &[(&str, &str)] = &[
         "Puertos de este worktree: +{n} (FORGE_PORT_OFFSET={n}): un servidor que va en el 3000 aquí va en el {p}.",
         "Ports for this worktree: +{n} (FORGE_PORT_OFFSET={n}): a server that runs on 3000 goes on {p} here.",
     ),
+    (
+        "{unable} no admite empezar con un mensaje, así que no puede recibir la fase: se propone {agent}.",
+        "{unable} can't start with a message, so it can't receive the phase: {agent} is proposed instead.",
+    ),
+    (
+        "Revisor: {agent} (elegido por ti)",
+        "Reviewer: {agent} (chosen by you)",
+    ),
+    ("Revisar con {agent}", "Review with {agent}"),
+    (
+        "La fase está terminada: ábrela en una revisión de solo lectura con este agente. Si no lo pulsas, no se abre nada.",
+        "The phase is finished: open it in a read-only review with this agent. Nothing opens unless you click.",
+    ),
+    ("Cambiar revisor", "Change reviewer"),
+    ("otra empresa", "another company"),
+    (
+        "Descartar la oferta de revisión",
+        "Dismiss the review offer",
+    ),
+    ("Revisión de fases", "Phase review"),
+    ("Revisión de otra marca", "Cross-company review"),
+    (
+        "Al terminar una fase (todas sus tareas tachadas), Forge ofrece un botón «Revisar con…» que la abre en una revisión de solo lectura con un agente de otra empresa: modelos distintos fallan en cosas distintas. Nunca empieza sola: si no lo pulsas, no pasa nada. Con «No ofrecer nunca» no aparece el botón, pero «Revisar» sigue en cada fase. Solo para este proyecto y en este ordenador.",
+        "When a phase is finished (all its tasks ticked), Forge offers a \"Review with…\" button that opens it in a read-only review with an agent from another company: different models miss different things. It never starts by itself: if you don't click, nothing happens. With \"Never offer\" the button doesn't show, but \"Review\" stays on every phase. Only for this project and on this computer.",
+    ),
+    ("Ofrecer siempre", "Always offer"),
+    ("No ofrecer nunca", "Never offer"),
 ];

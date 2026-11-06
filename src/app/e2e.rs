@@ -5077,3 +5077,161 @@ fn launching_in_parallel_refuses_a_phase_without_a_branch_or_an_agent_without_a_
     drop(h);
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Plan #84, fase 2: un proyecto con Claude Code y Codex «instalados» (comandos que solo
+/// escriben, para no abrir agentes de verdad) y una fase terminada que hizo Claude Code.
+/// Devuelve el arnés con el panel de planes abierto y el plan cargado.
+fn finished_phase(name: &str, agents: &[&str], setup: impl FnOnce(&App)) -> Harness<'static, App> {
+    use forge_core::ideas::{Phase, Task};
+    let dir = project(name);
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    let toml: String = agents
+        .iter()
+        .map(|id| format!("[[agents]]\nid = \"{id}\"\ncommand = \"{echo} {id}:\"\n"))
+        .collect();
+    std::fs::write(dir.join(".forge/agents.toml"), toml).unwrap();
+    let mut h = app(dir);
+    // Solo los de la prueba: los agentes instalados de verdad en esta máquina no cuentan.
+    for a in ws_mut(h.state_mut()).project.agents.iter_mut() {
+        a.enabled = agents.contains(&a.id.as_str());
+    }
+    // Instalados (simulados) tras la detección de fondo, que si no los pisa.
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    h.state().agents.lock().unwrap().insert(
+        echo.into(),
+        forge_core::agents::Detection {
+            path: Some(format!("/bin/{echo}").into()),
+            version: None,
+        },
+    );
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Webhook");
+    phase.branch = Some("feat/webhook".into());
+    phase.status = "doing".into();
+    phase.worked_by = Some("claude-code".into());
+    phase.tasks = vec![Task {
+        text: "Reintentos".into(),
+        done: true,
+    }];
+    h.state_mut()
+        .db(|s| s.add_plan(Some(&path), "Recibos", "", &[phase], "claude-code"))
+        .unwrap();
+    setup(h.state());
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    ws_mut(h.state_mut()).ideas.open = true;
+    wait_until(&mut h, "plan cargado", |a| !ws(a).ideas.items.is_empty());
+    h.run_steps(3);
+    h
+}
+
+/// Al terminar una fase Forge ofrece «Revisar con <revisor de otra empresa>», pero sin pulsar
+/// no se abre nada ni se anota ninguna revisión. Al pulsar, se abre la terminal de solo
+/// lectura del revisor (Codex, no Claude Code que la hizo) con el brief de la fase.
+#[test]
+fn a_finished_phase_offers_a_cross_review_that_only_starts_when_clicked() {
+    let _serial = serial();
+    let mut h = finished_phase("offer-click", &["claude", "codex"], |_| {});
+    assert!(
+        h.query_by_label_contains("Revisar con Codex").is_some(),
+        "se ofrece el revisor de otra empresa"
+    );
+    // Sin pulsar: nada se abre ni se escribe.
+    h.run_steps(10);
+    assert_eq!(ws(h.state()).panel_count(), 1, "no se abre ningún revisor");
+    assert!(ws(h.state()).ideas.runs.is_empty(), "no se anota revisión");
+    h.get_by_label_contains("Revisar con Codex").click();
+    wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
+    let launched = &ws(h.state()).review_launches;
+    assert_eq!(launched.len(), 1);
+    let (agent, command) = &launched[0];
+    assert_eq!(agent, "codex", "revisa el de otra empresa");
+    assert_eq!(
+        ws(h.state()).review_panel_count(),
+        1,
+        "terminal de solo lectura"
+    );
+    // Una línea del brief sin comillas (en Windows se escapan distinto).
+    assert!(command.contains("review_comment_add (plan="), "{command}");
+    assert!(command.contains("[bug/high]"), "{command}");
+}
+
+/// Descartar la oferta la oculta en esa fase, y se recuerda.
+#[test]
+fn a_dismissed_cross_review_offer_stays_hidden() {
+    let _serial = serial();
+    let mut h = finished_phase("offer-dismiss", &["claude", "codex"], |_| {});
+    h.get_by_label("Descartar la oferta de revisión").click();
+    h.run_steps(3);
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "se relee", |a| !ws(a).ideas.dirty);
+    h.run_steps(3);
+    assert!(h.query_by_label_contains("Revisar con Codex").is_none());
+    let path = ws(h.state()).project.path.clone();
+    let store = h.state().store.as_ref().unwrap();
+    assert_eq!(forge_core::cross_review::dismissed(store, &path).len(), 1);
+    assert_eq!(ws(h.state()).panel_count(), 1, "no se abre nada");
+}
+
+/// Con «No ofrecer nunca» no aparece la oferta, pero «Revisar» sigue como siempre.
+#[test]
+fn with_offers_off_only_the_manual_review_button_remains() {
+    let _serial = serial();
+    let h = finished_phase("offer-never", &["claude", "codex"], |a| {
+        let path = ws(a).project.path.clone();
+        forge_core::cross_review::set_offers(a.store.as_ref().unwrap(), &path, false).unwrap();
+    });
+    assert!(h.query_by_label_contains("Revisar con Codex").is_none());
+    assert!(
+        h.query_by_label_contains("Revisar").is_some(),
+        "«Revisar» sigue"
+    );
+}
+
+/// Si el revisor que tocaría (Gemini CLI, de otra empresa) no admite un mensaje inicial, se
+/// ofrece otro y se dice por qué.
+#[test]
+fn a_reviewer_without_an_initial_message_is_not_offered_first() {
+    let _serial = serial();
+    let h = finished_phase("offer-no-prompt", &["claude", "gemini"], |_| {});
+    assert!(h.query_by_label_contains("Revisar con Gemini").is_none());
+    assert!(
+        h.query_by_label_contains("Revisar con Claude Code")
+            .is_some()
+    );
+    assert!(
+        h.query_by_label_contains("Gemini CLI no admite empezar con un mensaje")
+            .is_some(),
+        "se dice en texto"
+    );
+}
+
+/// «Revisión de otra marca» se elige en Ajustes > Este proyecto (no en General) y se guarda.
+#[test]
+fn the_cross_review_setting_is_in_the_project_settings_tab() {
+    let _serial = serial();
+    let mut h = app(project("offer-setting"));
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::General);
+    h.state_mut().settings_open = true;
+    h.run_steps(4);
+    assert!(
+        h.query_by_label("Revisión de otra marca").is_none(),
+        "General no lo trae"
+    );
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::Project);
+    h.run_steps(4);
+    assert!(
+        h.query_by_label("Revisión de otra marca").is_some(),
+        "Este proyecto lo trae"
+    );
+    h.get_by_label("No ofrecer nunca").click();
+    h.run_steps(3);
+    let path = ws(h.state()).project.path.clone();
+    let store = h.state().store.as_ref().unwrap();
+    assert!(!forge_core::cross_review::offers_enabled(store, &path));
+}

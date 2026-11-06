@@ -1,11 +1,12 @@
 // Revisión por otra empresa (plan #84): qué agente hizo una fase, de qué empresa es, y qué
 // agente instalado de otra empresa debería revisarla. Solo elige y explica: abrir la
 // revisión sigue siendo el botón «Revisar».
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::activity::Activity;
 use crate::agents::AgentSpec;
-use crate::store::ActiveAgentSession;
+use crate::store::{ActiveAgentSession, Store};
 use crate::worktrees::Record;
 
 /// Quién hace el agente (el modelo de serie que trae). Modelos de empresas distintas fallan en
@@ -209,6 +210,87 @@ pub fn choose(author: Option<&str>, candidates: &[&str], in_use: &[&str]) -> Opt
         });
     }
     pick(candidates, why)
+}
+
+/// Lo que Forge ofrece al terminar una fase: el revisor y, si el mejor no puede empezar con
+/// un mensaje (Gemini CLI, Qwen Code, Pi: no recibirían la fase), cuál era, para decirlo.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Offer {
+    pub choice: Choice,
+    /// El revisor que tocaba y no admite un mensaje inicial (su id).
+    pub unable: Option<String>,
+}
+
+/// El revisor que se ofrece. `installed`: los agentes instalados y activos con si admiten un
+/// mensaje inicial, en el orden de la lista de agentes. Se elige entre todos (como si todos
+/// pudieran); si el elegido no admite mensaje, se propone el mejor de los que sí, y se dice.
+pub fn offer(author: Option<&str>, installed: &[(&str, bool)], in_use: &[&str]) -> Option<Offer> {
+    let all: Vec<&str> = installed.iter().map(|(id, _)| *id).collect();
+    let able: Vec<&str> = installed
+        .iter()
+        .filter(|(_, prompt)| *prompt)
+        .map(|(id, _)| *id)
+        .collect();
+    let best = choose(author, &all, in_use)?;
+    if able.contains(&best.agent.as_str()) {
+        return Some(Offer {
+            choice: best,
+            unable: None,
+        });
+    }
+    Some(Offer {
+        choice: choose(author, &able, in_use)?,
+        unable: Some(best.agent),
+    })
+}
+
+/// Clave del ajuste «Revisión de otra marca» de un proyecto (tabla de ajustes del almacén).
+fn offers_key(project: &Path) -> String {
+    format!("cross-review-offer:{}", project.display())
+}
+
+/// Clave de las ofertas descartadas de un proyecto.
+fn dismissed_key(project: &Path) -> String {
+    format!("cross-review-dismissed:{}", project.display())
+}
+
+/// ¿Ofrece Forge «Revisar con…» al terminar una fase de este proyecto? Sí, salvo que el
+/// dueño eligiera «No ofrecer nunca».
+pub fn offers_enabled(store: &Store, project: &Path) -> bool {
+    store
+        .setting(&offers_key(project))
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("never")
+}
+
+pub fn set_offers(store: &Store, project: &Path, on: bool) -> Result<(), String> {
+    store.set_setting(&offers_key(project), if on { "" } else { "never" })
+}
+
+/// Una oferta descartada se recuerda por fase: `plan:id estable de la fase`.
+pub fn offer_id(plan: i64, phase_id: &str) -> String {
+    format!("{plan}:{phase_id}")
+}
+
+/// Las ofertas descartadas del proyecto (`offer_id`).
+pub fn dismissed(store: &Store, project: &Path) -> BTreeSet<String> {
+    store
+        .setting(&dismissed_key(project))
+        .ok()
+        .flatten()
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default()
+}
+
+pub fn dismiss(store: &Store, project: &Path, plan: i64, phase_id: &str) -> Result<(), String> {
+    let mut ids = dismissed(store, project);
+    if ids.insert(offer_id(plan, phase_id)) {
+        let json = serde_json::to_string(&ids).map_err(|e| e.to_string())?;
+        store.set_setting(&dismissed_key(project), &json)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -483,5 +565,53 @@ mod tests {
             Some("claude".into())
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reviewer_that_cannot_start_with_a_message_is_not_offered_first() {
+        // Gemini CLI es de otra empresa y el dueño lo usa, pero no puede recibir la fase.
+        let installed = [("claude", true), ("gemini", false), ("codex", true)];
+        let offer = offer(Some("claude"), &installed, &["gemini", "claude"]).unwrap();
+        assert_eq!(offer.choice.agent, "codex");
+        assert_eq!(offer.choice.why, Why::OtherCompany("claude".into()));
+        assert_eq!(
+            offer.unable.as_deref(),
+            Some("gemini"),
+            "se dice por qué no"
+        );
+        // Si el que toca sí puede, nada que decir.
+        let offer = super::offer(Some("claude"), &installed, &["codex"]).unwrap();
+        assert_eq!((offer.choice.agent.as_str(), offer.unable), ("codex", None));
+        // Nadie que pueda recibir la fase: no hay oferta.
+        assert!(super::offer(Some("claude"), &[("gemini", false)], &[]).is_none());
+    }
+
+    #[test]
+    fn the_offer_setting_is_on_by_default_and_per_project() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = (Path::new("/p/a"), Path::new("/p/b"));
+        assert!(offers_enabled(&store, a), "por defecto se ofrece");
+        set_offers(&store, a, false).unwrap();
+        assert!(!offers_enabled(&store, a));
+        assert!(offers_enabled(&store, b), "cada proyecto tiene el suyo");
+        set_offers(&store, a, true).unwrap();
+        assert!(offers_enabled(&store, a));
+    }
+
+    #[test]
+    fn a_dismissed_offer_is_remembered_per_phase() {
+        let store = Store::in_memory().unwrap();
+        let (a, b) = (Path::new("/p/a"), Path::new("/p/b"));
+        assert!(dismissed(&store, a).is_empty());
+        dismiss(&store, a, 7, "x1").unwrap();
+        dismiss(&store, a, 7, "x1").unwrap();
+        dismiss(&store, a, 8, "x1").unwrap();
+        let ids = dismissed(&store, a);
+        assert_eq!(ids.len(), 2, "{ids:?}");
+        assert!(ids.contains(&offer_id(7, "x1")) && ids.contains(&offer_id(8, "x1")));
+        assert!(
+            dismissed(&store, b).is_empty(),
+            "otro proyecto no se entera"
+        );
     }
 }

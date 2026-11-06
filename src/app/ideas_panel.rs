@@ -119,6 +119,11 @@ impl App {
         let runs = view.runs.clone();
         let authors = view.authors.clone();
         let in_use = view.in_use.clone();
+        let offer = OfferCtx {
+            on: view.offers && target.is_some(),
+            dismissed: view.dismissed.clone(),
+            picked: view.picked.clone(),
+        };
         let input = ui.add(
             theme::field(egui::TextEdit::singleline(&mut view.input))
                 .hint_text(tr!("Nueva idea para el backlog… (Enter)"))
@@ -180,6 +185,7 @@ impl App {
                 launchers: &launchers,
                 authors: &authors,
                 in_use: &in_use,
+                offer: &offer,
             };
             if let Some(edit) = editing.as_mut().filter(|e| e.0 == idea.id) {
                 edit_card(edit, target, ui, cmds);
@@ -296,11 +302,23 @@ impl App {
                     .db(|s| s.list_review_runs(Some(&path)))
                     .unwrap_or_default();
                 let authors = self.phase_authors(i, &items);
+                let (offers, dismissed) = self
+                    .store
+                    .as_ref()
+                    .map(|s| {
+                        (
+                            forge_core::cross_review::offers_enabled(s, &path),
+                            forge_core::cross_review::dismissed(s, &path),
+                        )
+                    })
+                    .unwrap_or_default();
                 let ws = &mut self.workspaces[i];
                 let view = &mut ws.ideas;
                 view.comments = comments;
                 view.runs = runs;
                 view.authors = authors;
+                view.offers = offers;
+                view.dismissed = dismissed;
                 let new_plan = view
                     .loaded
                     .is_some()
@@ -751,6 +769,16 @@ struct ItemCtx<'a> {
     authors: &'a HashMap<(i64, usize), forge_core::cross_review::Author>,
     /// Agentes que el dueño usa ahora (ids), el más a mano primero.
     in_use: &'a [String],
+    /// La oferta de revisión al terminar una fase (plan #84).
+    offer: &'a OfferCtx,
+}
+
+/// Lo que decide la oferta «Revisar con…» de cada fase terminada.
+struct OfferCtx {
+    /// El proyecto la quiere (Ajustes) y es un proyecto (no la lista general).
+    on: bool,
+    dismissed: std::collections::BTreeSet<String>,
+    picked: HashMap<String, String>,
 }
 
 /// Cabecera de sección: `EN PROGRESO  2`.
@@ -1118,14 +1146,23 @@ fn phase_row(
                     }
                 }
             });
+            if let Some(agent) = offered_reviewer(idea.id, index, phase, ctx) {
+                offer_row(ui, idea.id, index, phase, &agent, ctx, cmds);
+            }
             if phase.reviewable()
-                && let Some((line, hover)) = reviewer_line(idea.id, index, ctx)
+                && let Some((line, hover, note)) = reviewer_line(idea.id, index, phase, ctx)
             {
                 let label = ui.add(
                     egui::Label::new(RichText::new(line).size(11.0).color(theme::TEXT_3)).wrap(),
                 );
                 if let Some(hover) = hover {
                     label.on_hover_text(hover);
+                }
+                if let Some(note) = note {
+                    ui.add(
+                        egui::Label::new(RichText::new(note).size(11.0).color(theme::ORANGE))
+                            .wrap(),
+                    );
                 }
             }
             if open {
@@ -1433,26 +1470,31 @@ fn fix_button(
 
 /// «Revisor: Codex (otra empresa que Claude Code)»: quién revisaría la fase y por qué (plan
 /// #84), y en la ayuda quién la hizo según qué. Solo texto: el botón «Revisar» sigue igual.
-fn reviewer_line(plan: i64, index: usize, ctx: &ItemCtx) -> Option<(String, Option<String>)> {
-    use forge_core::cross_review::{Source, Why, choose};
+fn reviewer_line(
+    plan: i64,
+    index: usize,
+    phase: &Phase,
+    ctx: &ItemCtx,
+) -> Option<(String, Option<String>, Option<String>)> {
+    use forge_core::cross_review::{Source, Why};
     let author = ctx.authors.get(&(plan, index));
-    let candidates: Vec<&str> = ctx.reviewers.iter().map(|(id, _, _)| id.as_str()).collect();
-    let in_use: Vec<&str> = ctx.in_use.iter().map(String::as_str).collect();
-    let choice = choose(author.map(|a| a.agent.as_str()), &candidates, &in_use)?;
-    let name = |id: &str| {
-        ctx.reviewers
-            .iter()
-            .find(|(a, _, _)| a == id)
-            .map(|(_, name, _)| name.clone())
-            .or_else(|| {
-                forge_core::agents::builtins()
-                    .into_iter()
-                    .find(|a| a.id == id)
-                    .map(|a| a.name)
-            })
-            .unwrap_or_else(|| id.to_string())
-    };
-    let agent = name(&choice.agent);
+    let offer = phase_reviewer(plan, index, ctx)?;
+    let choice = &offer.choice;
+    let agent = agent_name(&choice.agent, ctx);
+    let name = |id: &str| agent_name(id, ctx);
+    // No admite empezar con un mensaje: se dice por qué no se propone.
+    let note = offer.unable.as_deref().map(|unable| {
+        tr!(
+            "{unable} no admite empezar con un mensaje, así que no puede recibir la fase: se propone {agent}.",
+            unable = name(unable),
+            agent = agent
+        )
+        .to_string()
+    });
+    if let Some(picked) = picked_reviewer(plan, phase, ctx) {
+        let line = tr!("Revisor: {agent} (elegido por ti)", agent = name(picked));
+        return Some((line.to_string(), None, note));
+    }
     let line = match &choice.why {
         Why::OtherCompany(a) => tr!(
             "Revisor: {agent} (otra empresa que {author})",
@@ -1491,7 +1533,155 @@ fn reviewer_line(plan: i64, index: usize, ctx: &ItemCtx) -> Option<(String, Opti
             from = from
         )
     });
-    Some((line.to_string(), hover.map(|h| h.to_string())))
+    Some((line.to_string(), hover.map(|h| h.to_string()), note))
+}
+
+/// Nombre de un agente por su id (el del proyecto, el conocido o el id tal cual).
+fn agent_name(id: &str, ctx: &ItemCtx) -> String {
+    ctx.launchers
+        .iter()
+        .chain(ctx.reviewers)
+        .find(|(a, _, _)| a == id)
+        .map(|(_, name, _)| name.clone())
+        .or_else(|| {
+            forge_core::agents::builtins()
+                .into_iter()
+                .find(|a| a.id == id)
+                .map(|a| a.name)
+        })
+        .unwrap_or_else(|| id.to_string())
+}
+
+/// El revisor de otra empresa de una fase (plan #84), entre los agentes instalados; si el que
+/// toca no admite empezar con un mensaje, el mejor que sí (y cuál no pudo).
+fn phase_reviewer(
+    plan: i64,
+    index: usize,
+    ctx: &ItemCtx,
+) -> Option<forge_core::cross_review::Offer> {
+    let author = ctx.authors.get(&(plan, index)).map(|a| a.agent.as_str());
+    // Los instalados; sin la lista de lanzadores, los que pueden revisar.
+    let installed: Vec<(&str, bool)> = if ctx.launchers.is_empty() {
+        ctx.reviewers
+            .iter()
+            .map(|(id, _, _)| (id.as_str(), true))
+            .collect()
+    } else {
+        ctx.launchers
+            .iter()
+            .map(|(id, _, prompt)| (id.as_str(), *prompt))
+            .collect()
+    };
+    let in_use: Vec<&str> = ctx.in_use.iter().map(String::as_str).collect();
+    forge_core::cross_review::offer(author, &installed, &in_use)
+        .filter(|o| ctx.reviewers.iter().any(|(id, _, _)| *id == o.choice.agent))
+}
+
+/// El revisor que el dueño eligió a mano en la oferta de la fase, si sigue pudiendo revisar.
+fn picked_reviewer<'a>(plan: i64, phase: &Phase, ctx: &'a ItemCtx) -> Option<&'a str> {
+    let picked = ctx
+        .offer
+        .picked
+        .get(&forge_core::cross_review::offer_id(plan, &phase.id))?;
+    ctx.reviewers
+        .iter()
+        .any(|(id, _, _)| id == picked)
+        .then_some(picked.as_str())
+}
+
+/// ¿Se ofrece revisar la fase? Terminada, con el ajuste del proyecto en «ofrecer», sin
+/// descartar y sin ninguna revisión empezada. El agente que se ofrece (id).
+fn offered_reviewer(plan: i64, index: usize, phase: &Phase, ctx: &ItemCtx) -> Option<String> {
+    if !ctx.offer.on || phase.id.is_empty() || !phase.offer_ready() {
+        return None;
+    }
+    let id = forge_core::cross_review::offer_id(plan, &phase.id);
+    let reviewed = ctx
+        .runs
+        .iter()
+        .any(|r| r.plan_id == plan && r.phase_id == phase.id);
+    if reviewed || ctx.offer.dismissed.contains(&id) {
+        return None;
+    }
+    picked_reviewer(plan, phase, ctx)
+        .map(String::from)
+        .or_else(|| phase_reviewer(plan, index, ctx).map(|o| o.choice.agent))
+}
+
+/// La oferta al terminar una fase: «Revisar con <revisor>» (lo único que abre algo), cambiar
+/// de revisor (otro agente que pueda recibir la fase; se dice cuáles son de otra empresa) y
+/// descartarla para esta fase.
+fn offer_row(
+    ui: &mut egui::Ui,
+    plan: i64,
+    index: usize,
+    phase: &Phase,
+    agent: &str,
+    ctx: &ItemCtx,
+    cmds: &mut Vec<UiCmd>,
+) {
+    use forge_core::cross_review::company;
+    let author = ctx.authors.get(&(plan, index)).map(|a| a.agent.as_str());
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        let label = format!(
+            "{} {}",
+            icon::MAGNIFYING_GLASS,
+            tr!("Revisar con {agent}", agent = agent_name(agent, ctx))
+        );
+        let review = ui
+            .add(
+                egui::Button::new(RichText::new(label).size(11.5).color(Color32::WHITE).strong())
+                    .fill(theme::ACCENT)
+                    .corner_radius(5.0),
+            )
+            .on_hover_text(tr!(
+                "La fase está terminada: ábrela en una revisión de solo lectura con este agente. Si no lo pulsas, no se abre nada."
+            ));
+        if review.clicked() {
+            cmds.push(UiCmd::ReviewPhase(plan, index, agent.to_string()));
+        }
+        let change = ui.add(
+            egui::Button::new(
+                RichText::new(format!("{} {}", tr!("Cambiar revisor"), icon::CARET_DOWN))
+                    .size(11.0)
+                    .color(theme::TEXT_3),
+            )
+            .frame(false),
+        );
+        egui::Popup::menu(&change).show(|ui| {
+            ui.set_min_width(220.0);
+            ui.label(
+                RichText::new(tr!("Revisar con…"))
+                    .size(11.0)
+                    .color(theme::TEXT_3),
+            );
+            let theirs = author.and_then(company);
+            for (id, name, _) in ctx.reviewers.iter().filter(|(id, _, _)| id != agent) {
+                let other = theirs.is_some_and(|t| company(id).is_some_and(|c| c != t));
+                let label = if other {
+                    format!("{name} · {}", tr!("otra empresa"))
+                } else {
+                    name.clone()
+                };
+                if ui.button(label).clicked() {
+                    cmds.push(UiCmd::ReviewOfferPick(plan, phase.id.clone(), id.clone()));
+                    ui.close();
+                }
+            }
+        });
+        if theme::icon_button_sized(
+            ui,
+            icon::X,
+            tr!("Descartar la oferta de revisión"),
+            18.0,
+            theme::TEXT_3,
+        )
+        .clicked()
+        {
+            cmds.push(UiCmd::ReviewOfferDismiss(plan, phase.id.clone()));
+        }
+    });
 }
 
 /// «Revisar»: un menú con los agentes que pueden revisar la fase; el elegido abre su terminal.

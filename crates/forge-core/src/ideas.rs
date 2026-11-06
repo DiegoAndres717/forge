@@ -197,6 +197,12 @@ impl Phase {
         self.branch.is_some() && self.status == "doing" && left <= 1
     }
 
+    /// ¿Terminada, como para ofrecer su revisión sin que nadie la pida? Se puede revisar y
+    /// tiene todas sus tareas tachadas (sin tareas no se sabe cuándo acaba: no se ofrece).
+    pub fn offer_ready(&self) -> bool {
+        self.reviewable() && !self.tasks.is_empty() && self.tasks.iter().all(|t| t.done)
+    }
+
     pub fn new(title: &str) -> Self {
         Phase {
             title: title.trim().to_string(),
@@ -2405,6 +2411,27 @@ mod tests {
             !bare.contains("written by") && !bare.contains("worktree `"),
             "{bare}"
         );
+    }
+
+    #[test]
+    fn a_phase_is_offered_for_review_once_all_its_tasks_are_ticked() {
+        let task = |done| Task {
+            text: "t".into(),
+            done,
+        };
+        let mut p = Phase::new("Webhook");
+        p.status = "doing".into();
+        p.branch = Some("feat/x".into());
+        assert!(!p.offer_ready(), "sin tareas no se sabe cuándo acaba");
+        p.tasks = vec![task(true), task(false)];
+        assert!(p.reviewable() && !p.offer_ready(), "le queda una");
+        p.tasks[1].done = true;
+        assert!(p.offer_ready());
+        p.branch = None;
+        assert!(!p.offer_ready(), "sin rama no hay qué revisar");
+        p.branch = Some("feat/x".into());
+        p.status = "done".into();
+        assert!(!p.offer_ready(), "ya está en main");
     }
 
     #[test]
