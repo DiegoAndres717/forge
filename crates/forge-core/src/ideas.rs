@@ -236,6 +236,24 @@ pub struct PhaseChange<'a> {
     /// Tarea (índice desde 0) a marcar como hecha o no.
     pub task: Option<(usize, bool)>,
     pub add_task: Option<&'a str>,
+    /// Tarea (índice desde 0) a renombrar, con su texto nuevo; si estaba tachada, sigue así.
+    pub rename_task: Option<(usize, &'a str)>,
+    /// Tarea (índice desde 0) a borrar. Las siguientes de la misma fase suben un número
+    /// (borrar la 2.2 hace de la 2.3 la 2.2); las demás fases no cambian.
+    pub remove_task: Option<usize>,
+}
+
+/// La tarea `task` (desde 0) de la fase `index` (desde 0), o el error que lo explica.
+fn phase_task(phase: &mut Phase, index: usize, task: usize) -> Result<&mut Task, String> {
+    let tasks = phase.tasks.len();
+    phase.tasks.get_mut(task).ok_or_else(|| {
+        tr!(
+            "la fase {n} tiene {tasks} tareas; no existe la tarea {t}",
+            n = index + 1,
+            tasks = tasks,
+            t = task + 1
+        )
+    })
 }
 
 /// Estado de un plan según sus fases: todas completadas → completado; alguna empezada →
@@ -663,17 +681,27 @@ impl Store {
                 done: false,
             });
         }
+        // Borrar una tarea cambia los números de las siguientes: junto a otro cambio de una
+        // tarea no se sabría a cuál se refiere.
+        if change.remove_task.is_some() && (change.task.is_some() || change.rename_task.is_some()) {
+            return Err(tr!(
+                "borra la tarea en un cambio aparte: los números de las siguientes cambian"
+            )
+            .into());
+        }
         if let Some((task, done)) = change.task {
-            let tasks = phase.tasks.len();
-            let item = phase.tasks.get_mut(task).ok_or_else(|| {
-                tr!(
-                    "la fase {n} tiene {tasks} tareas; no existe la tarea {t}",
-                    n = index + 1,
-                    tasks = tasks,
-                    t = task + 1
-                )
-            })?;
-            item.done = done;
+            phase_task(phase, index, task)?.done = done;
+        }
+        if let Some((task, text)) = change.rename_task {
+            let text = text.trim();
+            if text.is_empty() {
+                return Err(tr!("el texto nuevo de la tarea está vacío").into());
+            }
+            phase_task(phase, index, task)?.text = text.to_string();
+        }
+        if let Some(task) = change.remove_task {
+            phase_task(phase, index, task)?;
+            phase.tasks.remove(task);
         }
         self.set_phases(project, id, &phases, by)
     }
@@ -2748,6 +2776,104 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(store.get_idea(p, idea).unwrap().unwrap().phases.len(), 1);
+    }
+
+    #[test]
+    fn a_task_is_removed_or_renamed_without_touching_the_other_phases() {
+        let store = Store::in_memory().unwrap();
+        let p = Some(Path::new("/p/forge"));
+        let task = |text: &str, done: bool| Task {
+            text: text.into(),
+            done,
+        };
+        let mut first = Phase::new("Modelo");
+        first.branch = Some("feat/model".into());
+        first.tasks = vec![task("Migración", true)];
+        let mut second = Phase::new("Panel");
+        second.branch = Some("feat/panel".into());
+        second.tasks = vec![
+            task("Lista", true),
+            task("Botón sobrante", false),
+            task("Filtros", true),
+        ];
+        let mut third = Phase::new("Exportar");
+        third.branch = Some("feat/export".into());
+        third.tasks = vec![task("CSV", false), task("PDF", false)];
+        let id = store
+            .add_plan(p, "Planes", "", &[first, second, third], "claude-code")
+            .unwrap();
+        let start = |n: usize, status: &str, by: &str| {
+            let change = PhaseChange {
+                status: Some(status),
+                ..Default::default()
+            };
+            store.update_phase(p, id, n, change, by).unwrap();
+        };
+        start(0, "done", "codex");
+        start(1, "in_progress", "claude-code");
+        let before = store.get_idea(p, id).unwrap().unwrap();
+
+        // Borrar la 2.2: la 2.3 pasa a ser la 2.2 (con su estado); las demás fases no se mueven.
+        let remove = PhaseChange {
+            remove_task: Some(1),
+            ..Default::default()
+        };
+        assert!(store.update_phase(p, id, 1, remove, "pi").unwrap());
+        // Renombrar la 2.1 conserva si estaba tachada.
+        let rename = PhaseChange {
+            rename_task: Some((0, "Lista de planes")),
+            ..Default::default()
+        };
+        assert!(store.update_phase(p, id, 1, rename, "pi").unwrap());
+
+        let after = store.get_idea(p, id).unwrap().unwrap();
+        assert_eq!(
+            after.phases[1].tasks,
+            vec![task("Lista de planes", true), task("Filtros", true)]
+        );
+        // La fase cambiada conserva identidad, rama, estado y quién la empezó.
+        let (old, new) = (&before.phases[1], &after.phases[1]);
+        assert_eq!(
+            (&new.id, &new.branch, &new.status, &new.worked_by),
+            (&old.id, &old.branch, &old.status, &old.worked_by)
+        );
+        // Y las otras, todo.
+        assert_eq!(after.phases[0], before.phases[0]);
+        assert_eq!(after.phases[2], before.phases[2]);
+        assert_eq!(after.status, before.status);
+
+        // Errores claros: tarea que no existe, texto vacío, borrar y otra cosa de una tarea a la vez.
+        let bad = |c: PhaseChange| store.update_phase(p, id, 1, c, "x").unwrap_err();
+        assert!(
+            bad(PhaseChange {
+                remove_task: Some(5),
+                ..Default::default()
+            })
+            .contains("no existe la tarea 6")
+        );
+        assert!(
+            bad(PhaseChange {
+                rename_task: Some((7, "x")),
+                ..Default::default()
+            })
+            .contains("no existe la tarea 8")
+        );
+        assert!(
+            !bad(PhaseChange {
+                rename_task: Some((0, "  ")),
+                ..Default::default()
+            })
+            .is_empty()
+        );
+        assert!(
+            !bad(PhaseChange {
+                remove_task: Some(0),
+                task: Some((0, true)),
+                ..Default::default()
+            })
+            .is_empty()
+        );
+        assert_eq!(store.get_idea(p, id).unwrap().unwrap(), after);
     }
 
     #[test]

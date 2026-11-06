@@ -310,6 +310,22 @@ fn mcp_server_shares_memory_between_clients() {
     };
     assert!(plans(&["show", "3"]).contains("1.2 [ ] Migración"));
     assert!(plans(&["task", "3", "1.2"]).contains("1.2 [x] Migración"));
+    // Renombrar o borrar una tarea sin tocar las demás fases ni sus ramas.
+    let renamed = plans(&["task", "3", "1.1", "--rename", "Tabla de lotes"]);
+    assert!(
+        renamed.contains("1.1 [x] Tabla de lotes")
+            && renamed.contains("1. ✓ Modelo y migración [feat/vacunas-lote]")
+            && renamed.contains("2. ✓ Pantalla de registro"),
+        "{renamed}"
+    );
+    let removed = plans(&["task", "3", "1.1", "--delete"]);
+    assert!(
+        removed.contains("1.1 [x] Migración")
+            && !removed.contains("Tabla de lotes")
+            && removed.contains("[feat/vacunas-lote]")
+            && removed.contains("2. ✓ Pantalla de registro"),
+        "{removed}"
+    );
     let reopened = plans(&["phase", "3", "2", "backlog"]);
     assert!(
         reopened.starts_with("#3 ◐"),

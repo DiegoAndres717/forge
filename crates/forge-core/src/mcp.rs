@@ -221,9 +221,9 @@ fn hints(name: &str) -> Value {
         "memory_save" | "plan_add" | "review_comment_add" => (false, false, false),
         "review_progress" => (false, false, true),
         // Editar guarda versiones, y borrar una memoria la archiva: nada se pierde.
-        "memory_update" | "memory_delete" | "plan_update" | "review_comment_resolve" => {
-            (false, false, true)
-        }
+        "memory_update" | "memory_delete" | "review_comment_resolve" => (false, false, true),
+        // Borrar una tarea dos veces borra dos: no es idempotente.
+        "plan_update" => (false, false, false),
         // Un plan borrado no vuelve.
         "plan_delete" => (false, true, true),
         // Sin clasificar: lo más prudente.
@@ -356,7 +356,7 @@ fn raw_tools() -> Value {
         },
         {
             "name": "plan_update",
-            "description": tr!("Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas; Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado."),
+            "description": tr!("Avanza un plan: al empezar una fase márcala in_progress (y crea su rama y asígnasela), tacha tareas al terminarlas (y renombra o borra una sola con task + task_text o remove_task, sin reemplazar las fases); Forge da la fase por hecha cuando su rama llega a main (márcala done tú solo si no tiene rama). El plan se completa solo cuando terminan todas. También planifica una idea del backlog (phases), cambia el estado de una idea sin fases o corrige título y nota. Devuelve el plan actualizado."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -372,6 +372,8 @@ fn raw_tools() -> Value {
                     "task": {"type": "integer", "description": tr!("Número de tarea de la fase (desde 1)")},
                     "task_done": {"type": "boolean", "description": tr!("Por defecto true: tachar la tarea")},
                     "add_task": {"type": "string", "description": tr!("Añade una tarea a la fase")},
+                    "task_text": {"type": "string", "description": tr!("Texto nuevo de la tarea `task` (la renombra sin tacharla)")},
+                    "remove_task": {"type": "boolean", "description": tr!("Borra la tarea `task` de la fase; las siguientes de esa fase bajan un número (la 2.3 pasa a ser la 2.2) y las demás fases, sus ramas y estados no cambian")},
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 },
                 "required": ["id"]
@@ -882,18 +884,26 @@ impl Server<'_> {
             }
         }
         if let Some(n) = args["phase"].as_u64() {
-            let task = args["task"].as_u64().map(|t| {
-                (
-                    t.saturating_sub(1) as usize,
-                    args["task_done"].as_bool().unwrap_or(true),
-                )
-            });
+            let number = args["task"].as_u64().map(|t| t.saturating_sub(1) as usize);
+            let rename = args["task_text"].as_str();
+            let remove = args["remove_task"].as_bool() == Some(true);
+            if (rename.is_some() || remove) && number.is_none() {
+                return Err(tr!("falta `task`: el número de la tarea dentro de la fase").into());
+            }
+            // Renombrar o borrar no tacha la tarea, salvo que se pida con task_done.
+            let done = match args["task_done"].as_bool() {
+                Some(done) => Some(done),
+                None if rename.is_none() && !remove => Some(true),
+                None => None,
+            };
             let change = ideas::PhaseChange {
                 status: args["phase_status"].as_str(),
                 branch: args["branch"].as_str(),
                 notes: args["phase_notes"].as_str(),
-                task,
+                task: number.zip(done),
                 add_task: args["add_task"].as_str(),
+                rename_task: number.zip(rename),
+                remove_task: number.filter(|_| remove),
             };
             let index = (n as usize)
                 .checked_sub(1)
@@ -1242,6 +1252,67 @@ mod tests {
             .unwrap();
         let text = out["result"]["content"][0]["text"].as_str().unwrap();
         assert!(text.contains(&format!("#{id} ✓")), "{text}");
+    }
+
+    #[test]
+    fn plan_update_renames_or_removes_one_task_and_leaves_the_rest() {
+        let store = Store::in_memory().unwrap();
+        let dir = Path::new("/p/tareas");
+        let id = store.add_idea(Some(dir), "Plan", "", "x").unwrap();
+        let task = |text: &str, done: bool| crate::ideas::Task {
+            text: text.into(),
+            done,
+        };
+        let phase = |title: &str, branch: &str, status: &str, tasks| crate::ideas::Phase {
+            title: title.into(),
+            status: status.into(),
+            branch: Some(branch.into()),
+            tasks,
+            ..Default::default()
+        };
+        let phases = [
+            phase("Uno", "feat/uno", "done", vec![task("A", true)]),
+            phase(
+                "Dos",
+                "feat/dos",
+                "doing",
+                vec![task("B", true), task("C", false), task("D", false)],
+            ),
+        ];
+        store.set_phases(Some(dir), id, &phases, "x").unwrap();
+        let before = store.get_idea(Some(dir), id).unwrap().unwrap();
+        let mut server = Server::new(dir, &store);
+        let mut call = |args: Value| {
+            let out = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "plan_update", "arguments": args}}))
+                .unwrap();
+            (
+                out["result"]["isError"] == json!(true),
+                out["result"]["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        };
+        // Renombrar no tacha la tarea (sin task_done no cambia si estaba hecha).
+        let (error, text) = call(json!({"id": id, "phase": 2, "task": 2, "task_text": "C bien"}));
+        assert!(!error && text.contains("2.2 [ ] C bien"), "{text}");
+        let (error, text) = call(json!({"id": id, "phase": 2, "task": 1, "task_text": "B2"}));
+        assert!(!error && text.contains("2.1 [x] B2"), "{text}");
+        // Borrar la 2.2: la 2.3 pasa a ser la 2.2.
+        let (error, text) = call(json!({"id": id, "phase": 2, "task": 2, "remove_task": true}));
+        assert!(
+            !error && text.contains("2.2 [ ] D") && !text.contains("C bien"),
+            "{text}"
+        );
+        let (error, _) = call(json!({"id": id, "phase": 2, "remove_task": true}));
+        assert!(error, "borrar sin decir qué tarea es un error");
+        let after = store.get_idea(Some(dir), id).unwrap().unwrap();
+        assert_eq!(after.phases[0], before.phases[0]);
+        assert_eq!(
+            (&after.phases[1].branch, &after.phases[1].status),
+            (&before.phases[1].branch, &before.phases[1].status)
+        );
     }
 
     #[test]
