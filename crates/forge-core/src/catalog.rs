@@ -169,9 +169,10 @@ pub const CATALOG: &[AgentInfo] = &[
         command: "pi",
         resume: None,
         headless: None,
-        mcp: false,
-        mcp_style: None,
-        install_hint: "npm install -g @mariozechner/pi-coding-agent",
+        // MCP propio desde la 1.0 (antes no lo tenía): `~/.pi/agent/mcp.json`.
+        mcp: true,
+        mcp_style: Some(McpStyle::PiConfig),
+        install_hint: "npm install -g --ignore-scripts @earendil-works/pi-coding-agent",
         prompt: Prompt::Unsupported,
         icon: Icon::Letter('P'),
         live: Live::None,
@@ -270,6 +271,32 @@ mod tests {
             );
         }
         assert_eq!(CATALOG.len(), crate::agents::builtins().len());
+    }
+
+    /// Un agente que dice admitir MCP tiene que recibir el de Forge: si no, se queda sin
+    /// memoria ni planes sin que nadie lo vea. Gemini CLI y Qwen Code son la excepción
+    /// conocida (sin conexión todavía): si se conectan, se quitan de aquí.
+    #[test]
+    fn every_agent_that_takes_mcp_gets_forges_wired() {
+        const NOT_WIRED_YET: &[&str] = &["gemini", "qwen"];
+        for agent in CATALOG {
+            if NOT_WIRED_YET.contains(&agent.id) {
+                assert!(
+                    agent.mcp && agent.mcp_style.is_none(),
+                    "«{}» ya no es una excepción: quítalo de NOT_WIRED_YET",
+                    agent.id
+                );
+                continue;
+            }
+            assert_eq!(
+                agent.mcp,
+                agent.mcp_style.is_some(),
+                "«{}»: mcp y su forma de conectarlo (mcp_style) no cuadran",
+                agent.id
+            );
+        }
+        // Pi trae MCP propio desde la 1.0 (~/.pi/agent/mcp.json).
+        assert!(get("pi").is_some_and(|pi| pi.mcp));
     }
 
     #[test]

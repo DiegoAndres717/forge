@@ -1205,12 +1205,20 @@ impl Workspace {
                 state.command.clone()
             }
             (Some(spec), Some(command), Some(server)) => Some(spec.with_mcp(command, &server)),
-            // Memoria apagada: que agy (configuración global) deje de recibir la de Forge.
+            // Memoria apagada: que agy y Pi (configuración global) dejen de recibir la de Forge.
             (Some(spec), Some(_), None)
                 if spec.mcp_style == Some(forge_core::agents::McpStyle::AgyConfig) =>
             {
                 if let Some(home) = forge_core::home_dir() {
                     let _ = forge_core::agents::remove_agy_mcp(&home);
+                }
+                state.command.clone()
+            }
+            (Some(spec), Some(_), None)
+                if spec.mcp_style == Some(forge_core::agents::McpStyle::PiConfig) =>
+            {
+                if let Some(dir) = forge_core::agents::pi_agent_dir(None) {
+                    let _ = forge_core::agents::remove_pi_mcp(&dir);
                 }
                 state.command.clone()
             }
