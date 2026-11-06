@@ -299,13 +299,27 @@ fn ui_preview() {
         // hace 2 min: de ahí salen el tiempo y la estimación que muestra la fase.
         let clock = forge_core::store::now();
         store
-            .start_review_run_at(Some(&project), receipt, 0, "codex", clock - 900)
+            .start_review_run_at(
+                Some(&project),
+                receipt,
+                0,
+                "codex",
+                Some("claude"),
+                clock - 900,
+            )
             .unwrap();
         store
             .review_progress_at(Some(&project), receipt, 0, None, None, true, clock - 600)
             .unwrap();
         store
-            .start_review_run_at(Some(&project), receipt, 1, "codex", clock - 120)
+            .start_review_run_at(
+                Some(&project),
+                receipt,
+                1,
+                "codex",
+                Some("claude"),
+                clock - 120,
+            )
             .unwrap();
         // Una revisión de Codex dejó dos comentarios en la fase 2; uno ya está resuelto.
         use forge_core::ideas::NewComment;
@@ -315,7 +329,7 @@ fn ui_preview() {
                 receipt,
                 1,
                 NewComment {
-                    text: "The Resend call has no timeout: a slow API blocks the webhook.",
+                    text: "[bug/high] The Resend call has no timeout: a slow API blocks the webhook.",
                     file: Some("src/email/send.ts"),
                     line: Some(31),
                 },
@@ -328,7 +342,7 @@ fn ui_preview() {
                 receipt,
                 1,
                 NewComment {
-                    text: "The template test never fails: it asserts on the mock.",
+                    text: "[bug/medium] The template test never fails: it asserts on the mock.",
                     file: Some("src/email/template.test.ts"),
                     line: None,
                 },
@@ -341,6 +355,14 @@ fn ui_preview() {
                 first + 1,
                 true,
                 "Asserts on the rendered HTML now",
+            )
+            .unwrap();
+        // El dueño lo dio por fallo real: cuenta en «Revisiones medidas» (plan #84, fase 3).
+        store
+            .set_review_outcome(
+                Some(&project),
+                first + 1,
+                forge_core::review_stats::Outcome::Accepted,
             )
             .unwrap();
         store

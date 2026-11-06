@@ -410,6 +410,7 @@ fn raw_tools() -> Value {
                 "properties": {
                     "id": {"type": "integer", "description": tr!("Id del comentario (el de «comment #N» en plans_list)")},
                     "resolution": {"type": "string", "description": tr!("Cómo se resolvió, o por qué no era un error")},
+                    "valid": {"type": "boolean", "description": tr!("true si el comentario tenía razón (era un fallo y lo arreglaste); false si no era un fallo")},
                     "scope": {"type": "string", "enum": ["project", "general"]}
                 },
                 "required": ["id"]
@@ -807,6 +808,10 @@ impl<'a> Server<'a> {
                         args["resolution"].as_str().unwrap_or_default(),
                     )
                     .and_then(|ok| {
+                        // Si era un fallo de verdad: de ahí sale la medida de la revisión.
+                        if let (true, Some(valid)) = (ok, args["valid"].as_bool()) {
+                            self.store.agent_review_verdict(list, id, valid)?;
+                        }
                         if ok {
                             Ok(tr!("Comentario #{id} resuelto.", id = id))
                         } else {
@@ -1395,6 +1400,58 @@ mod tests {
     }
 
     #[test]
+    fn resolving_a_finding_says_whether_it_was_a_real_mistake() {
+        use crate::review_stats::Outcome;
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/x");
+        let mut server = Server::new(project, &store);
+        let call = |server: &mut Server, name: &str, args: Value| {
+            let r = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}}))
+                .unwrap();
+            r["result"]["isError"].as_bool().unwrap()
+        };
+        assert!(!call(
+            &mut server,
+            "plan_add",
+            json!({"title": "Plan", "phases": [{"title": "Uno"}]})
+        ));
+        for text in ["[bug/high] a", "[bug/low] b", "[bug/low] c"] {
+            assert!(!call(
+                &mut server,
+                "review_comment_add",
+                json!({"plan": 1, "phase": 1, "text": text})
+            ));
+        }
+        assert!(!call(
+            &mut server,
+            "review_comment_resolve",
+            json!({"id": 1, "valid": true, "resolution": "arreglado"})
+        ));
+        assert!(!call(
+            &mut server,
+            "review_comment_resolve",
+            json!({"id": 2, "valid": false, "resolution": "no era un fallo"})
+        ));
+        // Sin `valid` (un agente de antes): resuelto, pero sin veredicto.
+        assert!(!call(
+            &mut server,
+            "review_comment_resolve",
+            json!({"id": 3})
+        ));
+        let outcomes: Vec<Outcome> = store
+            .list_review_comments(Some(project), 1)
+            .unwrap()
+            .iter()
+            .map(|c| c.outcome)
+            .collect();
+        assert_eq!(
+            outcomes,
+            [Outcome::Accepted, Outcome::Dismissed, Outcome::Pending]
+        );
+    }
+
+    #[test]
     fn a_reviewer_leaves_comments_on_a_phase_and_the_author_resolves_them() {
         let store = Store::in_memory().unwrap();
         let project = Path::new("/p/x");
@@ -1479,7 +1536,7 @@ mod tests {
         );
         assert!(err, "sin revisión abierta: {out}");
         store
-            .start_review_run(Some(project), 1, 0, "codex")
+            .start_review_run(Some(project), 1, 0, "codex", None)
             .unwrap();
         let (err, out) = call(
             &mut server,
