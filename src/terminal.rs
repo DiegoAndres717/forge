@@ -192,6 +192,10 @@ pub struct Terminal {
     last_output: Arc<Mutex<Option<std::time::Instant>>>,
     /// Bytes escritos por el programa desde que arrancó.
     output_bytes: Arc<std::sync::atomic::AtomicU64>,
+    /// Cuándo arrancó y cuándo se escribió el comando inicial (y si fue por la pausa del
+    /// prompt o por agotar la espera): para diagnosticar los tests que se agotan.
+    started: Instant,
+    typed: Arc<Mutex<Option<(Instant, bool)>>>,
 }
 
 /// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
@@ -398,8 +402,10 @@ impl Terminal {
             true => forge_core::agents::powershell_line(i),
             false => i.to_string(),
         });
+        let typed = Arc::new(Mutex::new(None));
         if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
+            let typed = typed.clone();
             std::thread::spawn(move || {
                 let start = std::time::Instant::now();
                 let quiet = std::time::Duration::from_millis(150);
@@ -413,6 +419,11 @@ impl Terminal {
                     }
                     std::thread::sleep(std::time::Duration::from_millis(30));
                 }
+                let quiet = output
+                    .lock()
+                    .unwrap()
+                    .is_some_and(|at| at.elapsed() >= quiet);
+                *typed.lock().unwrap() = Some((Instant::now(), quiet));
                 let _ = writer
                     .lock()
                     .unwrap()
@@ -453,7 +464,35 @@ impl Terminal {
             exit_code: None,
             last_output,
             output_bytes,
+            started: Instant::now(),
+            typed,
         })
+    }
+
+    /// Estado del proceso en una línea (tests: qué hacía la terminal cuando se agotó una espera).
+    #[cfg(test)]
+    pub fn diagnose(&self) -> String {
+        let ago = |at: Instant| format!("{:.1} s", at.elapsed().as_secs_f32());
+        let typed = match *self.typed.lock().unwrap() {
+            Some((at, quiet)) => format!(
+                "escrito a los {:.1} s ({})",
+                at.duration_since(self.started).as_secs_f32(),
+                if quiet {
+                    "tras la pausa"
+                } else {
+                    "sin pausa: espera agotada"
+                }
+            ),
+            None => "sin comando escrito".into(),
+        };
+        format!(
+            "pid {:?}, abierta hace {}, terminada {}, {} bytes, última salida hace {}, {typed}",
+            self.pid(),
+            ago(self.started),
+            self.exited(),
+            self.output_bytes(),
+            self.last_output().map_or("—".into(), ago),
+        )
     }
 
     /// Historial y pantalla como texto, hasta la línea anterior al cursor (para mostrarlo

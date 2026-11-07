@@ -83,14 +83,107 @@ fn app(project: PathBuf) -> Harness<'static, App> {
 /// Avanza fotogramas hasta que se cumpla la condición (los shells y checks son reales).
 fn wait_until(harness: &mut Harness<'_, App>, what: &str, done: impl Fn(&App) -> bool) {
     let start = Instant::now();
+    let (mut frames, mut slowest) = (0u32, Duration::ZERO);
     while !done(harness.state()) {
-        assert!(
-            start.elapsed() < Duration::from_secs(60),
-            "tiempo agotado: {what}"
-        );
+        if start.elapsed() >= Duration::from_secs(60) {
+            panic!(
+                "tiempo agotado: {what}\n{}",
+                timed_out(harness.state(), frames, slowest)
+            );
+        }
+        let step = Instant::now();
         harness.run_steps(2);
+        slowest = slowest.max(step.elapsed());
+        frames += 1;
         std::thread::sleep(Duration::from_millis(50));
     }
+    log_wait(what, start.elapsed(), frames, slowest);
+}
+
+/// Con `FORGE_E2E_LOG=<archivo>`, cada espera apunta cuánto tardó (para comparar en el CI).
+fn log_wait(what: &str, took: Duration, frames: u32, slowest: Duration) {
+    use std::io::Write as _;
+    let Some(path) = std::env::var_os("FORGE_E2E_LOG") else {
+        return;
+    };
+    let test = std::thread::current().name().unwrap_or("?").to_string();
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(
+            f,
+            "{test}\t{what}\t{:.2}\t{frames}\t{:.0}\t{}",
+            took.as_secs_f32(),
+            slowest.as_secs_f32() * 1000.0,
+            load()
+        );
+    }
+}
+
+/// Lo que se imprime al agotarse una espera: la carga de la máquina, los procesos que cuelgan
+/// del test y cada terminal con su estado y su pantalla.
+fn timed_out(app: &App, frames: u32, slowest: Duration) -> String {
+    format!(
+        "--- {frames} vueltas, el fotograma más lento {:.0} ms\n--- carga: {}\n--- procesos:\n{}\n{}",
+        slowest.as_secs_f32() * 1000.0,
+        load(),
+        processes(),
+        ws(app).diagnose()
+    )
+}
+
+/// Carga media (1, 5, 15 min), núcleos y hilos de test.
+fn load() -> String {
+    let avg = if cfg!(target_os = "macos") {
+        std::process::Command::new("sysctl")
+            .args(["-n", "vm.loadavg"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .unwrap_or_default()
+    } else {
+        std::fs::read_to_string("/proc/loadavg").unwrap_or_default()
+    };
+    let cpus = std::thread::available_parallelism().map_or(0, |n| n.get());
+    let threads = std::env::var("RUST_TEST_THREADS").unwrap_or_else(|_| "?".into());
+    format!(
+        "{} · {cpus} núcleos · RUST_TEST_THREADS={threads}",
+        avg.trim()
+    )
+}
+
+/// Procesos descendientes de este test (shells y lo que lanzan), con su estado y tiempo de CPU.
+fn processes() -> String {
+    if cfg!(windows) {
+        return String::new();
+    }
+    let Ok(out) = std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,stat=,etime=,time=,command="])
+        .output()
+    else {
+        return String::new();
+    };
+    let text = String::from_utf8_lossy(&out.stdout);
+    let rows: Vec<(u32, u32, &str)> = text
+        .lines()
+        .filter_map(|l| {
+            let mut w = l.split_whitespace();
+            Some((w.next()?.parse().ok()?, w.next()?.parse().ok()?, l))
+        })
+        .collect();
+    let mut mine = vec![std::process::id()];
+    let mut i = 0;
+    while i < mine.len() {
+        let parent = mine[i];
+        mine.extend(rows.iter().filter(|r| r.1 == parent).map(|r| r.0));
+        i += 1;
+    }
+    rows.iter()
+        .filter(|r| mine[1..].contains(&r.0))
+        .map(|r| r.2.trim())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn ws(app: &App) -> &Workspace {
@@ -2394,8 +2487,8 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
     {
         assert!(
             start.elapsed() < Duration::from_secs(60),
-            "tiempo agotado: el agente recibe los comentarios\n--- pantalla ---\n{}",
-            ws(h.state()).shell_text()
+            "tiempo agotado: el agente recibe los comentarios\n{}",
+            timed_out(h.state(), 0, Duration::ZERO)
         );
         h.run_steps(2);
         std::thread::sleep(Duration::from_millis(50));
@@ -4572,8 +4665,8 @@ fn shift_enter_goes_back_in_the_terminal_search() {
     while ws(h.state()).shell_text().matches("42zzq").count() < 3 {
         assert!(
             start.elapsed() < Duration::from_secs(60),
-            "tiempo agotado: salida\n--- pantalla ---\n{}",
-            ws(h.state()).shell_text()
+            "tiempo agotado: salida\n{}",
+            timed_out(h.state(), 0, Duration::ZERO)
         );
         h.run_steps(2);
         std::thread::sleep(Duration::from_millis(50));
@@ -5197,8 +5290,8 @@ fn the_plans_panel_launches_phases_in_parallel_each_in_its_own_worktree() {
         }
         assert!(
             start.elapsed() < Duration::from_secs(60),
-            "tiempo agotado: el mensaje de cada fase; en pantalla:\n{}",
-            ws(h.state()).shell_text()
+            "tiempo agotado: el mensaje de cada fase\n{}",
+            timed_out(h.state(), 0, Duration::ZERO)
         );
         h.run_steps(2);
         std::thread::sleep(Duration::from_millis(50));

@@ -2048,6 +2048,31 @@ impl Workspace {
             .join("\n")
     }
 
+    /// Cada terminal con su proceso, su comando y su pantalla (tests: qué pasaba cuando se
+    /// agotó una espera).
+    #[cfg(test)]
+    pub fn diagnose(&self) -> String {
+        let mut ids: Vec<&PanelId> = self.panels.keys().collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .filter_map(|id| {
+                let p = &self.panels[id];
+                let Content::Shell(t) = &p.content else {
+                    return None;
+                };
+                Some(format!(
+                    "--- panel {id:?} (agente {:?}, comando {:?}): {}\n{}",
+                    p.agent,
+                    p.command,
+                    t.diagnose(),
+                    t.screen_text(40)
+                        .unwrap_or_else(|| "(pantalla alternativa)".into())
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Terminales de revisión (solo lectura) abiertas (tests).
     #[cfg(test)]
     pub fn review_panel_count(&self) -> usize {
