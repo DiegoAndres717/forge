@@ -198,6 +198,8 @@ pub struct Terminal {
     started: Instant,
     #[cfg_attr(not(test), expect(dead_code))]
     typed: Arc<Mutex<Option<(Instant, &'static str)>>>,
+    /// Cuándo cambió la interfaz su tamaño por última vez (`None`: aún no lo dio, 80×24).
+    sized: Arc<Mutex<Option<Instant>>>,
     /// Tests: lo que llegó del PTY tal cual, con marcas de cuándo se escribió y se redimensionó.
     #[cfg(test)]
     transcript: Arc<Mutex<Vec<u8>>>,
@@ -243,17 +245,6 @@ fn pwsh_args(script: &str) -> Vec<String> {
 }
 
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
-
-/// El shell ya lee con su editor de línea (zle, readline…): la terminal salió del modo
-/// canónico. `None` si no se puede saber.
-#[cfg(unix)]
-fn line_editor_ready(tty: &std::os::fd::OwnedFd) -> Option<bool> {
-    use std::os::fd::AsRawFd;
-    // SAFETY: descriptor propio y abierto; termios es una estructura C de datos simples.
-    let mut t: libc::termios = unsafe { std::mem::zeroed() };
-    let ok = unsafe { libc::tcgetattr(tty.as_raw_fd(), &mut t) } == 0;
-    ok.then_some(t.c_lflag & libc::ICANON == 0)
-}
 
 /// Shell elegido en Ajustes para las terminales nuevas (vacío: el del sistema).
 static SHELL_OVERRIDE: Mutex<String> = Mutex::new(String::new());
@@ -417,53 +408,43 @@ impl Terminal {
             c.request_repaint();
         });
 
-        // El comando se escribe cuando el shell ya espera una línea: su editor (zle, readline)
-        // tomó la terminal (sale del modo canónico) y la salida hizo una pausa breve. Escrito
-        // mientras aún carga el perfil, el bash del Mac lo perdía a trozos al cambiar el modo
-        // de la terminal (plan #210); y escrito antes del prompt, la terminal lo repetía encima.
-        // Donde no se puede saber el modo (Windows) basta la pausa; si el shell nunca sale del
-        // modo canónico (sin editor de línea), se escribe igual tras unos segundos.
+        // El comando se escribe cuando la interfaz ya le dio a la terminal su tamaño (abre en
+        // 80×24) y el shell, tras redibujar su prompt, hizo una pausa breve. Escrito antes del
+        // prompt, la terminal lo repetía encima; escrito antes del tamaño, el redibujado del
+        // shell al cambiarlo (SIGWINCH) podía tapar la salida del comando: bash 3.2 con un
+        // prompt más largo que la línea sube una fila y escribe el prompt encima (plan #210).
+        // Si la interfaz no la dibuja (pestaña oculta), se escribe tras unos segundos igual.
         // En Windows lo escrito va a PowerShell, que pasa los argumentos a su manera.
         let input = input.map(|i| match cfg!(windows) {
             true => forge_core::agents::powershell_line(i),
             false => i.to_string(),
         });
         let typed = Arc::new(Mutex::new(None));
+        let sized: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
-            let typed = typed.clone();
+            let (typed, sized) = (typed.clone(), sized.clone());
             #[cfg(test)]
             let raw = transcript.clone();
-            #[cfg(unix)]
-            let tty = pair.master.as_raw_fd().and_then(|fd| {
-                // SAFETY: el descriptor es del PTY recién abierto; se duplica para que el hilo
-                // tenga el suyo aunque la terminal se cierre antes.
-                unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }
-                    .try_clone_to_owned()
-                    .ok()
-            });
             std::thread::spawn(move || {
-                let start = std::time::Instant::now();
-                let pause = std::time::Duration::from_millis(150);
+                let start = Instant::now();
+                let pause = Duration::from_millis(150);
                 let reason = loop {
                     let quiet = output
                         .lock()
                         .unwrap()
                         .is_some_and(|at| at.elapsed() >= pause);
-                    #[cfg(unix)]
-                    let editor = tty.as_ref().and_then(line_editor_ready);
-                    #[cfg(not(unix))]
-                    let editor: Option<bool> = None;
-                    match editor {
-                        Some(true) if quiet => break "editor de línea listo",
-                        None if quiet => break "pausa en la salida",
-                        _ if quiet && start.elapsed() >= std::time::Duration::from_secs(5) => {
-                            break "pausa, sin editor de línea";
+                    let sized = sized
+                        .lock()
+                        .unwrap()
+                        .is_some_and(|at| at.elapsed() >= pause);
+                    match start.elapsed() {
+                        _ if quiet && sized => break "con su tamaño, tras la pausa",
+                        t if quiet && t >= Duration::from_secs(5) => {
+                            break "sin tamaño, tras la pausa";
                         }
-                        _ if start.elapsed() >= std::time::Duration::from_secs(10) => {
-                            break "espera agotada";
-                        }
-                        _ => std::thread::sleep(std::time::Duration::from_millis(30)),
+                        t if t >= Duration::from_secs(10) => break "espera agotada",
+                        _ => std::thread::sleep(Duration::from_millis(30)),
                     }
                 };
                 *typed.lock().unwrap() = Some((Instant::now(), reason));
@@ -511,9 +492,27 @@ impl Terminal {
             output_bytes,
             started: Instant::now(),
             typed,
+            sized,
             #[cfg(test)]
             transcript,
         })
+    }
+
+    /// Tamaño en celdas que le da la interfaz (el shell recibe SIGWINCH si cambia).
+    fn set_size(&mut self, size: Size) {
+        let mut sized = self.sized.lock().unwrap();
+        if size != self.size {
+            *sized = Some(Instant::now());
+            self.size = size;
+            self.term.lock().unwrap().resize(size);
+            let _ = self.master.resize(pty_size(size));
+            #[cfg(test)]
+            self.transcript
+                .lock()
+                .unwrap()
+                .extend_from_slice(format!("<<{}x{}>>", size.cols, size.rows).as_bytes());
+        }
+        sized.get_or_insert_with(Instant::now);
     }
 
     /// Estado del proceso en una línea (tests: qué hacía la terminal cuando se agotó una espera).
@@ -693,20 +692,10 @@ impl Terminal {
                 ctx.request_repaint_after(Duration::from_millis(20));
             }
         }
-        let size = Size {
+        self.set_size(Size {
             cols: ((rect.width() / m.cell.x) as usize).max(2),
             rows: ((rect.height() / m.cell.y) as usize).max(1),
-        };
-        if size != self.size {
-            self.size = size;
-            self.term.lock().unwrap().resize(size);
-            let _ = self.master.resize(pty_size(size));
-            #[cfg(test)]
-            self.transcript
-                .lock()
-                .unwrap()
-                .extend_from_slice(format!("<<{}x{}>>", size.cols, size.rows).as_bytes());
-        }
+        });
 
         let response = ui.interact(rect, id, Sense::click_and_drag());
         // Ids de las terminales: el foco de egui que tenga otra terminal no cuenta como "otro
@@ -2685,20 +2674,16 @@ mod tests {
         }
     }
 
-    /// El comando inicial no se escribe mientras el shell aún carga su perfil (terminal en modo
-    /// canónico): en el bash del Mac del CI, lo escrito entonces se perdía a trozos cuando
-    /// readline cambiaba el modo de la terminal (plan #210). Se espera al editor de línea.
+    /// El comando inicial espera a que la interfaz dé su tamaño a la terminal: si se escribe
+    /// antes, el redibujado del shell al cambiar de tamaño puede tapar su salida (en el bash
+    /// 3.2 del Mac del CI, con un prompt más largo que la línea; plan #210).
     #[cfg(unix)]
     #[test]
-    fn the_first_command_waits_for_the_line_editor() {
+    fn the_first_command_waits_for_the_terminal_size() {
         let ctx = egui::Context::default();
-        // Un perfil que escribe algo y tarda en terminar (como path_helper en un Mac cargado).
-        let mut cmd = CommandBuilder::new("sh");
-        cmd.args([
-            "-c",
-            "echo cargando el perfil; sleep 1; exec bash --norc --noprofile -i",
-        ]);
-        let term = Terminal::start(
+        let mut cmd = CommandBuilder::new("bash");
+        cmd.args(["--norc", "--noprofile", "-i"]);
+        let mut term = Terminal::start(
             &ctx,
             Path::new("/tmp"),
             &HashMap::new(),
@@ -2706,20 +2691,27 @@ mod tests {
             Some("echo pedido: $((40+2))"),
         )
         .unwrap();
-        let deadline = Instant::now() + std::time::Duration::from_secs(20);
+        std::thread::sleep(Duration::from_secs(1));
+        assert!(
+            term.typed.lock().unwrap().is_none(),
+            "escrito sin tamaño: {}",
+            term.diagnose()
+        );
+        term.set_size(Size {
+            cols: 100,
+            rows: 30,
+        });
+        let sized = Instant::now();
+        let deadline = sized + Duration::from_secs(20);
         while !term
             .screen_text(50)
             .is_some_and(|s| s.lines().any(|l| l == "pedido: 42"))
         {
             assert!(Instant::now() < deadline, "{}", term.diagnose());
-            std::thread::sleep(std::time::Duration::from_millis(50));
+            std::thread::sleep(Duration::from_millis(50));
         }
         let (at, _) = term.typed.lock().unwrap().unwrap();
-        assert!(
-            at.duration_since(term.started) >= std::time::Duration::from_secs(1),
-            "escrito antes de que el shell estuviera listo: {}",
-            term.diagnose()
-        );
+        assert!(at > sized, "{}", term.diagnose());
     }
 
     #[test]
