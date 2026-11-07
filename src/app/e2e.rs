@@ -1271,6 +1271,108 @@ fn git_panel_stages_unstages_and_commits() {
     assert!(ws(h.state()).git.message.is_empty());
 }
 
+/// Con el cajón al mínimo, nada de un panel se sale por la derecha (ni queda tapado por el
+/// borde de la ventana): lo largo se recorta y las filas de botones bajan de línea.
+fn assert_inside_the_narrow_drawer(h: &Harness<'_, App>, rect: egui::Rect, what: &str) {
+    let right = h.ctx.content_rect().max.x;
+    let left = right - DRAWER_MIN;
+    assert!(
+        rect.min.x >= left - 0.5 && rect.max.x <= right + 0.5,
+        "{what} se sale del cajón estrecho: {rect:?} fuera de {left}..{right}"
+    );
+}
+
+#[test]
+fn the_git_panel_fits_a_narrow_drawer() {
+    let _serial = serial();
+    let dir = project("narrow-git");
+    let deep = "src/una/carpeta/bastante/profunda";
+    std::fs::create_dir_all(dir.join(deep)).unwrap();
+    std::fs::write(
+        dir.join(deep)
+            .join("un-archivo-con-un-nombre-muy-largo-para-el-panel.rs"),
+        "fn x() {}\n",
+    )
+    .unwrap();
+    // Un commit (para tener rama e historial), una rama de nombre largo, un archivo
+    // preparado y otros sin preparar.
+    let ok = std::process::Command::new("sh")
+        .args([
+            "-c",
+            "git commit -qm inicio && git checkout -qb feature/una-rama-con-un-nombre-largo-de-verdad \
+             && echo y >> main.ts && git add main.ts && echo z >> .forge/rules.toml",
+        ])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+    let mut h = app(dir);
+    h.state_mut().drawer_width = DRAWER_MIN;
+    h.key_press_modifiers(CMD_SHIFT, Key::G);
+    h.run_steps(2);
+    wait_until(&mut h, "estado de git", |a| ws(a).git.data.is_some());
+    h.run_steps(3);
+    let mut checked = 0;
+    for label in [
+        "Cerrar (⌘⇧G)",
+        "Pull",
+        "Push",
+        "Nueva rama",
+        "Preparar",
+        "Descartar cambios",
+        "Quitar de preparados",
+        "Quitar todo",
+        "Commit (1)",
+        "Revisar cambios",
+        "Juicio",
+        "un-archivo-con-un-nombre-muy-largo-para-el-panel.rs",
+    ] {
+        let nodes: Vec<_> = h.query_all_by_label_contains(label).collect();
+        assert!(!nodes.is_empty(), "falta {label}");
+        for node in nodes {
+            assert_inside_the_narrow_drawer(&h, node.rect(), label);
+            checked += 1;
+        }
+    }
+    assert!(checked >= 12);
+    let branch = h.get_by(|n| n.value().is_some_and(|v| v.contains("una-rama")));
+    assert_inside_the_narrow_drawer(&h, branch.rect(), "la rama");
+}
+
+#[test]
+fn the_memory_panel_fits_a_narrow_drawer() {
+    let _serial = serial();
+    let dir = project("narrow-memory-con-un-nombre-largo");
+    let mut h = app(dir.clone());
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .add_memory(
+            &dir,
+            "decision",
+            "Una decisión con un título larguísimo que no cabe en un cajón estrecho",
+            "x",
+            "",
+            "x",
+        )
+        .unwrap();
+    h.state_mut().drawer_width = DRAWER_MIN;
+    h.key_press_modifiers(CMD_SHIFT, Key::M);
+    h.run_steps(3);
+    let close = h.get_by_label("Cerrar (⌘⇧M)").rect();
+    assert_inside_the_narrow_drawer(&h, close, "cerrar");
+    let note = h.get_by_label_contains("Una decisión").rect();
+    assert_inside_the_narrow_drawer(&h, note, "la nota");
+    h.get_by_label_contains("Una decisión").click();
+    h.run_steps(3);
+    for label in ["Nueva nota", "Archivar", "Se ignoró", "Borrar"] {
+        let rect = h.get_by_label_contains(label).rect();
+        assert_inside_the_narrow_drawer(&h, rect, label);
+    }
+}
+
 #[test]
 fn the_file_tree_shows_folders_marks_changes_and_asks_before_the_trash() {
     let _serial = serial();

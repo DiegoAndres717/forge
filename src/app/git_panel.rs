@@ -78,25 +78,15 @@ impl App {
                     .color(theme::ORANGE),
             );
             ui.label(RichText::new("Git").size(15.0).color(theme::TEXT).strong());
-            if let Some((status, branches, _)) = &git.data {
-                let current = status
-                    .branch
-                    .clone()
-                    .unwrap_or_else(|| tr!("HEAD separado").to_string());
-                egui::ComboBox::from_id_salt("git-branch")
-                    .selected_text(RichText::new(&current).size(12.5))
-                    .width(170.0)
-                    .show_ui(ui, |ui| {
-                        for b in branches {
-                            if ui
-                                .selectable_label(Some(b) == status.branch.as_ref(), b)
-                                .clicked()
-                                && Some(b) != status.branch.as_ref()
-                            {
-                                cmds.push(UiCmd::GitSwitch(b.clone()));
-                            }
-                        }
-                    });
+            // De derecha a izquierda: cerrar y ↑↓ siempre a la vista; la rama ocupa lo que
+            // sobre (como mucho 170) y su nombre se recorta.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if theme::icon_button(ui, icon::X, tr!("Cerrar (⌘⇧G)")).clicked() {
+                    cmds.push(UiCmd::ToggleGit);
+                }
+                let Some((status, branches, _)) = &git.data else {
+                    return;
+                };
                 if status.upstream.is_some() {
                     ui.label(
                         RichText::new(format!("↑{} ↓{}", status.ahead, status.behind))
@@ -105,14 +95,35 @@ impl App {
                     )
                     .on_hover_text(tr!("Commits por subir ↑ y por bajar ↓"));
                 }
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if theme::icon_button(ui, icon::X, tr!("Cerrar (⌘⇧G)")).clicked() {
-                    cmds.push(UiCmd::ToggleGit);
-                }
+                let current = status
+                    .branch
+                    .clone()
+                    .unwrap_or_else(|| tr!("HEAD separado").to_string());
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // Sitio para el triángulo del desplegable.
+                    let width = (ui.available_width() - 4.0).clamp(40.0, 170.0);
+                    egui::ComboBox::from_id_salt("git-branch")
+                        .selected_text(RichText::new(&current).size(12.5))
+                        .width(width)
+                        .truncate()
+                        .show_ui(ui, |ui| {
+                            for b in branches {
+                                if ui
+                                    .selectable_label(Some(b) == status.branch.as_ref(), b)
+                                    .clicked()
+                                    && Some(b) != status.branch.as_ref()
+                                {
+                                    cmds.push(UiCmd::GitSwitch(b.clone()));
+                                }
+                            }
+                        })
+                        .response
+                        .on_hover_text(&current);
+                });
             });
         });
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
             if theme::secondary(ui, format!("{}  Pull", icon::ARROW_DOWN)).clicked() {
                 cmds.push(UiCmd::GitRun("git pull"));
             }
@@ -126,11 +137,12 @@ impl App {
             }
         });
         if let Some(name) = &mut git.new_branch {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                 let edit = ui.add(
                     theme::field(egui::TextEdit::singleline(name))
                         .hint_text(tr!("nombre-de-la-rama"))
-                        .desired_width(200.0),
+                        .desired_width(ui.available_width().min(200.0)),
                 );
                 edit.request_focus();
                 let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
@@ -213,7 +225,9 @@ impl App {
                         .desired_width(f32::INFINITY),
                 );
                 let ready = !staged.is_empty() && !git.message.trim().is_empty();
-                ui.horizontal(|ui| {
+                // En un panel estrecho los botones bajan de línea (enteros: sin partir el texto).
+                ui.horizontal_wrapped(|ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
                     let label = tr!("{p0}  Commit ({n})", p0 = icon::CHECK, n = staged.len());
                     if ui
                         .add_enabled(ready, theme::primary_button(label))
@@ -224,20 +238,20 @@ impl App {
                     // Revisión con IA de lo que hay sin commit, antes de commitear (plan #42).
                     let changes = !staged.is_empty() || !unstaged.is_empty();
                     if ui
-                        .add_enabled_ui(changes, |ui| {
-                            theme::secondary(ui, tr!("{p0}  Revisar cambios", p0 = icon::SHIELD_CHECK))
-                        })
-                        .inner
+                        .add_enabled(
+                            changes,
+                            theme::secondary_button(tr!("{p0}  Revisar cambios", p0 = icon::SHIELD_CHECK)),
+                        )
                         .on_hover_text(tr!("Valida el commit con los revisores con IA (seguridad, base de datos, lentes…), aunque Guard no los pida: lo preparado o, si no hay nada preparado, todo lo que hay sin commit. El resultado sale en Guard."))
                         .clicked()
                     {
                         cmds.push(UiCmd::GuardReview);
                     }
                     if ui
-                        .add_enabled_ui(changes, |ui| {
-                            theme::secondary(ui, tr!("{p0}  Juicio", p0 = icon::SCALES))
-                        })
-                        .inner
+                        .add_enabled(
+                            changes,
+                            theme::secondary_button(tr!("{p0}  Juicio", p0 = icon::SCALES)),
+                        )
                         .on_hover_text(tr!("Dos jueces con Sonnet (o el modelo de Ajustes) revisan el cambio a ciegas leyendo el proyecto: doble clic, estados vacíos, errores, concurrencia, seguridad, tests… Lo que ven los dos bloquea; lo que ve uno queda como sospecha. Gasta más que «Revisar cambios»."))
                         .clicked()
                     {
@@ -304,18 +318,8 @@ impl App {
                     .strong()
                     .color(color),
             );
-            let (dir, name) = f
-                .path
-                .rsplit_once('/')
-                .map_or(("", f.path.as_str()), |(d, n)| (d, n));
-            let text = RichText::new(name).size(12.5);
-            let response = ui.add(egui::Label::new(text).truncate().sense(Sense::click()));
-            if !dir.is_empty() {
-                ui.label(RichText::new(dir).size(11.0).color(theme::TEXT_4));
-            }
-            if response.on_hover_text(tr!("Ver diff")).clicked() {
-                cmds.push(UiCmd::GitDiff(f.path.clone(), staged));
-            }
+            // Los botones primero (de derecha a izquierda, siempre a la vista); el nombre y la
+            // carpeta se recortan con lo que sobre.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let small = |ui: &mut egui::Ui, glyph: &str, tip: &str| {
                     theme::icon_button_sized(ui, glyph, tip, 20.0, theme::TEXT_3).clicked()
@@ -332,6 +336,26 @@ impl App {
                         cmds.push(UiCmd::GitDiscardAsk(f.clone()));
                     }
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    let (dir, name) = f
+                        .path
+                        .rsplit_once('/')
+                        .map_or(("", f.path.as_str()), |(d, n)| (d, n));
+                    let text = RichText::new(name).size(12.5);
+                    let response = ui.add(egui::Label::new(text).truncate().sense(Sense::click()));
+                    // La carpeta solo si queda sitio para algo más que el «…».
+                    if !dir.is_empty() && ui.available_width() > 24.0 {
+                        ui.add(
+                            egui::Label::new(RichText::new(dir).size(11.0).color(theme::TEXT_4))
+                                .truncate(),
+                        );
+                    }
+                    // La ruta entera en el aviso: el nombre o la carpeta pueden ir recortados.
+                    let tip = format!("{}\n{}", f.path, tr!("Ver diff"));
+                    if response.on_hover_text(tip).clicked() {
+                        cmds.push(UiCmd::GitDiff(f.path.clone(), staged));
+                    }
+                });
             });
         });
     }
