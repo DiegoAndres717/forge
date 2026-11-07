@@ -194,7 +194,9 @@ pub struct Terminal {
     output_bytes: Arc<std::sync::atomic::AtomicU64>,
     /// Cuándo arrancó y cuándo se escribió el comando inicial (y si fue por la pausa del
     /// prompt o por agotar la espera): para diagnosticar los tests que se agotan.
+    #[cfg_attr(not(test), expect(dead_code))]
     started: Instant,
+    #[cfg_attr(not(test), expect(dead_code))]
     typed: Arc<Mutex<Option<(Instant, bool)>>>,
 }
 
