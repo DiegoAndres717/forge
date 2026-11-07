@@ -371,12 +371,14 @@ pub fn primary_button(text: impl Into<String>) -> egui::Button<'static> {
 
 /// Botón secundario (relleno neutro).
 pub fn secondary(ui: &mut Ui, text: impl Into<String>) -> Response {
-    ui.add(
-        egui::Button::new(RichText::new(text.into()).color(TEXT))
-            .fill(SURFACE_HOVER)
-            .corner_radius(6.0)
-            .min_size(Vec2::new(0.0, 30.0)),
-    )
+    ui.add(secondary_button(text))
+}
+
+pub fn secondary_button(text: impl Into<String>) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text.into()).color(TEXT))
+        .fill(SURFACE_HOVER)
+        .corner_radius(6.0)
+        .min_size(Vec2::new(0.0, 30.0))
 }
 
 /// Contenedor agrupado con esquinas redondeadas (como las listas de Ajustes del Sistema).

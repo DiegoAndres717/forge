@@ -58,19 +58,25 @@ impl App {
                     .color(theme::TEXT)
                     .strong(),
             );
-            ui.label(
-                RichText::new(tr!(
-                    "{p0} · {p1} notas",
-                    p0 = ws.project.name(),
-                    p1 = ws.memory.count
-                ))
-                .size(13.0)
-                .color(theme::TEXT_3),
-            );
+            // Cerrar primero (siempre a la vista); el proyecto se recorta con lo que sobre.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if theme::icon_button(ui, icon::X, tr!("Cerrar (⌘⇧M)")).clicked() {
                     cmds.push(UiCmd::ToggleMemory);
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(tr!(
+                                "{p0} · {p1} notas",
+                                p0 = ws.project.name(),
+                                p1 = ws.memory.count
+                            ))
+                            .size(13.0)
+                            .color(theme::TEXT_3),
+                        )
+                        .truncate(),
+                    );
+                });
             });
         });
 
@@ -115,17 +121,33 @@ impl App {
 
         // Buscador y tipo; en un panel estrecho, uno debajo del otro.
         ui.horizontal_wrapped(|ui| {
+            // Sin sitio para los dos desplegables (tipo y etiquetas, unos 270) al lado, el
+            // buscador ocupa la fila y ellos van debajo, a medias. (Un desplegable no baja
+            // solo de línea: se sale del panel.)
+            let full = ui.available_width();
+            let narrow = full < 410.0;
+            let combo_width = if narrow {
+                (full - ui.spacing().item_spacing.x) / 2.0
+            } else {
+                ui.spacing().combo_width
+            };
             let search = ui.add(
                 theme::field(egui::TextEdit::singleline(&mut ws.memory.query))
                     .hint_text(tr!(
                         "{p0}  Buscar (sin tildes también)",
                         p0 = icon::MAGNIFYING_GLASS
                     ))
-                    // Sitio para los dos desplegables (tipo y etiquetas).
-                    .desired_width((ui.available_width() - 270.0).clamp(140.0, 320.0)),
+                    .desired_width(if narrow {
+                        full
+                    } else {
+                        (full - 270.0).clamp(140.0, 320.0)
+                    }),
             );
             if search.changed() {
                 ws.memory.dirty = true;
+            }
+            if narrow {
+                ui.end_row();
             }
             let selected = ws
                 .memory
@@ -137,6 +159,8 @@ impl App {
             ui.spacing_mut().interact_size.y = 34.0;
             egui::ComboBox::from_id_salt("memory-kind")
                 .selected_text(selected)
+                .width(combo_width)
+                .truncate()
                 .show_ui(ui, |ui| {
                     if ui
                         .selectable_label(ws.memory.kind.is_none(), tr!("Todos"))
@@ -167,6 +191,8 @@ impl App {
                 };
                 egui::ComboBox::from_id_salt("memory-tag")
                     .selected_text(selected)
+                    .width(combo_width)
+                    .truncate()
                     .show_ui(ui, |ui| {
                         egui::ScrollArea::vertical()
                             .max_height(300.0)
@@ -300,33 +326,41 @@ impl App {
                         let read = ws.memory.reads.get(&m.id).copied();
                         let stats = ws.memory.stats.get(&m.id).copied().unwrap_or_default();
                         // Un título largo no se sale del panel: se corta con «…» (entero al
-                        // abrir la nota). El encabezado plegable no parte líneas.
-                        let room = ((ui.available_width() - 110.0) / 7.0).max(12.0) as usize;
-                        let title = if m.title.chars().count() > room {
-                            format!("{}…", m.title.chars().take(room - 1).collect::<String>())
-                        } else {
-                            m.title.clone()
-                        };
+                        // abrir la nota). El encabezado plegable no parte líneas, así que se
+                        // mide el texto de verdad; si los datos de uso dejan poco sitio al
+                        // título (panel estrecho), bajan a una segunda línea.
+                        let info = format!(
+                            "{}{}{}",
+                            match read {
+                                Some((1, _)) => tr!("1 lectura").into(),
+                                Some((n, _)) => tr!("{n} lecturas", n = n),
+                                None => tr!("sin leer").into(),
+                            },
+                            usage(stats),
+                            forge_core::memory::status_note(m)
+                        );
+                        let (title_font, info_font) =
+                            (FontId::proportional(13.0), FontId::proportional(11.0));
+                        let width = ui.available_width()
+                            - ui.spacing().indent
+                            - ui.spacing().button_padding.x;
+                        let info_width = text_width(ui, &info, &info_font) + 8.0;
+                        let below = width - info_width < 90.0;
+                        let title_room = if below { width } else { width - info_width };
+                        let title = fit(ui, &m.title, &title_font, title_room);
                         let mut header = egui::text::LayoutJob::default();
                         header.append(
                             &title,
                             0.0,
-                            egui::TextFormat::simple(FontId::proportional(13.0), theme::TEXT),
+                            egui::TextFormat::simple(title_font, theme::TEXT),
                         );
-                        header.append(
-                            &format!(
-                                "{}{}{}",
-                                match read {
-                                    Some((1, _)) => tr!("1 lectura").into(),
-                                    Some((n, _)) => tr!("{n} lecturas", n = n),
-                                    None => tr!("sin leer").into(),
-                                },
-                                usage(stats),
-                                forge_core::memory::status_note(m)
-                            ),
-                            8.0,
-                            egui::TextFormat::simple(FontId::proportional(11.0), theme::TEXT_3),
-                        );
+                        let info_format = egui::TextFormat::simple(info_font.clone(), theme::TEXT_3);
+                        if below {
+                            let info = fit(ui, &info, &info_font, width);
+                            header.append(&format!("\n{info}"), 0.0, info_format);
+                        } else {
+                            header.append(&info, 8.0, info_format);
+                        }
                         let cut = title != m.title;
                         let note = egui::CollapsingHeader::new(header)
                             .id_salt(("memory", m.id))
@@ -431,6 +465,33 @@ impl App {
                 }
             });
     }
+}
+
+fn text_width(ui: &egui::Ui, text: &str, font: &FontId) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font.clone(), theme::TEXT)
+        .size()
+        .x
+}
+
+/// El texto entero si cabe en `room` puntos; si no, recortado con «…» hasta que quepa.
+fn fit(ui: &egui::Ui, text: &str, font: &FontId, room: f32) -> String {
+    if text_width(ui, text, font) <= room {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let cut = |n: usize| format!("{}…", chars[..n].iter().collect::<String>().trim_end());
+    // Búsqueda binaria: con muchas notas, probar letra a letra en cada fotograma pesa.
+    let (mut fits, mut too_long) = (0, chars.len());
+    while too_long - fits > 1 {
+        let mid = (fits + too_long) / 2;
+        if text_width(ui, &cut(mid), font) <= room {
+            fits = mid;
+        } else {
+            too_long = mid;
+        }
+    }
+    cut(fits)
 }
 
 /// « · enviada N · ignorada M», lo que haya.
