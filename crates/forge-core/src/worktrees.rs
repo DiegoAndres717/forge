@@ -24,6 +24,9 @@ pub struct Worktree {
     pub tracked: bool,
     /// Archivos ignorados que `git worktree remove` borraría y no se regeneran (`.env`…).
     pub ignored: Vec<String>,
+    /// La carpeta existe pero git falla dentro de ella (`.git` roto, permisos, propiedad
+    /// dudosa…): no se sabe qué tiene, así que nunca se quita sola.
+    pub broken: bool,
     /// Bytes en disco (aproximado); `None` si no se pudo medir.
     pub size: Option<u64>,
 }
@@ -58,6 +61,8 @@ pub enum Keep {
     Detached,
     /// Su carpeta está en un disco que no está montado: no se poda.
     Unmounted,
+    /// Git falla dentro de su carpeta: no se puede mirar qué tiene.
+    Broken,
 }
 
 impl Keep {
@@ -72,6 +77,7 @@ impl Keep {
             Keep::Ignored => tr!("tiene archivos ignorados que no se pueden regenerar"),
             Keep::Detached => tr!("tiene HEAD separado (quizá un rebase a medias)"),
             Keep::Unmounted => tr!("su disco no está conectado"),
+            Keep::Broken => tr!("carpeta rota: git no puede leerla"),
         }
         .to_string()
     }
@@ -100,6 +106,9 @@ impl Worktree {
             Some(false) => add(tr!("sin fusionar")),
             None => {}
         }
+        if self.broken {
+            add(tr!("carpeta rota: git no puede leerla"));
+        }
         if self.dirty {
             add(tr!("cambios sin commit"));
         }
@@ -109,7 +118,7 @@ impl Worktree {
         match self.unpushed {
             Some(0) => add(tr!("subida")),
             Some(n) => add(&tr!("{n} sin subir", n = n)),
-            None if !self.main && !self.prunable => add(tr!("sin rama remota")),
+            None if !self.main && !self.prunable && !self.broken => add(tr!("sin rama remota")),
             None => {}
         }
         parts.join(" · ")
@@ -164,6 +173,10 @@ impl Cleanup {
             },
             Action::Keep(Keep::Dirty) => tr!("haz commit o descártalos primero").to_string(),
             Action::Keep(Keep::InUse) => tr!("cierra esa terminal primero").to_string(),
+            // Forge no borra lo que no puede mirar; sin la carpeta, la limpieza solo poda.
+            Action::Keep(Keep::Broken) => {
+                tr!("revísala a mano; si sobra, bórrala tú y la limpieza la podará").to_string()
+            }
             _ => return self.describe(),
         };
         format!("{} ({more})", self.describe())
@@ -227,22 +240,22 @@ fn list_with(repo: &Path, sizes: bool) -> Result<Vec<Worktree>, String> {
         if wt.prunable {
             continue;
         }
-        match crate::git::status(&wt.path) {
-            Ok(status) => {
+        // Si git no puede mirar dentro (`.git` roto, carpeta que ya no es un checkout…), el
+        // worktree queda «roto»: su error nunca pasa por un archivo ni por cambios.
+        let status = crate::git::status(&wt.path);
+        let ignored = git(&wt.path, &["status", "--porcelain", "--ignored", "-z"]);
+        match (status, ignored) {
+            (Ok(status), Ok(ignored)) => {
                 wt.dirty = !status.files.is_empty();
                 // Con la rama remota borrada (`[gone]`) no queda nada subido que valga.
                 wt.unpushed = status
                     .upstream
                     .filter(|u| crate::git::resolve_commit(&wt.path, u).is_some())
                     .map(|_| status.ahead);
+                wt.ignored = unrecoverable(&ignored);
             }
-            // Si no se puede mirar, se trata como si tuviera cambios.
-            Err(_) => wt.dirty = true,
+            _ => wt.broken = true,
         }
-        wt.ignored = match git(&wt.path, &["status", "--porcelain", "--ignored", "-z"]) {
-            Ok(out) => unrecoverable(&out),
-            Err(e) => vec![e],
-        };
         if sizes {
             wt.size = dir_size(&wt.path);
         }
@@ -387,6 +400,7 @@ pub fn decide(wt: &Worktree, current: &[PathBuf], in_use: &[PathBuf]) -> Action 
         _ if wt.prunable && volume_missing(&wt.path) => Action::Keep(Keep::Unmounted),
         _ if wt.prunable => Action::Prune { delete_branch },
         _ if inside(in_use) => Action::Keep(Keep::InUse),
+        _ if wt.broken => Action::Keep(Keep::Broken),
         _ if wt.dirty => Action::Keep(Keep::Dirty),
         _ if wt.branch.is_none() => Action::Keep(Keep::Detached),
         _ if !wt.ignored.is_empty() => Action::Keep(Keep::Ignored),
@@ -1230,6 +1244,50 @@ mod tests {
         let plan = clean(&dir, &[], &[], true).unwrap();
         assert_eq!(action(&plan, "wt/done"), Action::Keep(Keep::Dirty));
         assert!(dir.join("wt/done/nuevo.txt").is_file());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_worktree_folder_git_cannot_read_is_broken_and_kept() {
+        // La carpeta sigue ahí, pero su `.git` ya no lleva a ningún repositorio: git falla
+        // dentro de ella y su error no es un archivo ignorado.
+        let dir = test_repo(
+            "wt-broken",
+            &format!("{SQUASHED} && echo basura > wt/done/.git"),
+        );
+        let list = list(&dir).unwrap();
+        let done = find(&list, "wt/done");
+        assert!(done.broken, "{done:?}");
+        assert!(done.ignored.is_empty(), "{done:?}");
+        let state = done.state();
+        assert!(!state.contains("fatal"), "{state}");
+        assert!(state.contains("git no puede leerla"), "{state}");
+        let plan = clean(&dir, &[], &[], true).unwrap();
+        assert_eq!(action(&plan, "wt/done"), Action::Keep(Keep::Broken));
+        let explained = plan
+            .iter()
+            .find(|c| c.worktree.path.ends_with("wt/done"))
+            .unwrap()
+            .explain();
+        assert!(!explained.contains("fatal"), "{explained}");
+        assert!(dir.join("wt/done/c").is_file());
+        assert!(porcelain(&dir).contains("wt/done"), "{}", porcelain(&dir));
+        // Bloqueado o en uso sigue mandando su motivo; nunca pasa a quitarse.
+        let locked = Worktree {
+            locked: true,
+            ..done.clone()
+        };
+        assert_eq!(decide(&locked, &[], &[]), Action::Keep(Keep::Locked));
+        let busy = [done.path.clone()];
+        assert_eq!(decide(done, &[], &busy), Action::Keep(Keep::InUse));
+        // Lo que dice la vista previa: si el dueño borra la carpeta, la limpieza la poda.
+        std::fs::remove_dir_all(dir.join("wt/done")).unwrap();
+        let plan = clean(&dir, &[], &[], true).unwrap();
+        assert!(
+            matches!(action(&plan, "wt/done"), Action::Prune { .. }),
+            "{plan:?}"
+        );
+        assert!(!porcelain(&dir).contains("wt/done"), "{}", porcelain(&dir));
         std::fs::remove_dir_all(dir).unwrap();
     }
 

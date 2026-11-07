@@ -235,7 +235,7 @@ impl App {
             return;
         };
         for wt in list.iter().filter(|w| !w.main) {
-            let dot = match (wt.dirty, wt.merged, wt.prunable) {
+            let dot = match (wt.dirty || wt.broken, wt.merged, wt.prunable) {
                 (_, _, true) => theme::TEXT_4,
                 (true, _, _) => theme::ORANGE,
                 (_, Some(true), _) => theme::GREEN,

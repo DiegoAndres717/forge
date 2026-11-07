@@ -3462,4 +3462,12 @@ pub const EN: &[(&str, &str)] = &[
         "commit or discard them first",
     ),
     ("cierra esa terminal primero", "close that terminal first"),
+    (
+        "carpeta rota: git no puede leerla",
+        "broken folder: git can't read it",
+    ),
+    (
+        "revísala a mano; si sobra, bórrala tú y la limpieza la podará",
+        "check it by hand; if you don't need it, delete it yourself and the cleanup will prune it",
+    ),
 ];
