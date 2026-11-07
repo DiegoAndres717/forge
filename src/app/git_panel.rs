@@ -160,6 +160,11 @@ impl App {
             });
         }
         if let Some(e) = &git.error {
+            // Fuera de git no hay nada que esperar: la línea en gris y sin la ruedita.
+            if forge_core::git::is_not_a_repo(e) && git.data.is_none() {
+                ui.label(RichText::new(e).size(12.0).color(theme::TEXT_3));
+                return;
+            }
             ui.label(RichText::new(e).size(12.0).color(theme::RED));
         }
         let Some((status, _, log)) = &git.data else {
