@@ -4912,6 +4912,31 @@ fn worktrees_are_listed_and_cleaned_only_after_a_preview() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Un proyecto cuya carpeta no es un repositorio git: ni Worktrees ni el panel de Git
+/// enseñan el stderr de git («fatal: not a git repository…»), sino una línea tranquila.
+#[test]
+fn a_project_outside_git_shows_a_calm_line_instead_of_git_stderr() {
+    let _serial = serial();
+    let dir = project("no-repo");
+    std::fs::remove_dir_all(dir.join(".git")).unwrap();
+    let mut h = app(dir.clone());
+    h.get_by_label("Worktrees").click();
+    wait_until(&mut h, "la carga de worktrees", |a| {
+        a.worktrees.error.is_some()
+    });
+    h.run_steps(2);
+    h.get_by_label_contains("no es un repositorio git");
+    assert!(h.query_by_label_contains("fatal").is_none());
+    assert!(h.query_by_label_contains("not a git repository").is_none());
+    h.key_press_modifiers(CMD_SHIFT, Key::G);
+    h.run_steps(2);
+    wait_until(&mut h, "el estado de git", |a| ws(a).git.error.is_some());
+    h.run_steps(2);
+    assert!(h.query_by_label_contains("fatal").is_none());
+    assert!(h.query_by_label_contains("not a git repository").is_none());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Plan #194, fase 2: un worktree de `forge worktree new` cuya rama ya está fusionada: Forge
 /// propone limpiarlo y el clic lleva a la vista previa, que no borra nada.
 #[test]

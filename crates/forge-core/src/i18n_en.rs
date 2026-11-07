@@ -688,6 +688,14 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("no es un repositorio Git", "not a Git repository"),
     (
+        "Esta carpeta no es un repositorio git",
+        "This folder is not a git repository",
+    ),
+    (
+        "Esta carpeta no es un repositorio git: no hay worktrees",
+        "This folder is not a git repository: no worktrees",
+    ),
+    (
         "no se encontró la rama base (configura `base` en [pull_request])",
         "base branch not found (set `base` in [pull_request])",
     ),

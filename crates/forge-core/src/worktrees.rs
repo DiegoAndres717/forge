@@ -302,7 +302,7 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        Err(crate::git::error(&String::from_utf8_lossy(&out.stderr)))
     }
 }
 
@@ -944,6 +944,18 @@ pub fn stray_copy_in_command(command: &str, cwd: &Path, project: &Path) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Una carpeta fuera de git: el error se reconoce y no trae el stderr de git.
+    #[test]
+    fn a_folder_outside_git_says_so_without_git_stderr() {
+        let dir = std::env::temp_dir().join(format!("forge-wt-norepo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for e in [list(&dir).unwrap_err(), list_basic(&dir).unwrap_err()] {
+            assert!(crate::git::is_not_a_repo(&e), "{e}");
+            assert!(!e.contains("fatal"), "{e}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn a_kept_worktree_says_what_blocks_it() {

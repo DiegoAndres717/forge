@@ -18,7 +18,7 @@ pub(super) struct WorktreesView {
     pub(super) list: Option<Vec<Worktree>>,
     pub(super) preview: Option<Vec<Cleanup>>,
     pub(super) applied: Option<Vec<Cleanup>>,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     pub(super) loading: Option<Receiver<Loaded>>,
     /// Worktrees de `forge worktree new` que Forge propone limpiar (rama fusionada o sin la
     /// terminal que los pidió): solo lo propone; la limpieza pasa por la vista previa.
@@ -226,6 +226,15 @@ impl App {
             return;
         }
         if let Some(e) = &view.error {
+            // Fuera de git no hay worktrees: no es un error, solo se dice (en gris).
+            if forge_core::git::is_not_a_repo(e) {
+                small(
+                    ui,
+                    tr!("Esta carpeta no es un repositorio git: no hay worktrees").into(),
+                    theme::TEXT_4,
+                );
+                return;
+            }
             small(ui, e.clone(), theme::RED);
         }
         let Some(list) = &view.list else {

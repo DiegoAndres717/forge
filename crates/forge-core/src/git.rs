@@ -54,8 +54,27 @@ fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        Err(error(&String::from_utf8_lossy(&out.stderr)))
     }
+}
+
+/// Lo que se enseña cuando la carpeta no está dentro de ningún repositorio git.
+pub fn not_a_repo() -> &'static str {
+    crate::tr!("Esta carpeta no es un repositorio git")
+}
+
+/// ¿Es `error` el de una carpeta fuera de git (ya traducido por `error`)?
+pub fn is_not_a_repo(error: &str) -> bool {
+    error == not_a_repo()
+}
+
+/// El error de git para quien lo lee: «fatal: not a git repository (or any parent up to mount
+/// point…)» no le dice nada, y no es un fallo: la carpeta simplemente no es un repositorio.
+pub(crate) fn error(stderr: &str) -> String {
+    if stderr.contains("not a git repository") {
+        return not_a_repo().to_string();
+    }
+    stderr.trim().to_string()
 }
 
 /// Diff de un archivo contra el último commit; uno sin seguimiento sale entero como añadido.
