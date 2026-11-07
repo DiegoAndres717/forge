@@ -192,12 +192,12 @@ pub struct Terminal {
     last_output: Arc<Mutex<Option<std::time::Instant>>>,
     /// Bytes escritos por el programa desde que arrancó.
     output_bytes: Arc<std::sync::atomic::AtomicU64>,
-    /// Cuándo arrancó y cuándo se escribió el comando inicial (y si fue por la pausa del
-    /// prompt o por agotar la espera): para diagnosticar los tests que se agotan.
+    /// Cuándo arrancó y cuándo (y por qué) se escribió el comando inicial: para diagnosticar
+    /// los tests que se agotan.
     #[cfg_attr(not(test), expect(dead_code))]
     started: Instant,
     #[cfg_attr(not(test), expect(dead_code))]
-    typed: Arc<Mutex<Option<(Instant, bool)>>>,
+    typed: Arc<Mutex<Option<(Instant, &'static str)>>>,
 }
 
 /// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
@@ -240,6 +240,17 @@ fn pwsh_args(script: &str) -> Vec<String> {
 }
 
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
+
+/// El shell ya lee con su editor de línea (zle, readline…): la terminal salió del modo
+/// canónico. `None` si no se puede saber.
+#[cfg(unix)]
+fn line_editor_ready(tty: &std::os::fd::OwnedFd) -> Option<bool> {
+    use std::os::fd::AsRawFd;
+    // SAFETY: descriptor propio y abierto; termios es una estructura C de datos simples.
+    let mut t: libc::termios = unsafe { std::mem::zeroed() };
+    let ok = unsafe { libc::tcgetattr(tty.as_raw_fd(), &mut t) } == 0;
+    ok.then_some(t.c_lflag & libc::ICANON == 0)
+}
 
 /// Shell elegido en Ajustes para las terminales nuevas (vacío: el del sistema).
 static SHELL_OVERRIDE: Mutex<String> = Mutex::new(String::new());
@@ -397,8 +408,12 @@ impl Terminal {
             c.request_repaint();
         });
 
-        // El comando se escribe cuando el shell ya mostró su prompt (salida y luego una
-        // pausa breve): escrito antes, la terminal lo repetía encima del prompt.
+        // El comando se escribe cuando el shell ya espera una línea: su editor (zle, readline)
+        // tomó la terminal (sale del modo canónico) y la salida hizo una pausa breve. Escrito
+        // mientras aún carga el perfil, el bash del Mac lo perdía a trozos al cambiar el modo
+        // de la terminal (plan #210); y escrito antes del prompt, la terminal lo repetía encima.
+        // Donde no se puede saber el modo (Windows) basta la pausa; si el shell nunca sale del
+        // modo canónico (sin editor de línea), se escribe igual tras unos segundos.
         // En Windows lo escrito va a PowerShell, que pasa los argumentos a su manera.
         let input = input.map(|i| match cfg!(windows) {
             true => forge_core::agents::powershell_line(i),
@@ -408,24 +423,39 @@ impl Terminal {
         if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
             let typed = typed.clone();
+            #[cfg(unix)]
+            let tty = pair.master.as_raw_fd().and_then(|fd| {
+                // SAFETY: el descriptor es del PTY recién abierto; se duplica para que el hilo
+                // tenga el suyo aunque la terminal se cierre antes.
+                unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }
+                    .try_clone_to_owned()
+                    .ok()
+            });
             std::thread::spawn(move || {
                 let start = std::time::Instant::now();
-                let quiet = std::time::Duration::from_millis(150);
-                while start.elapsed() < std::time::Duration::from_secs(5) {
-                    let ready = output
+                let pause = std::time::Duration::from_millis(150);
+                let reason = loop {
+                    let quiet = output
                         .lock()
                         .unwrap()
-                        .is_some_and(|at| at.elapsed() >= quiet);
-                    if ready {
-                        break;
+                        .is_some_and(|at| at.elapsed() >= pause);
+                    #[cfg(unix)]
+                    let editor = tty.as_ref().and_then(line_editor_ready);
+                    #[cfg(not(unix))]
+                    let editor: Option<bool> = None;
+                    match editor {
+                        Some(true) if quiet => break "editor de línea listo",
+                        None if quiet => break "pausa en la salida",
+                        _ if quiet && start.elapsed() >= std::time::Duration::from_secs(5) => {
+                            break "pausa, sin editor de línea";
+                        }
+                        _ if start.elapsed() >= std::time::Duration::from_secs(10) => {
+                            break "espera agotada";
+                        }
+                        _ => std::thread::sleep(std::time::Duration::from_millis(30)),
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(30));
-                }
-                let quiet = output
-                    .lock()
-                    .unwrap()
-                    .is_some_and(|at| at.elapsed() >= quiet);
-                *typed.lock().unwrap() = Some((Instant::now(), quiet));
+                };
+                *typed.lock().unwrap() = Some((Instant::now(), reason));
                 let _ = writer
                     .lock()
                     .unwrap()
@@ -476,14 +506,9 @@ impl Terminal {
     pub fn diagnose(&self) -> String {
         let ago = |at: Instant| format!("{:.1} s", at.elapsed().as_secs_f32());
         let typed = match *self.typed.lock().unwrap() {
-            Some((at, quiet)) => format!(
-                "escrito a los {:.1} s ({})",
-                at.duration_since(self.started).as_secs_f32(),
-                if quiet {
-                    "tras la pausa"
-                } else {
-                    "sin pausa: espera agotada"
-                }
+            Some((at, why)) => format!(
+                "escrito a los {:.1} s ({why})",
+                at.duration_since(self.started).as_secs_f32()
             ),
             None => "sin comando escrito".into(),
         };
@@ -2635,6 +2660,43 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+    }
+
+    /// El comando inicial no se escribe mientras el shell aún carga su perfil (terminal en modo
+    /// canónico): en el bash del Mac del CI, lo escrito entonces se perdía a trozos cuando
+    /// readline cambiaba el modo de la terminal (plan #210). Se espera al editor de línea.
+    #[cfg(unix)]
+    #[test]
+    fn the_first_command_waits_for_the_line_editor() {
+        let ctx = egui::Context::default();
+        // Un perfil que escribe algo y tarda en terminar (como path_helper en un Mac cargado).
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.args([
+            "-c",
+            "echo cargando el perfil; sleep 1; exec bash --norc --noprofile -i",
+        ]);
+        let term = Terminal::start(
+            &ctx,
+            Path::new("/tmp"),
+            &HashMap::new(),
+            cmd,
+            Some("echo pedido: $((40+2))"),
+        )
+        .unwrap();
+        let deadline = Instant::now() + std::time::Duration::from_secs(20);
+        while !term
+            .screen_text(50)
+            .is_some_and(|s| s.lines().any(|l| l == "pedido: 42"))
+        {
+            assert!(Instant::now() < deadline, "{}", term.diagnose());
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let (at, _) = term.typed.lock().unwrap().unwrap();
+        assert!(
+            at.duration_since(term.started) >= std::time::Duration::from_secs(1),
+            "escrito antes de que el shell estuviera listo: {}",
+            term.diagnose()
+        );
     }
 
     #[test]
