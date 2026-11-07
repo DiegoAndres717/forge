@@ -198,6 +198,9 @@ pub struct Terminal {
     started: Instant,
     #[cfg_attr(not(test), expect(dead_code))]
     typed: Arc<Mutex<Option<(Instant, &'static str)>>>,
+    /// Tests: lo que llegó del PTY tal cual, con marcas de cuándo se escribió y se redimensionó.
+    #[cfg(test)]
+    transcript: Arc<Mutex<Vec<u8>>>,
 }
 
 /// Variables de Forge para todas las terminales (enlaces de comandos peligrosos, ZDOTDIR,
@@ -380,6 +383,10 @@ impl Terminal {
         let activity = last_output.clone();
         let output_bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let bytes = output_bytes.clone();
+        #[cfg(test)]
+        let transcript = Arc::new(Mutex::new(Vec::new()));
+        #[cfg(test)]
+        let raw = transcript.clone();
         std::thread::spawn(move || {
             let mut parser: Processor = Processor::new();
             let mut buf = [0u8; 64 * 1024];
@@ -396,6 +403,8 @@ impl Terminal {
                 }
                 *activity.lock().unwrap() = Some(std::time::Instant::now());
                 bytes.fetch_add(n as u64, Ordering::Relaxed);
+                #[cfg(test)]
+                raw.lock().unwrap().extend_from_slice(&buf[..n]);
                 for url in scanner.feed(&buf[..n]) {
                     let mut urls = u.lock().unwrap();
                     if !urls.contains(&url) && urls.len() < 8 {
@@ -423,6 +432,8 @@ impl Terminal {
         if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
             let typed = typed.clone();
+            #[cfg(test)]
+            let raw = transcript.clone();
             #[cfg(unix)]
             let tty = pair.master.as_raw_fd().and_then(|fd| {
                 // SAFETY: el descriptor es del PTY recién abierto; se duplica para que el hilo
@@ -456,6 +467,8 @@ impl Terminal {
                     }
                 };
                 *typed.lock().unwrap() = Some((Instant::now(), reason));
+                #[cfg(test)]
+                raw.lock().unwrap().extend_from_slice(b"<<escrito>>");
                 let _ = writer
                     .lock()
                     .unwrap()
@@ -498,6 +511,8 @@ impl Terminal {
             output_bytes,
             started: Instant::now(),
             typed,
+            #[cfg(test)]
+            transcript,
         })
     }
 
@@ -519,6 +534,9 @@ impl Terminal {
             self.exited(),
             self.output_bytes(),
             self.last_output().map_or("—".into(), ago),
+        ) + &format!(
+            "\n    salida en bruto: {}",
+            String::from_utf8_lossy(&self.transcript.lock().unwrap()).escape_debug()
         )
     }
 
@@ -683,6 +701,11 @@ impl Terminal {
             self.size = size;
             self.term.lock().unwrap().resize(size);
             let _ = self.master.resize(pty_size(size));
+            #[cfg(test)]
+            self.transcript
+                .lock()
+                .unwrap()
+                .extend_from_slice(format!("<<{}x{}>>", size.cols, size.rows).as_bytes());
         }
 
         let response = ui.interact(rect, id, Sense::click_and_drag());
