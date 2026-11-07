@@ -1282,6 +1282,16 @@ fn assert_inside_the_narrow_drawer(h: &Harness<'_, App>, rect: egui::Rect, what:
     );
 }
 
+/// El botón de cerrar de un cajón, por su atajo: «Cerrar (⌘⇧G)» en macOS, con Ctrl+Shift
+/// en Linux y Windows.
+fn close_button(h: &Harness<'_, App>, key: char) -> egui::Rect {
+    h.get_by(|n| {
+        n.label()
+            .is_some_and(|l| l.starts_with("Cerrar (") && l.ends_with(&format!("{key})")))
+    })
+    .rect()
+}
+
 #[test]
 fn the_git_panel_fits_a_narrow_drawer() {
     let _serial = serial();
@@ -1315,7 +1325,6 @@ fn the_git_panel_fits_a_narrow_drawer() {
     h.run_steps(3);
     let mut checked = 0;
     for label in [
-        "Cerrar (⌘⇧G)",
         "Pull",
         "Push",
         "Nueva rama",
@@ -1335,7 +1344,9 @@ fn the_git_panel_fits_a_narrow_drawer() {
             checked += 1;
         }
     }
-    assert!(checked >= 12);
+    assert!(checked >= 11);
+    let close = close_button(&h, 'G');
+    assert_inside_the_narrow_drawer(&h, close, "cerrar");
     let branch = h.get_by(|n| n.value().is_some_and(|v| v.contains("una-rama")));
     assert_inside_the_narrow_drawer(&h, branch.rect(), "la rama");
 }
@@ -1361,7 +1372,7 @@ fn the_memory_panel_fits_a_narrow_drawer() {
     h.state_mut().drawer_width = DRAWER_MIN;
     h.key_press_modifiers(CMD_SHIFT, Key::M);
     h.run_steps(3);
-    let close = h.get_by_label("Cerrar (⌘⇧M)").rect();
+    let close = close_button(&h, 'M');
     assert_inside_the_narrow_drawer(&h, close, "cerrar");
     let note = h.get_by_label_contains("Una decisión").rect();
     assert_inside_the_narrow_drawer(&h, note, "la nota");
