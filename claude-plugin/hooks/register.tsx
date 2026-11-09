@@ -69,6 +69,17 @@ const DANGER_HINT = /\b(git|rm|docker|psql|mysql|mariadb|dropdb)(\.exe)?\b/i
 // A stray worktree or clone of the project: the shims stop it too, but denying it here
 // tells the model to use `forge worktree new` before anything runs. Forge decides.
 const STRAY_HINT = /\bgit\b[\s\S]*\b(worktree\s+add|clone)\b/
+// A review snapshot (`git worktree add --detach --no-checkout <tmp> <commit>`, as Pi's review
+// extension builds it) isn't a working copy: like `worktrees::stray_copy`, checked per segment
+// of the line, so another copy chained after it is still asked.
+const SNAPSHOT_FLAGS = ['--detach', '--no-checkout']
+const strayHint = (command: string) =>
+  command.replace(/&&|\|\|/g, ';').split(/[;|\n]/).some(segment => {
+    if (!STRAY_HINT.test(segment)) return false
+    const words = segment.split(/\s+/).map(w => w.replace(/^['"]+|['"]+$/g, ''))
+    const options = words.includes('--') ? words.slice(0, words.indexOf('--')) : words
+    return !SNAPSHOT_FLAGS.every(f => options.includes(f))
+  })
 const SECRET_HINT = /\.env|\.ssh|\.aws|\.gnupg|\.kube|\.docker|gh\/hosts|gcloud|\.pem|\.key\b|\.p12|\.pfx|id_rsa|id_ed25519|id_ecdsa|\.netrc|\.pgpass|\.npmrc|\.pypirc|credentials|keychain|\.kdbx/
 
 /** Searching and reading tools: after this many in a row the main loop is nudged to
@@ -477,7 +488,7 @@ export const register: Register = on => {
     const verdict = await next(e)
     if (verdict.decision === 'deny') return verdict
     const input = (e.input ?? {}) as { file_path?: unknown; path?: unknown; command?: unknown }
-    if (e.tool === 'Bash' && typeof input.command === 'string' && STRAY_HINT.test(input.command)) {
+    if (e.tool === 'Bash' && typeof input.command === 'string' && strayHint(input.command)) {
       const out = await forge($, ['worktree', 'check', '--command', input.command], undefined, 2_000)
       if (out && out.exitCode === 0) return { decision: 'deny' as const, reason: out.stdout.trim() }
     }

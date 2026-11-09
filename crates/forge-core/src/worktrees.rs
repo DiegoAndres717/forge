@@ -836,6 +836,17 @@ fn same_source(source: &str, cwd: &Path, project: &Path) -> bool {
     crate::git::remote(project).is_some_and(|r| crate::git::normalize_remote(source) == r)
 }
 
+/// ¿`git worktree add` con `--detach` y `--no-checkout` (antes de `--`)? Es la instantánea de
+/// solo lectura que arman las revisiones (la extensión de Pi), no una copia para trabajar.
+fn review_snapshot(rest: &[String]) -> bool {
+    let options: Vec<&str> = rest
+        .iter()
+        .map(String::as_str)
+        .take_while(|a| *a != "--")
+        .collect();
+    options.contains(&"--detach") && options.contains(&"--no-checkout")
+}
+
 /// Si `git <args>` (desde `cwd`) crea un worktree o un clon del mismo repositorio que
 /// `project`, el aviso para el agente (en inglés: es para él).
 pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String> {
@@ -860,7 +871,9 @@ pub fn stray_copy(args: &[String], cwd: &Path, project: &Path) -> Option<String>
     let (sub, rest) = (args.get(i)?.as_str(), &args[i + 1..]);
     let what = match sub {
         "worktree"
-            if rest.iter().find(|a| !a.starts_with('-'))? == "add" && same_repo(&dir, project) =>
+            if rest.iter().find(|a| !a.starts_with('-'))? == "add"
+                && !review_snapshot(rest)
+                && same_repo(&dir, project) =>
         {
             "a worktree"
         }
@@ -1100,6 +1113,28 @@ mod tests {
         assert_eq!(stray(&format!("clone {} c", other.display()), &tmp), None);
         assert_eq!(stray("clone https://github.com/acme/otro c", &tmp), None);
         assert_eq!(stray("worktree add ../x", &other), None);
+        // Una instantánea para revisar (`--detach` y `--no-checkout`, en cualquier orden y
+        // tras opciones globales) no es una copia de trabajo: pasa.
+        for snapshot in [
+            "worktree add --detach --no-checkout /tmp/snap abc123".to_string(),
+            "worktree add --no-checkout --detach /tmp/snap HEAD".to_string(),
+            "worktree add --no-checkout /tmp/snap --detach HEAD".to_string(),
+            format!(
+                "-C {} -c core.quotepath=off worktree add --no-checkout --detach /tmp/s HEAD",
+                dir.display()
+            ),
+        ] {
+            assert_eq!(stray(&snapshot, &dir), None, "{snapshot}");
+        }
+        // Solo una de las dos, o tras `--` (ya es la carpeta), sigue siendo una copia.
+        for copy in [
+            "worktree add --detach ../x",
+            "worktree add --no-checkout ../x",
+            "worktree add -b feat/y --no-checkout ../y",
+            "worktree add --detach -- --no-checkout HEAD",
+        ] {
+            assert!(stray(copy, &dir).is_some(), "{copy}");
+        }
         std::fs::remove_dir_all(dir).unwrap();
         std::fs::remove_dir_all(other).unwrap();
     }
@@ -1122,6 +1157,26 @@ mod tests {
         // Una carpeta que no se puede seguir (`cd "/a b"`, `cd ~/x`): se mira el proyecto.
         assert!(line("cd \"/no existe/x\" && git worktree add y", &dir).is_some());
         assert_eq!(line("git worktree list", &dir), None);
+        // La instantánea de una revisión (y quitarla después) pasa; otra copia en la misma
+        // línea, no.
+        let snapshot = "git worktree add --detach --no-checkout /tmp/snap abc123";
+        assert_eq!(line(snapshot, &dir), None);
+        assert_eq!(
+            line(
+                &format!("{snapshot} && git worktree remove --force /tmp/snap"),
+                &dir
+            ),
+            None
+        );
+        assert_eq!(
+            line(
+                "bash -lc 'git -C . worktree add --no-checkout --detach /tmp/s HEAD'",
+                &dir
+            ),
+            None
+        );
+        assert!(line(&format!("{snapshot}; git worktree add ../x"), &dir).is_some());
+        assert!(line("git worktree add --detach ../x", &dir).is_some());
         let away = format!("cd {} && git worktree add x", tmp.display());
         assert_eq!(line(&away, &dir), None);
         assert_eq!(
