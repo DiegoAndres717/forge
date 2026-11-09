@@ -585,6 +585,13 @@ test('a stray worktree or clone of the project is denied with how to do it', asy
   const before = asked.length
   expect((await check('git worktree list')).decision).toBe('allow')
   expect(asked.length).toBe(before)
+  // A review snapshot (detached, no checkout) isn't a working copy: not even asked.
+  expect((await check('git worktree add --no-checkout --detach /tmp/snap abc123')).decision).toBe('allow')
+  expect((await check('git -C . worktree add --detach --no-checkout /tmp/snap HEAD && git worktree remove /tmp/snap')).decision).toBe('allow')
+  expect(asked.length).toBe(before)
+  // Only one of the two flags, or another copy on the same line, is still asked and denied.
+  expect((await check('git worktree add --detach ../x')).decision).toBe('deny')
+  expect((await check('git worktree add --detach --no-checkout /tmp/s HEAD; git worktree add ../x')).decision).toBe('deny')
 })
 
 test('reading a file with secrets asks first; other files keep their verdict', async ($, on) => {
