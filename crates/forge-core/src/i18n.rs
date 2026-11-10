@@ -76,7 +76,7 @@ pub fn t(s: &'static str) -> &'static str {
         .or_insert_with(|| Box::leak(pc_keys(s).into_boxed_str()))
 }
 
-fn translate(lang: Lang, s: &'static str) -> &'static str {
+pub(crate) fn translate(lang: Lang, s: &'static str) -> &'static str {
     match lang {
         Lang::Es => s,
         Lang::En => EN.get(s).copied().unwrap_or(s),

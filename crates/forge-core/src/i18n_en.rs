@@ -1,5 +1,40 @@
 // Traducciones al inglés (clave = texto en español del código).
 pub const EN: &[(&str, &str)] = &[
+    (crate::norms::TEMPLATE, crate::norms::TEMPLATE_EN),
+    ("una norma no tiene `id`", "a norm has no `id`"),
+    (
+        "la norma \"{p0}\" está repetida",
+        "the norm \"{p0}\" is repeated",
+    ),
+    (
+        "la norma \"{p0}\" necesita `look_for` (qué buscar)",
+        "the norm \"{p0}\" needs `look_for` (what to look for)",
+    ),
+    (
+        "la norma \"{p0}\" necesita `paths` (a qué archivos aplica)",
+        "the norm \"{p0}\" needs `paths` (which files it applies to)",
+    ),
+    ("Revisor de normas del proyecto", "Project norms reviewer"),
+    ("las normas del proyecto", "the project's norms"),
+    (
+        "Eres el revisor de normas del proyecto. Revisa el cambio SOLO contra estas normas, cada una solo en los archivos que indica; lo que no incumpla ninguna no es un hallazgo y, si nada las incumple, aprueba.\n{p0}\nEn cada hallazgo añade \"norm\": \"<id de la norma que incumple>\". Marca \"blocking\" solo lo que incumple una norma blocking; lo de una suggestion va como \"warning\".",
+        "You are the project norms reviewer. Review the change ONLY against these norms, each one only in the files it lists; anything that breaks none of them is not a finding and, if nothing breaks them, approve.\n{p0}\nIn every finding add \"norm\": \"<id of the norm it breaks>\". Mark as \"blocking\" only what breaks a blocking norm; what breaks a suggestion goes as \"warning\".",
+    ),
+    (
+        "Norma del proyecto que incumpliría [{p0}]: {p1}\nJuzga si el código la incumple.\n",
+        "Project norm it would break [{p0}]: {p1}\nJudge whether the code breaks it.\n",
+    ),
+    (
+        "el cambio no toca las rutas de ninguna norma",
+        "the change touches no norm's paths",
+    ),
+    ("normas que aplican: {p0}", "norms that apply: {p0}"),
+    ("Creado {p0}", "Created {p0}"),
+    (
+        "Las normas corren en las etapas con require_ai_review (rules.toml) y con forge review.",
+        "Norms run in the stages with require_ai_review (rules.toml) and with forge review.",
+    ),
+    ("    normas que aplican: {p0}", "    norms that apply: {p0}"),
     ("no se encontró $HOME", "$HOME not found"),
     (
         "{e} (los workspaces no se guardarán)",

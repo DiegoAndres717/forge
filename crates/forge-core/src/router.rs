@@ -160,7 +160,7 @@ impl RouterConfig {
                 "claude -p --model {model} --effort {effort} --output-format json --no-session-persistence \
                  --strict-mcp-config --disable-slash-commands --setting-sources '' \
                  --tools 'Read,Grep,Glob' --allowedTools 'Read,Grep,Glob' \
-                 --disallowedTools 'Read(**/.env*)' 'Read(**/*.pem)' 'Read(**/*.key)' 'Read(~/.ssh/**)' \
+                 --disallowedTools 'Read(**/.env*)' 'Read(**/*.pem)' 'Read(**/*.key)' 'Read(~/.ssh/**)' 'Read(**/.git/**)' \
                  --max-budget-usd {max_cost}",
                 OutputFormat::ClaudeJson,
                 false,
@@ -641,6 +641,9 @@ pub struct Finding {
     pub line: u64,
     #[serde(default)]
     pub message: String,
+    /// Id de la norma del proyecto que incumple (solo en la revisión por normas).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub norm: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -728,7 +731,12 @@ impl AiOutcome {
             } else {
                 format!("{}:{} ", f.file, f.line)
             };
-            out.push(format!("[{}] {at}{}", f.severity, f.message));
+            let norm = if f.norm.is_empty() {
+                String::new()
+            } else {
+                format!("[{}] ", f.norm)
+            };
+            out.push(format!("[{}] {norm}{at}{}", f.severity, f.message));
         }
         if let Some(r) = &self.reason {
             out.push(r.clone());
@@ -830,7 +838,8 @@ fn call(
             "{max_cost}",
             &format!("{:.2}", config.max_cost_per_call_usd),
         );
-    let mut child = crate::shell_command(&command)
+    let mut cmd = crate::shell_command(&command);
+    let mut child = blind(&mut cmd)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -889,6 +898,32 @@ fn call(
     let review =
         parse_review(&text).ok_or_else(|| tr!("la respuesta no es el JSON pedido").to_string());
     review.map(|r| (r, usage))
+}
+
+/// Revisión a ciegas: el revisor hereda el entorno del Guard, que en un hook de git es el del
+/// agente que hizo el cambio. Se quitan las variables que dicen qué agente, sesión o modelo lo
+/// hizo (un revisor con shell, como Codex, podría leerlas). FORGE_ORIGIN se cambia en vez de
+/// quitarse: con él siguen activos los shims y el hook que protegen los secretos.
+fn blind(cmd: &mut Command) -> &mut Command {
+    for var in [
+        "FORGE_SESSION_ID",
+        "FORGE_PANEL",
+        "FORGE_ACCOUNT_ID",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+        "CLAUDECODE",
+        "CLAUDE_CODE_ENTRYPOINT",
+    ] {
+        cmd.env_remove(var);
+    }
+    // Solo si ya lo tenía (hook de un agente): fuera de una terminal de agente no se inventa.
+    let inherited = std::env::var_os("FORGE_ORIGIN").is_some()
+        || cmd
+            .get_envs()
+            .any(|(k, v)| k == "FORGE_ORIGIN" && v.is_some());
+    if inherited {
+        cmd.env("FORGE_ORIGIN", "forge-review");
+    }
+    cmd
 }
 
 fn shell_word(s: &str) -> String {
@@ -1118,7 +1153,16 @@ pub fn specialist(
         Ok(d) => d,
         Err(e) => return incomplete(Vec::new(), tr!("no se pudo preparar el diff: {e}", e = e)),
     };
-    let role = specialist_role(reviewer);
+    let role = if activation.norms.is_empty() {
+        specialist_role(reviewer)
+    } else {
+        let role = crate::norms::role(&activation.norms, &activation.files);
+        if reviewer.blocking {
+            role
+        } else {
+            format!("{role} {}", precision_gate())
+        }
+    };
     let started = Instant::now();
     let label = format!("{} · {} {}", reviewer.name, chosen.provider, chosen.model);
     match call(config, &chosen, &prompt_with(&role, ctx, &diff), &ctx.repo) {
@@ -1140,13 +1184,29 @@ pub fn specialist(
             let mut steps = vec![step];
             let mut findings = review.findings;
             let mut verdict = verdict;
+            // Normas: solo una norma bloqueante bloquea, y bloquear exige un hallazgo suyo.
+            if !activation.norms.is_empty() {
+                findings = crate::norms::settle(findings, &activation.norms);
+                if verdict == AiVerdict::Block && !findings.iter().any(|f| f.severity == "blocking")
+                {
+                    verdict = AiVerdict::Changes;
+                }
+            }
             // Solo lo que bloquearía pasa por el refutador (idea de gentle-ai): menos
             // bloqueos falsos sin gastar en lo informativo.
             // Bloquear sin hallazgos concretos no tiene nada que desmentir: sigue bloqueando.
             let had_blocking = findings.iter().any(|f| f.severity == "blocking");
             if config.refuter && reviewer.blocking && verdict == AiVerdict::Block && had_blocking {
                 findings = refute(
-                    config, ctx, reviewer, &diff, findings, spent, local, &mut steps,
+                    config,
+                    ctx,
+                    reviewer,
+                    &activation.norms,
+                    &diff,
+                    findings,
+                    spent,
+                    local,
+                    &mut steps,
                 );
                 if !findings.iter().any(|f| f.severity == "blocking") {
                     verdict = AiVerdict::Changes;
@@ -1190,6 +1250,7 @@ fn refute(
     config: &RouterConfig,
     ctx: &ReviewContext,
     reviewer: &crate::reviewers::ReviewerSpec,
+    norms: &[crate::norms::Norm],
     diff: &str,
     findings: Vec<Finding>,
     mut spent: f64,
@@ -1214,10 +1275,20 @@ fn refute(
                 return f;
             }
             tried += 1;
+            // Si incumple una norma, el refutador juzga contra esa norma, no contra su criterio.
+            let norm = norms
+                .iter()
+                .find(|n| n.id == f.norm)
+                .map(|n| tr!(
+                    "Norma del proyecto que incumpliría [{p0}]: {p1}\nJuzga si el código la incumple.\n",
+                    p0 = n.id,
+                    p1 = n.look_for.trim()
+                ))
+                .unwrap_or_default();
             let prompt = format!(
                 "Eres un refutador. Otro revisor ({}) marcó este hallazgo como bloqueante. \
                  Intenta desmentirlo con el diff: ¿es un defecto real que se demuestra con el código mostrado?\n\
-                 Hallazgo: {}:{} {}\n\n\
+                 Hallazgo: {}:{} {}\n{norm}\n\
                  Diff:\n```diff\n{diff}\n```\n\n\
                  Responde SOLO con un objeto JSON: {{\"verdict\": \"block\" si el hallazgo es real, \
                  \"approve\" si es falso o no se sostiene, \"changes\" si el diff no basta para decidir, \
@@ -1932,6 +2003,44 @@ mod tests {
     }
 
     #[test]
+    fn reviewers_never_see_which_agent_made_the_change() {
+        // El Guard corre en el hook de git del agente: su entorno dice quién es.
+        let mut cmd = crate::shell_command(if cfg!(windows) {
+            "Get-ChildItem env: | ForEach-Object { $_.Name + '=' + $_.Value }"
+        } else {
+            "env"
+        });
+        cmd.env("FORGE_ORIGIN", "Claude Code")
+            .env("FORGE_SESSION_ID", "sess-42")
+            .env("FORGE_PANEL", "7")
+            .env("FORGE_ACCOUNT_ID", "3")
+            .env("CLAUDE_CODE_SUBAGENT_MODEL", "haiku-author")
+            .env("CLAUDECODE", "1")
+            .env("CLAUDE_CODE_ENTRYPOINT", "cli");
+        let out = blind(&mut cmd).output().unwrap();
+        let env = String::from_utf8_lossy(&out.stdout);
+        for leak in [
+            "Claude Code",
+            "sess-42",
+            "FORGE_PANEL=",
+            "FORGE_ACCOUNT_ID=",
+            "haiku-author",
+            "CLAUDECODE=",
+            "CLAUDE_CODE_ENTRYPOINT=",
+        ] {
+            assert!(!env.contains(leak), "el revisor ve «{leak}»");
+        }
+        // Sigue siendo un proceso de agente para los shims que protegen los secretos.
+        assert!(env.contains("FORGE_ORIGIN=forge-review"), "{env}");
+        // Claude, además, no lee el historial de git (autor y mensajes de los commits).
+        let claude = RouterConfig::default()
+            .provider("anthropic")
+            .unwrap()
+            .command;
+        assert!(claude.contains("'Read(**/.git/**)'"), "{claude}");
+    }
+
+    #[test]
     fn judgment_runs_two_blind_judges_in_parallel() {
         let dir = std::env::temp_dir().join(format!("forge-judgment-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -2007,6 +2116,7 @@ mod tests {
             file: file.into(),
             line,
             message: message.into(),
+            norm: String::new(),
         };
         let judge = |verdict: &str, findings| ModelReview {
             verdict: verdict.into(),
@@ -2258,6 +2368,7 @@ mod tests {
         let activation = crate::reviewers::Activation {
             reviewer: security,
             files: vec!["a.txt".into()],
+            norms: vec![],
         };
         // El refutador (la ruta de seguridad, «potente») lo confirma: sigue bloqueando.
         let outcome = specialist(&config, &rules, &ctx, &activation, 0.0, false);
