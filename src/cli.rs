@@ -578,9 +578,17 @@ fn gate(
     };
     let handle = guard::run(project_dir, &project.root(), rules, stage, options, || {});
 
-    // Muestra el análisis y luego cada check según termina.
+    // Muestra el análisis y luego cada check y cada revisión con IA según termina: un
+    // hallazgo bloqueante se ve en cuanto su revisor responde (plan #237 fase 2).
     let mut shown_items = false;
     let mut shown_checks = vec![false; 0];
+    let mut shown_ai: Vec<String> = Vec::new();
+    let print_ai = |item: &guard::Item| {
+        out.line(&format!("  {} {}", level_mark(out, item.level), item.label));
+        for d in item.details.iter().take(12) {
+            out.line(&out.paint("2", &format!("      {d}")));
+        }
+    };
     loop {
         let finished = handle.snapshot(|r| {
             if !shown_items && !r.analyzing {
@@ -599,7 +607,7 @@ fn gate(
                         &tr!("  candidato {p0}{place}", p0 = c.id, place = place),
                     ));
                 }
-                // Las revisiones con IA se muestran al final, cuando terminan.
+                // Las revisiones con IA se muestran cuando terminan.
                 for item in r.items.iter().filter(|i| !is_ai(&i.id)) {
                     out.line(&format!("  {} {}", level_mark(out, item.level), item.label));
                     if item.level != Level::Pass && item.level != Level::Info {
@@ -622,6 +630,17 @@ fn gate(
                     print_check(out, r, c);
                 }
             }
+            if shown_items {
+                for item in &r.items {
+                    if is_ai(&item.id)
+                        && item.level != Level::Pending
+                        && !shown_ai.contains(&item.id)
+                    {
+                        shown_ai.push(item.id.clone());
+                        print_ai(item);
+                    }
+                }
+            }
             r.finished()
         });
         if finished {
@@ -642,11 +661,12 @@ fn gate(
     }
 
     handle.snapshot(|r| {
-        for item in r.items.iter().filter(|i| is_ai(&i.id)) {
-            out.line(&format!("  {} {}", level_mark(out, item.level), item.label));
-            for d in item.details.iter().take(12) {
-                out.line(&out.paint("2", &format!("      {d}")));
-            }
+        for item in r
+            .items
+            .iter()
+            .filter(|i| is_ai(&i.id) && !shown_ai.contains(&i.id))
+        {
+            print_ai(item);
         }
         let verdict = r.verdict();
         let (done, total) = r.progress();

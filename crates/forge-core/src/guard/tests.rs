@@ -686,6 +686,152 @@ mod unit {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Plan #237 fase 2: el hallazgo de un revisor se ve en cuanto ese revisor responde, sin
+    /// esperar a los demás (antes llegaban todos juntos al terminar el más lento).
+    #[test]
+    fn a_reviewer_finding_shows_before_the_slower_reviewers_finish() {
+        let dir = std::env::temp_dir().join(format!("forge-instant-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".forge")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let sh = |cmd: &str| {
+            assert!(
+                Command::new("sh")
+                    .args(["-c", cmd])
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "{cmd}"
+            )
+        };
+        sh(
+            "git init -q -b main && git config user.email t@t && git config user.name t && git config core.autocrlf false",
+        );
+        std::fs::write(dir.join("README.md"), "x\n").unwrap();
+        sh("git add README.md && git commit -qm start");
+        std::fs::create_dir_all(dir.join("src/api")).unwrap();
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(
+            dir.join("src/api/users.ts"),
+            "export const q = (id: string) => \"SELECT * FROM users WHERE id = \" + id;\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("lib/util.ts"), "export const one = 1;\n").unwrap();
+        sh("git add src lib");
+        std::fs::write(
+            dir.join(".forge/norms.toml"),
+            "[[norms]]\nid = \"sql-params\"\nseverity = \"blocking\"\npaths = [\"src/api/**\"]\nlook_for = \"SQL built by concatenation\"\n",
+        )
+        .unwrap();
+        // Un revisor propio lento: no responde hasta que exista `release`.
+        std::fs::write(
+            dir.join(".forge/agents.toml"),
+            "[[reviewers]]\nid = \"slowpoke\"\npaths = [\"lib/**\"]\nfocus = \"slowpoke area\"\n",
+        )
+        .unwrap();
+        let release = dir.join("release");
+        // Si el test falla antes de tiempo, el proveedor lento no queda esperando.
+        struct Release(std::path::PathBuf);
+        impl Drop for Release {
+            fn drop(&mut self) {
+                let _ = std::fs::write(&self.0, "");
+            }
+        }
+        let _release = Release(release.clone());
+        let block = "{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"concatenated SQL\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"src/api/users.ts\",\"line\":1,\"norm\":\"sql-params\",\"message\":\"query built by concatenation\"}]}";
+        let approve =
+            "{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"ok\",\"findings\":[]}";
+        let command = if cfg!(windows) {
+            format!(
+                "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd(); if ($p.Contains('sql-params')) {{ echo '{block}' }} else {{ if ($p.Contains('slowpoke')) {{ while (-not (Test-Path -LiteralPath '{}')) {{ Start-Sleep -Milliseconds 100 }} }}; echo '{approve}' }}",
+                release.display()
+            )
+        } else {
+            format!(
+                "p=$(cat); case \"$p\" in *sql-params*) echo '{block}';; *slowpoke*) while [ ! -f '{}' ]; do sleep 0.1; done; echo '{approve}';; *) echo '{approve}';; esac",
+                release.display()
+            )
+        };
+        let mut config = crate::router::RouterConfig::default();
+        config.providers.insert(
+            "fake".into(),
+            crate::router::ProviderDef {
+                command,
+                format: crate::router::OutputFormat::Text,
+                cost_per_call_usd: 0.0,
+                local: true,
+            },
+        );
+        for task in ["classification", "code_review", "architecture", "security"] {
+            config.tasks.insert(
+                task.into(),
+                crate::router::TaskRoute {
+                    provider: "fake".into(),
+                    model: "m".into(),
+                    effort: None,
+                },
+            );
+        }
+        let reviewers: Vec<_> = crate::reviewers::load(&dir)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.id == "norms" || r.id == "slowpoke")
+            .collect();
+        let notified = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = notified.clone();
+        let handle = run(
+            &dir,
+            &dir,
+            rules("[commit]\nrequire_ai_review = true\n"),
+            Stage::Commit,
+            RunOptions {
+                env: Default::default(),
+                exceptions: vec![],
+                push_range: None,
+                evidence: vec![],
+                name: "test".into(),
+                routing: Some(config),
+                month_spent: 0.0,
+                reviewers,
+            },
+            move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            },
+        );
+        let level =
+            |id: &str| handle.snapshot(|r| r.items.iter().find(|i| i.id == id).map(|i| i.level));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while level("reviewer:norms") != Some(Level::Block) {
+            assert!(
+                Instant::now() < deadline,
+                "el hallazgo bloqueante no llegó mientras el otro revisor seguía: {:#?}",
+                handle.snapshot(|r| r
+                    .items
+                    .iter()
+                    .map(|i| format!("{} {:?} {}", i.id, i.level, i.label))
+                    .collect::<Vec<_>>())
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // El lento sigue revisando: el hallazgo se vio antes del final.
+        assert_eq!(level("reviewer:slowpoke"), Some(Level::Pending));
+        assert!(!handle.snapshot(GuardRun::finished));
+        assert_eq!(handle.snapshot(GuardRun::verdict), Verdict::Blocked);
+        let blocking = handle
+            .snapshot(GuardRun::first_blocking)
+            .unwrap_or_default();
+        assert!(
+            blocking.contains("sql-params") && blocking.contains("query built by"),
+            "el aviso dice qué norma y qué hallazgo: {blocking}"
+        );
+        assert!(notified.load(std::sync::atomic::Ordering::Relaxed) > 0);
+        std::fs::write(&release, "").unwrap();
+        wait(&handle);
+        assert_eq!(level("reviewer:slowpoke"), Some(Level::Pass));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn reviewers_disagreement() {
         let o = |name: &str, verdict| (name.to_string(), verdict, 0.9, String::new());

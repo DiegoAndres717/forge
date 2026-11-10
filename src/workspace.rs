@@ -182,8 +182,10 @@ pub struct GuardView {
     pub ai_spend: Option<(f64, f64)>,
     /// Formulario del pull request (borrador editable antes de publicarlo con `gh`).
     pub pr: Option<forge_core::pr::Draft>,
-    /// Terminó una validación mientras el proyecto no estaba a la vista.
+    /// Guard bloqueó (p. ej. un hallazgo bloqueante del revisor) sin que se estuviera viendo.
     pub unseen: bool,
+    /// El bloqueo de esta ejecución ya encendió el aviso (uno por ejecución).
+    pub alerted: bool,
 }
 
 pub struct AllowForm {
@@ -214,6 +216,7 @@ impl Default for GuardView {
             ai_spend: None,
             pr: None,
             unseen: false,
+            alerted: false,
         }
     }
 }
