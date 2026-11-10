@@ -517,8 +517,8 @@ mod tests {
         assert_eq!(launch_target(&args(&["open", "/p"])), Ok(Some("/p".into())));
         assert_eq!(launch_target(&args(&["-psn_0_1234"])), Ok(None));
         assert_eq!(
-            launch_target(&args(&["norms", "init"])),
-            Err("norms".into())
+            launch_target(&args(&["no-such-command", "init"])),
+            Err("no-such-command".into())
         );
         assert_eq!(launch_target(&args(&["--bogus"])), Err("--bogus".into()));
     }

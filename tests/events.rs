@@ -216,7 +216,7 @@ fn an_unknown_command_prints_usage_instead_of_opening_the_app() {
         child.wait_with_output().unwrap()
     };
     for args in [
-        &["norms", "init"][..],
+        &["no-such-command", "init"][..],
         &["--bogus"],
         &["no-such-folder-xyz"],
     ] {
