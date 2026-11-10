@@ -1167,6 +1167,26 @@ pub fn planner_agent<'a>(
 mod tests {
     use super::*;
 
+    /// El prompt de un revisor (varias líneas, comillas, acentos, `$`, `\`, comillas
+    /// invertidas) llega al agente tal cual: el comando escrito se lee igual en sh, bash y zsh.
+    #[cfg(unix)]
+    #[test]
+    fn a_review_prompt_reaches_the_agent_whole_in_every_posix_shell() {
+        let prompt = "Review phase 2 (\"Módulos por cuenta\") in Forge's plans, on `feat/x`.\n\
+                      Phase notes: $HOME ${PATH} $(rm -rf /) \\n \\ «ok» '' \"\" !! *\n\n- [x] fin '";
+        let command = format!("printf '%s' {}", quote(prompt));
+        for shell in ["/bin/sh", "/bin/bash", "/bin/zsh"] {
+            if !Path::new(shell).exists() {
+                continue;
+            }
+            let out = std::process::Command::new(shell)
+                .args(["-c", &command])
+                .output()
+                .unwrap();
+            assert_eq!(String::from_utf8_lossy(&out.stdout), prompt, "{shell}");
+        }
+    }
+
     /// El asesor se escribe en los ajustes de Claude sin tocar lo demás ni lo que el
     /// usuario haya elegido.
     #[test]

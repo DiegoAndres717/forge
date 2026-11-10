@@ -186,3 +186,55 @@ fn advisor_tokens_are_read_from_the_transcript_once() {
     // La salida le sirve al mod para la banda: lo sumado ahora.
     assert!(out.contains("\"opus\""), "{out}");
 }
+
+/// Un comando que Forge no conoce (`forge norms init` antes de existir, un hook mal escrito)
+/// no abre otra ventana de Forge: dice cómo se usa y sale con error. Y lo que llama Codex
+/// (`notify`) termina enseguida sin abrir nada.
+#[test]
+fn an_unknown_command_prints_usage_instead_of_opening_the_app() {
+    let dir = std::env::temp_dir().join(format!("forge-unknown-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let run = |args: &[&str]| {
+        let mut child = Command::new(FORGE)
+            .args(args)
+            .current_dir(&dir)
+            .env("FORGE_EVENTS", &dir)
+            .env("FORGE_DB", dir.join("forge.db"))
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("`forge {}` abrió la app", args.join(" "));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        child.wait_with_output().unwrap()
+    };
+    for args in [
+        &["norms", "init"][..],
+        &["--bogus"],
+        &["no-such-folder-xyz"],
+    ] {
+        let out = run(args);
+        assert!(
+            !out.status.success(),
+            "`forge {}` salió bien",
+            args.join(" ")
+        );
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(args[0]), "`forge {}`: {err}", args.join(" "));
+        assert!(
+            err.contains("forge help"),
+            "`forge {}`: {err}",
+            args.join(" ")
+        );
+    }
+    let notify = run(&["agent-event", "stop", r#"{"type":"agent-turn-complete"}"#]);
+    assert!(notify.status.success());
+    let _ = std::fs::remove_dir_all(&dir);
+}

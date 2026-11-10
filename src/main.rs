@@ -280,6 +280,20 @@ fn leave_own_console() {
     }
 }
 
+/// Qué abre la app según sus argumentos: nada, `open <carpeta>` o una carpeta que existe.
+/// Cualquier otra cosa (un comando que no existe, una opción) es un error y no abre otra
+/// ventana: así un hook o un comando mal escrito de un agente no lanza Forge de nuevo.
+fn launch_target(args: &[String]) -> Result<Option<PathBuf>, String> {
+    match args.first().map(String::as_str) {
+        None => Ok(None),
+        Some("open") => Ok(args.get(1).map(PathBuf::from)),
+        // macOS antiguo pasa el número de proceso al abrir desde el Finder.
+        Some(a) if a.starts_with("-psn_") => Ok(None),
+        Some(a) if Path::new(a).exists() => Ok(Some(PathBuf::from(a))),
+        Some(a) => Err(a.to_string()),
+    }
+}
+
 fn main() -> eframe::Result {
     // Ejecutado como `rm`, `git`… desde `shims/`: control de comandos peligrosos.
     if let Some(name) = std::env::args()
@@ -355,11 +369,20 @@ fn main() -> eframe::Result {
         }
         _ => {}
     }
-    let open = match args.first().map(String::as_str) {
-        Some("open") => args.get(1),
-        _ => args.first(),
-    }
-    .map(PathBuf::from);
+    let open = match launch_target(&args) {
+        Ok(open) => open,
+        Err(unknown) => {
+            eprintln!(
+                "{}\n\n{}",
+                forge_core::tr!(
+                    "forge: «{unknown}» no es un comando ni una carpeta. Ver `forge help`.",
+                    unknown = unknown
+                ),
+                cli::usage()
+            );
+            std::process::exit(2);
+        }
+    };
     let options = eframe::NativeOptions {
         // Ventana nativa de macOS: el contenido sube bajo la barra de título (los semáforos
         // quedan sobre la barra lateral). Sin transparencia: Forge pinta con Metal en la propia
@@ -482,6 +505,23 @@ mod tests {
     }
 
     use super::*;
+
+    /// Solo abre la app sin argumentos, con `open` o con una carpeta que existe.
+    #[test]
+    fn only_folders_open_the_app() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let tmp = std::env::temp_dir();
+        let dir = tmp.to_string_lossy();
+        assert_eq!(launch_target(&[]), Ok(None));
+        assert_eq!(launch_target(&args(&[&dir])), Ok(Some(tmp.clone())));
+        assert_eq!(launch_target(&args(&["open", "/p"])), Ok(Some("/p".into())));
+        assert_eq!(launch_target(&args(&["-psn_0_1234"])), Ok(None));
+        assert_eq!(
+            launch_target(&args(&["norms", "init"])),
+            Err("norms".into())
+        );
+        assert_eq!(launch_target(&args(&["--bogus"])), Err("--bogus".into()));
+    }
 
     #[test]
     fn settings_parse_and_reject_typos() {

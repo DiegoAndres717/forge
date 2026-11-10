@@ -37,6 +37,10 @@ pub const EN: &[(&str, &str)] = &[
     ("    normas que aplican: {p0}", "    norms that apply: {p0}"),
     ("no se encontró $HOME", "$HOME not found"),
     (
+        "forge: «{unknown}» no es un comando ni una carpeta. Ver `forge help`.",
+        "forge: “{unknown}” is not a command or a folder. See `forge help`.",
+    ),
+    (
         "{e} (los workspaces no se guardarán)",
         "{e} (workspaces will not be saved)",
     ),
