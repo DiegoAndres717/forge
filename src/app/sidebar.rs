@@ -245,6 +245,7 @@ impl App {
                     let (panels, live_rows, overlaps) = &agent_rows[i];
                     super::agent_rows::agent_rows_ui(
                         ui,
+                        (!selected).then_some(i),
                         live_rows,
                         panels,
                         overlaps,

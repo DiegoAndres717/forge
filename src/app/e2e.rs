@@ -5184,6 +5184,89 @@ fn clicking_an_agent_rows_status_line_goes_to_its_terminal() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// La fila de un agente de otro proyecto (no el activo) también lleva a su terminal: primero
+/// entra en ese proyecto, como un clic en su tarjeta, y luego enfoca el panel.
+#[test]
+fn clicking_an_agent_row_of_another_project_switches_to_it() {
+    let _serial = serial();
+    let (a, b) = (project("agent-row-other-a"), project("agent-row-other-b"));
+    std::fs::write(
+        b.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Claude Code\"\ncommand = \"sleep 60\"\n\
+         [[agents]]\nid = \"fake2\"\nname = \"Codex\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let store = Store::in_memory().unwrap();
+    for p in [&a, &b] {
+        store
+            .touch(p, p.file_name().unwrap().to_str().unwrap())
+            .unwrap();
+    }
+    store.set_setting("active", &b.to_string_lossy()).unwrap();
+    let mut h = app_with(store, None);
+    wait_until(&mut h, "detección de agentes", |a| {
+        !a.detecting.load(std::sync::atomic::Ordering::SeqCst)
+    });
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    let ib = h
+        .state()
+        .workspaces
+        .iter()
+        .position(|w| w.project.path == b)
+        .unwrap();
+    let ia = 1 - ib;
+    assert_eq!(h.state().active, Some(ib));
+    // Dos agentes en B; el enfocado al salir es Codex.
+    for id in ["fake", "fake2"] {
+        h.state_mut()
+            .apply(&ctx, UiCmd::AgentClick(id.into(), false), area);
+        h.run_steps(2);
+    }
+    let (claude, codex) = (
+        h.state().workspaces[ib].agent_panels("fake")[0],
+        h.state().workspaces[ib].agent_panels("fake2")[0],
+    );
+    {
+        let store = h.state().store.as_ref().unwrap();
+        let e = forge_core::activity::Event {
+            kind: "tool".into(),
+            tool: Some("Bash".into()),
+            target: Some("npm run build".into()),
+            origin: Some("Claude Code".into()),
+            ..Default::default()
+        };
+        let session = forge_core::store::session_id_for_panel(std::process::id(), claude);
+        store
+            .record_activity(&b, &session, &e, Some(&b), forge_core::store::now() - 5)
+            .unwrap();
+    }
+    h.state_mut().apply(&ctx, UiCmd::GoToPanel(codex), area);
+    h.run_steps(3);
+    assert_eq!(h.state().workspaces[ib].focused(), codex);
+    // Ahora el activo es A; la fila de Claude Code sigue bajo la tarjeta de B.
+    h.state_mut().apply(&ctx, UiCmd::Activate(ia), area);
+    h.state_mut().agent_rows.refresh();
+    h.run_steps(3);
+    assert_eq!(h.state().active, Some(ia));
+    h.get_by_label("Claude Code · corriendo npm run build")
+        .click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().active,
+        Some(ib),
+        "entra en el proyecto de la fila"
+    );
+    assert_eq!(
+        h.state().workspaces[ib].focused(),
+        claude,
+        "y enfoca la terminal de ese agente"
+    );
+    for p in [a, b] {
+        let _ = std::fs::remove_dir_all(p);
+    }
+}
+
 /// El «+» de la barra lateral abre el diálogo «Nuevo agente» (como «Create worktree» de
 /// Orca): con un nombre de rama nueva crea el worktree, lo registra y abre ahí el agente.
 #[test]
