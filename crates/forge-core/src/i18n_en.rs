@@ -73,6 +73,7 @@ pub const EN: &[(&str, &str)] = &[
         "Guard bloqueó la validación",
         "Guard blocked the validation",
     ),
+    ("Guard bloqueó: {what}", "Guard blocked: {what}"),
     ("{p0}  Despertar", "{p0}  Wake up"),
     (
         "{p0}  Dormir (libera memoria)",
@@ -2914,8 +2915,8 @@ pub const EN: &[(&str, &str)] = &[
     ),
     ("Guard bloqueó", "Guard blocked"),
     (
-        "Project Guard encontró algo que impide el commit o el push.",
-        "Project Guard found something that blocks the commit or push.",
+        "Project Guard encontró algo que impide el commit o el push; un hallazgo bloqueante del revisor avisa en cuanto aparece.",
+        "Project Guard found something that blocks the commit or push; a blocking reviewer finding alerts as soon as it appears.",
     ),
     ("Límite de la cuenta", "Account limit"),
     (

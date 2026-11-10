@@ -315,6 +315,14 @@ impl App {
         let mut to_save = Vec::new();
         for ws in &mut self.workspaces {
             let Some(run) = &ws.guard.run else { continue };
+            // Avisa en cuanto algo bloquea, aunque la revisión siga (plan #237 fase 2): el
+            // aviso «Guard bloqueó» de Ajustes, con su sonido y su notificación.
+            if !ws.guard.alerted
+                && run.snapshot(guard::GuardRun::verdict) == guard::Verdict::Blocked
+            {
+                ws.guard.alerted = true;
+                ws.guard.unseen = true;
+            }
             let (finished, frozen, stage, unstaged) =
                 run.snapshot(|r| (r.finished(), r.frozen.clone(), r.stage, r.unstaged));
             let Some(frozen) = frozen.filter(|_| finished) else {
@@ -781,6 +789,12 @@ impl App {
                                         );
                                     }
                                 });
+                        }
+                        // Los hallazgos que bloquean, a la vista sin desplegar.
+                        if item.level == guard::Level::Block {
+                            for d in item.details.iter().filter(|d| d.starts_with("[blocking]")) {
+                                ui.label(RichText::new(d).size(11.5).color(theme::RED));
+                            }
                         }
                         if item.level == guard::Level::Block
                             && ui

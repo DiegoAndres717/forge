@@ -1468,6 +1468,7 @@ impl App {
                                         }),
                                 };
                                 ws.guard.saved = false;
+                                ws.guard.alerted = false;
                                 ws.guard.stale = false;
                                 ws.guard.stale_rx = None;
                                 ws.guard.stale_checked = None;

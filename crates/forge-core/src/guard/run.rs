@@ -186,6 +186,14 @@ impl GuardRun {
         items.chain(checks).collect()
     }
 
+    /// Lo primero que bloquea, para el aviso: el hallazgo bloqueante (con su norma) si lo
+    /// hay, si no la etiqueta del control.
+    pub fn first_blocking(&self) -> Option<String> {
+        let item = self.items.iter().find(|i| i.level == Level::Block)?;
+        let finding = item.details.iter().find(|d| d.starts_with("[blocking]"));
+        Some(finding.unwrap_or(&item.label).clone())
+    }
+
     pub fn verdict(&self) -> Verdict {
         if self.error.is_some() {
             return Verdict::Blocked;
@@ -527,7 +535,7 @@ pub(crate) struct AiRun<'a> {
     repo: &'a Path,
     diff: &'a Diff,
     frozen: &'a Candidate,
-    notify: &'a dyn Fn(),
+    notify: &'a (dyn Fn() + Sync),
     activations: &'a [Activation],
 }
 
@@ -796,12 +804,27 @@ impl AiRun<'_> {
             paid <= room
         });
         let (config, rules) = (self.config, self.rules);
+        {
+            // Los que no cabían en el presupuesto del mes: como un revisor sin respuesta.
+            let mut st = s.lock().unwrap();
+            for (n, a) in &skipped {
+                st.items[*n].level = incomplete_level(config.best_effort, a.reviewer.blocking);
+                st.items[*n].label = tr!("{p0}: presupuesto mensual agotado", p0 = a.reviewer.name);
+            }
+        }
+        // Cada revisor publica su resultado en cuanto responde (plan #237 fase 2): un hallazgo
+        // bloqueante se ve y avisa sin esperar al revisor más lento.
         let outcomes: Vec<(usize, Activation, AiOutcome)> = std::thread::scope(|scope| {
             let handles: Vec<_> = pending
                 .into_iter()
                 .map(|(n, a)| {
+                    let signature = signature(&a);
                     scope.spawn(move || {
                         let outcome = router::specialist(config, rules, ctx, &a, spent, local);
+                        let mut st = s.lock().unwrap();
+                        self.apply_reviewer(&mut st, n, &a, &outcome, signature);
+                        drop(st);
+                        (self.notify)();
                         (n, a, outcome)
                     })
                 })
@@ -810,54 +833,6 @@ impl AiRun<'_> {
         });
 
         let mut st = s.lock().unwrap();
-        // Los que no cabían en el presupuesto del mes: como un revisor sin respuesta.
-        for (n, a) in &skipped {
-            st.items[*n].level = incomplete_level(config.best_effort, a.reviewer.blocking);
-            st.items[*n].label = tr!("{p0}: presupuesto mensual agotado", p0 = a.reviewer.name);
-        }
-        for (n, a, outcome) in &outcomes {
-            let rule = format!("reviewer:{}", a.reviewer.id);
-            st.usage
-                .extend(outcome.steps.iter().filter_map(|step| step.usage.clone()));
-            // Un revisor informativo nunca bloquea: sus objeciones quedan como aviso o nota.
-            let (level, word) = match (outcome.verdict, a.reviewer.blocking) {
-                (AiVerdict::Approve, _) => (Level::Pass, "aprueba"),
-                (AiVerdict::Block, true) => (Level::Block, "bloquea"),
-                (AiVerdict::Block, false) => (Level::Warn, "objeta (informativo)"),
-                (AiVerdict::Changes, true) => (Level::Warn, tr!("pide cambios")),
-                (AiVerdict::Changes, false) => (Level::Info, "comenta"),
-                (AiVerdict::Incomplete, true) => {
-                    (incomplete_level(config.best_effort, true), "incompleto")
-                }
-                (AiVerdict::Incomplete, false) => (Level::Info, tr!("sin respuesta")),
-            };
-            let mut details = vec![tr!("archivos: {p0}", p0 = a.files.join(", "))];
-            details.extend(outcome.details());
-            let level = match st.exception_for(&rule).cloned() {
-                Some(e) if matches!(level, Level::Block | Level::Warn | Level::Pending) => {
-                    details.insert(0, e.summary());
-                    Level::Excepted
-                }
-                _ => level,
-            };
-            st.items[*n].level = level;
-            st.items[*n].label = format!("{}: {word} · ${:.3}", a.reviewer.name, outcome.cost());
-            st.items[*n].details = details;
-            if outcome.verdict == AiVerdict::Approve {
-                st.extra_evidence.push(Evidence {
-                    check_id: rule,
-                    command: signature(a),
-                    tree: self.frozen.tree.clone(),
-                    duration_ms: outcome
-                        .steps
-                        .iter()
-                        .map(|s| (s.seconds * 1000.0) as u64)
-                        .sum(),
-                    output: outcome.summary.clone(),
-                    created_at: unix(SystemTime::now()),
-                });
-            }
-        }
         // Comparación entre revisores (plan §11): desacuerdos a la vista.
         if outcomes.len() > 1 {
             let summary: Vec<(String, AiVerdict, f64, String)> = outcomes
@@ -882,6 +857,59 @@ impl AiRun<'_> {
         }
         drop(st);
         (self.notify)();
+    }
+
+    /// Deja en su ítem lo que dijo un revisor (nivel, hallazgos con norma y gravedad, gasto).
+    fn apply_reviewer(
+        &self,
+        st: &mut GuardRun,
+        n: usize,
+        a: &Activation,
+        outcome: &AiOutcome,
+        signature: String,
+    ) {
+        let config = self.config;
+        let rule = format!("reviewer:{}", a.reviewer.id);
+        st.usage
+            .extend(outcome.steps.iter().filter_map(|step| step.usage.clone()));
+        // Un revisor informativo nunca bloquea: sus objeciones quedan como aviso o nota.
+        let (level, word) = match (outcome.verdict, a.reviewer.blocking) {
+            (AiVerdict::Approve, _) => (Level::Pass, "aprueba"),
+            (AiVerdict::Block, true) => (Level::Block, "bloquea"),
+            (AiVerdict::Block, false) => (Level::Warn, "objeta (informativo)"),
+            (AiVerdict::Changes, true) => (Level::Warn, tr!("pide cambios")),
+            (AiVerdict::Changes, false) => (Level::Info, "comenta"),
+            (AiVerdict::Incomplete, true) => {
+                (incomplete_level(config.best_effort, true), "incompleto")
+            }
+            (AiVerdict::Incomplete, false) => (Level::Info, tr!("sin respuesta")),
+        };
+        let mut details = vec![tr!("archivos: {p0}", p0 = a.files.join(", "))];
+        details.extend(outcome.details());
+        let level = match st.exception_for(&rule).cloned() {
+            Some(e) if matches!(level, Level::Block | Level::Warn | Level::Pending) => {
+                details.insert(0, e.summary());
+                Level::Excepted
+            }
+            _ => level,
+        };
+        st.items[n].level = level;
+        st.items[n].label = format!("{}: {word} · ${:.3}", a.reviewer.name, outcome.cost());
+        st.items[n].details = details;
+        if outcome.verdict == AiVerdict::Approve {
+            st.extra_evidence.push(Evidence {
+                check_id: rule,
+                command: signature,
+                tree: self.frozen.tree.clone(),
+                duration_ms: outcome
+                    .steps
+                    .iter()
+                    .map(|s| (s.seconds * 1000.0) as u64)
+                    .sum(),
+                output: outcome.summary.clone(),
+                created_at: unix(SystemTime::now()),
+            });
+        }
     }
 }
 

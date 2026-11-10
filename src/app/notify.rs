@@ -101,7 +101,9 @@ pub(super) fn alert_text(alert: Alert) -> (&'static str, &'static str) {
         ),
         Alert::Blocked => (
             tr!("Guard bloqueó"),
-            tr!("Project Guard encontró algo que impide el commit o el push."),
+            tr!(
+                "Project Guard encontró algo que impide el commit o el push; un hallazgo bloqueante del revisor avisa en cuanto aparece."
+            ),
         ),
         Alert::Limit => (
             tr!("Límite de la cuenta"),
@@ -335,7 +337,15 @@ impl App {
             let text = match &attention {
                 Attention::Agent(name) => tr!("{name} terminó o espera respuesta", name = name),
                 Attention::Failed(name) => tr!("El proceso {name} falló", name = name),
-                Attention::Blocked => tr!("Guard bloqueó la validación").to_string(),
+                Attention::Blocked => match ws
+                    .guard
+                    .run
+                    .as_ref()
+                    .and_then(|r| r.snapshot(forge_core::guard::GuardRun::first_blocking))
+                {
+                    Some(what) => tr!("Guard bloqueó: {what}", what = what),
+                    None => tr!("Guard bloqueó la validación").to_string(),
+                },
                 Attention::Event(_, text) => text.clone(),
             };
             let (clicked, ctx) = (self.notification_click.clone(), ctx.clone());

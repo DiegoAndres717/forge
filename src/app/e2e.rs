@@ -988,6 +988,115 @@ fn background_process_failure_lights_the_project() {
     assert_eq!(ws(h.state()).attention(), None);
 }
 
+/// Plan #237 fase 2: un hallazgo bloqueante del revisor enciende el aviso «Guard bloqueó» (con
+/// su norma) en cuanto llega, mientras otro revisor sigue revisando.
+#[test]
+fn a_blocking_reviewer_finding_alerts_before_the_review_ends() {
+    let _serial = serial();
+    let dir = project("instant-alert");
+    std::fs::write(
+        dir.join(".forge/rules.toml"),
+        "[commit]\nrequire_ai_review = true\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join(".forge/norms.toml"),
+        "[[norms]]\nid = \"sql-params\"\nseverity = \"blocking\"\npaths = [\"src/api/**\"]\nlook_for = \"SQL built by concatenation\"\n",
+    )
+    .unwrap();
+    // Un revisor propio lento: no responde hasta que exista `release`.
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[reviewers]]\nid = \"slowpoke\"\npaths = [\"lib/**\"]\nfocus = \"slowpoke area\"\n",
+    )
+    .unwrap();
+    let release = dir.join("release");
+    // Si el test falla antes de tiempo, el proveedor lento no queda esperando.
+    struct Release(std::path::PathBuf);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            let _ = std::fs::write(&self.0, "");
+        }
+    }
+    let _release = Release(release.clone());
+    // Proveedor falso (nunca un modelo real): bloquea si recibe la norma y el lento espera.
+    let block = r#"{"verdict":"block","confidence":0.9,"summary":"concatenated SQL","findings":[{"severity":"blocking","file":"src/api/users.ts","line":1,"norm":"sql-params","message":"query built by concatenation"}]}"#;
+    let approve = r#"{"verdict":"approve","confidence":0.9,"summary":"ok","findings":[]}"#;
+    let command = if cfg!(windows) {
+        format!(
+            "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd(); if ($p.Contains('sql-params')) {{ echo '{block}' }} else {{ if ($p.Contains('slowpoke')) {{ while (-not (Test-Path -LiteralPath '{}')) {{ Start-Sleep -Milliseconds 100 }} }}; echo '{approve}' }}",
+            release.display()
+        )
+    } else {
+        format!(
+            "p=$(cat); case \"$p\" in *sql-params*) echo '{block}';; *slowpoke*) while [ ! -f '{}' ]; do sleep 0.1; done; echo '{approve}';; *) echo '{approve}';; esac",
+            release.display()
+        )
+    };
+    let tasks = ["classification", "code_review", "architecture", "security"]
+        .map(|t| format!("[routing.tasks.{t}]\nprovider = \"fake\"\nmodel = \"m\"\n"))
+        .concat();
+    std::fs::write(
+        dir.join(".forge/routing.toml"),
+        format!(
+            "[routing]\nprefer_local = false\n[routing.providers.fake]\nlocal = true\ncommand = '''{command}'''\n{tasks}"
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("src/api")).unwrap();
+    std::fs::create_dir_all(dir.join("lib")).unwrap();
+    std::fs::write(
+        dir.join("src/api/users.ts"),
+        "export const q = (id: string) => \"SELECT * FROM users WHERE id = \" + id;\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("lib/util.ts"), "export const one = 1;\n").unwrap();
+    std::process::Command::new("git")
+        .args(["add", "-A"])
+        .current_dir(&dir)
+        .status()
+        .unwrap();
+    let mut h = app(dir);
+    h.key_press_modifiers(CMD, Key::G);
+    h.run_steps(2);
+    h.get_by_label_contains("Ejecutar").click();
+    h.run_steps(2);
+    // Se sale del proyecto: el aviso es para cuando no se está mirando.
+    h.key_press_modifiers(CMD_SHIFT, Key::H);
+    h.run_steps(2);
+    wait_until(&mut h, "aviso del hallazgo bloqueante", |a| {
+        ws(a).attention() == Some(crate::workspace::Attention::Blocked)
+    });
+    let (slow, what) = ws(h.state()).guard.run.as_ref().unwrap().snapshot(|r| {
+        let slow = r.items.iter().find(|i| i.id == "reviewer:slowpoke");
+        (
+            slow.map(|i| i.level),
+            r.first_blocking().unwrap_or_default(),
+        )
+    });
+    assert_eq!(
+        slow,
+        Some(guard::Level::Pending),
+        "el aviso llega antes de que termine la revisión"
+    );
+    assert!(
+        what.contains("[blocking]") && what.contains("sql-params"),
+        "la notificación dice gravedad y norma: {what}"
+    );
+    std::fs::write(&release, "").unwrap();
+    wait_until(&mut h, "Guard termina", |a| {
+        ws(a)
+            .guard
+            .run
+            .as_ref()
+            .is_some_and(|r| r.snapshot(|r| r.finished()))
+    });
+    // Un solo aviso por ejecución, y al entrar se apaga.
+    h.key_press_modifiers(CMD, Key::Num1);
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).attention(), None);
+}
+
 #[test]
 #[cfg_attr(
     windows,
