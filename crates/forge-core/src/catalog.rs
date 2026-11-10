@@ -59,8 +59,9 @@ pub enum Live {
     /// Codex, Gemini CLI y Antigravity: el hook previo de Guard ve comandos y lecturas, no
     /// las ediciones; los archivos cambiados salen de `git status` de su worktree.
     Commands,
-    /// Sin hook que Forge use (OpenCode, Qwen Code, Pi, propios): solo el título y la salida
-    /// de su terminal, menos fiable.
+    /// Sin hook que Forge use (OpenCode, Qwen Code, propios): solo el título y la salida
+    /// de su terminal, menos fiable. Pi avisa al terminar y al esperar al usuario (su
+    /// extensión `forge-events`), pero no dice qué herramienta usa: también va aquí.
     None,
 }
 
