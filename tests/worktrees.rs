@@ -219,7 +219,8 @@ fn each_agent_hook_denies_stray_copies_and_lets_the_rest_through() {
     ] {
         assert_eq!(hook("codex", codex(ok)), "", "{ok}");
         assert_eq!(hook("gemini", gemini(ok)), "{}", "{ok}");
-        assert_eq!(hook("agy", agy(ok)), "{}", "{ok}");
+        // Antigravity toma `{}` por un rechazo sin motivo: sin decisión, nada.
+        assert_eq!(hook("agy", agy(ok)), "", "{ok}");
     }
     // Claude Code: el mod pregunta y deniega si sale 0 con el motivo.
     let check = |c: &str| forge(&e, &["worktree", "check", "--command", c]);
