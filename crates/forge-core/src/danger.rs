@@ -766,6 +766,29 @@ pub fn secret_hook_main(format: &str) -> ! {
     let mut input = String::new();
     let _ = std::io::Read::read_to_string(&mut std::io::stdin(), &mut input);
     let call: serde_json::Value = serde_json::from_str(&input).unwrap_or_default();
+    let start = Instant::now();
+    let tool = hook_tool_name(&call);
+    let forge_env = forge_env_present();
+    // Si el hook se cae, el agente ve un fallo sin explicación: que quede en el registro.
+    let (panic_format, panic_tool, panic_env) =
+        (format.to_string(), tool.clone(), forge_env.clone());
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        if let Some(path) = hook_log_path() {
+            log_hook_run(
+                &path,
+                &HookRun {
+                    format: &panic_format,
+                    tool: panic_tool.clone(),
+                    outcome: "panic",
+                    exit: 101,
+                    elapsed: start.elapsed(),
+                    forge_env: panic_env.clone(),
+                },
+            );
+        }
+        default_panic(info);
+    }));
     // agy ejecuta sus hooks desde ~/.gemini/config: el proyecto viene en la llamada.
     let cwd = call["cwd"]
         .as_str()
@@ -810,6 +833,11 @@ pub fn secret_hook_main(format: &str) -> ! {
     // Los hooks de agy y Gemini son globales: fuera de una terminal de agente de Forge no hacen nada.
     let found = std::env::var_os("FORGE_ORIGIN").and_then(|_| secret_in_tool_call(&call, &cwd));
     let secret = found.is_some();
+    let mut outcome = if stray.is_some() {
+        "deny:stray-copy"
+    } else {
+        "allow"
+    };
     let denied = stray.or_else(|| {
         found.and_then(|reason| {
             crate::i18n::init_from_store();
@@ -823,22 +851,69 @@ pub fn secret_hook_main(format: &str) -> ! {
                 .to_string();
             // Sin la app no se pregunta en la terminal: es la del agente, y le quitaría la entrada.
             if std::env::var_os("FORGE_APPROVALS").is_none() {
+                outcome = "deny:secret";
                 return Some(format!(
                     "Forge: blocked ({reason}): Forge is not open to authorize it"
                 ));
             }
             let project = std::env::var_os("FORGE_PROJECT").map(PathBuf::from);
             match ask_person(&command, reason.clone(), cwd, project) {
-                Ok(true) => None,
-                Ok(false) => Some(format!("Forge: the user denied it ({reason})")),
-                Err(e) => Some(format!("Forge: blocked ({reason}): {e}")),
+                Ok(true) => {
+                    outcome = "allow:user";
+                    None
+                }
+                Ok(false) => {
+                    outcome = "deny:user";
+                    Some(format!("Forge: the user denied it ({reason})"))
+                }
+                Err(e) => {
+                    outcome = "deny:no-answer";
+                    Some(format!("Forge: blocked ({reason}): {e}"))
+                }
             }
         })
     });
     if let Some(event) = board.filter(|_| denied.is_none() && !secret) {
         crate::activity::record_detached(&event);
     }
-    let reply = match (format, denied) {
+    let reply = hook_reply(format, denied);
+    // Sin pánico si el agente cerró la salida: un código distinto de 0 dejaría pasar la llamada.
+    // Sin decisión no se escribe nada, ni un salto de línea.
+    if !reply.is_empty() {
+        let _ = writeln!(std::io::stdout(), "{reply}");
+    }
+    if let Some(path) = hook_log_path() {
+        log_hook_run(
+            &path,
+            &HookRun {
+                format,
+                tool,
+                outcome,
+                exit: 0,
+                elapsed: start.elapsed(),
+                forge_env,
+            },
+        );
+    }
+    std::process::exit(0)
+}
+
+/// Respuesta del hook previo en el formato de cada agente.
+///
+/// Sin decisión: Codex y Antigravity, sin salida; Gemini CLI, `{}`. Antigravity exige
+/// `decision` y toma `{}` por un rechazo con el motivo vacío («tool call denied by pre-tool
+/// hook: »), comprobado con agy en modo normal y en `--mode plan`; sin salida sigue con sus
+/// propios permisos (no `"allow"`, que se saltaría las preguntas del usuario).
+fn hook_reply(format: &str, denied: Option<String>) -> String {
+    // Un rechazo siempre lleva motivo: vacío, el agente no sabría qué le pasó.
+    let denied = denied.map(|why| {
+        if why.trim().is_empty() {
+            "Forge: blocked by Forge's tool hook (no reason was given)".to_string()
+        } else {
+            why
+        }
+    });
+    match (format, denied) {
         ("codex", Some(why)) => serde_json::json!({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
@@ -846,13 +921,99 @@ pub fn secret_hook_main(format: &str) -> ! {
         }})
         .to_string(),
         (_, Some(why)) => serde_json::json!({"decision": "deny", "reason": why}).to_string(),
-        // Codex sigue sin salida; agy y Gemini esperan un JSON (vacío: sin decisión).
-        ("codex", None) => String::new(),
-        (_, None) => "{}".into(),
+        ("gemini", None) => "{}".into(),
+        (_, None) => String::new(),
+    }
+}
+
+/// Una llamada al hook previo, para el registro (sin argumentos ni contenido).
+struct HookRun<'a> {
+    format: &'a str,
+    tool: String,
+    outcome: &'static str,
+    exit: i32,
+    elapsed: Duration,
+    forge_env: Vec<&'static str>,
+}
+
+/// Desde cuánto una llamada del hook se apunta por lenta (aunque permita).
+const HOOK_SLOW: Duration = Duration::from_secs(10);
+/// Tope del registro: al pasarlo, el actual pasa a `hooks.log.1` (se pisa el anterior).
+const HOOK_LOG_MAX: u64 = 256 * 1024;
+
+/// `hooks.log` junto a la base de Forge (respeta `FORGE_DB`).
+fn hook_log_path() -> Option<PathBuf> {
+    Some(
+        crate::store::Store::default_path()?
+            .parent()?
+            .join("hooks.log"),
+    )
+}
+
+/// Nombre de la herramienta, solo letras, cifras y `_.-`: nunca los argumentos.
+fn hook_tool_name(call: &serde_json::Value) -> String {
+    let name: String = call["toolCall"]["name"]
+        .as_str()
+        .or_else(|| call["tool_name"].as_str())
+        .unwrap_or("?")
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || "_.-".contains(*c))
+        .take(64)
+        .collect();
+    if name.is_empty() { "?".into() } else { name }
+}
+
+/// Qué variables de Forge llegaron al hook (solo los nombres): sin ellas el hook no sabe
+/// que está en una terminal de agente de Forge.
+fn forge_env_present() -> Vec<&'static str> {
+    [
+        "FORGE_ORIGIN",
+        "FORGE_PROJECT",
+        "FORGE_APPROVALS",
+        "FORGE_APP_PID",
+        "FORGE_SESSION_ID",
+    ]
+    .into_iter()
+    .filter(|k| std::env::var_os(k).is_some())
+    .collect()
+}
+
+/// Apunta la llamada si se rechazó, falló o tardó: herramienta, resultado, código de salida,
+/// duración y qué variables de Forge había. Nunca argumentos, rutas ni contenido. Nunca falla.
+fn log_hook_run(path: &Path, run: &HookRun<'_>) {
+    let worth = run.outcome != "allow" && run.outcome != "allow:user"
+        || run.exit != 0
+        || run.elapsed >= HOOK_SLOW;
+    if !worth {
+        return;
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::metadata(path).is_ok_and(|m| m.len() >= HOOK_LOG_MAX) {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
+    let when = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let env = if run.forge_env.is_empty() {
+        "none".to_string()
+    } else {
+        run.forge_env.join(",")
     };
-    // Sin pánico si el agente cerró la salida: un código distinto de 0 dejaría pasar la llamada.
-    let _ = writeln!(std::io::stdout(), "{reply}");
-    std::process::exit(0)
+    let line = format!(
+        "t={when} {} tool={} outcome={} exit={} ms={} env={env}\n",
+        run.format,
+        run.tool,
+        run.outcome,
+        run.exit,
+        run.elapsed.as_millis(),
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
 }
 
 fn exec_real(real: &Path, name: &str, args: &[String]) -> ! {
@@ -1182,6 +1343,104 @@ pub fn install(base: &Path, exe: &Path) -> std::io::Result<HashMap<String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lo que contesta el hook previo a cada agente. Antigravity toma `{}` (sin `decision`)
+    /// por un rechazo sin motivo: sin decisión, a agy no se le escribe nada.
+    #[test]
+    fn hook_replies_without_a_decision_let_each_agent_go_on() {
+        assert_eq!(hook_reply("agy", None), "");
+        assert_eq!(hook_reply("codex", None), "");
+        assert_eq!(hook_reply("gemini", None), "{}");
+        let agy: serde_json::Value =
+            serde_json::from_str(&hook_reply("agy", Some("Forge: no".into()))).unwrap();
+        assert_eq!(
+            agy,
+            serde_json::json!({"decision": "deny", "reason": "Forge: no"})
+        );
+        let codex: serde_json::Value =
+            serde_json::from_str(&hook_reply("codex", Some("Forge: no".into()))).unwrap();
+        assert_eq!(codex["hookSpecificOutput"]["permissionDecision"], "deny");
+        assert_eq!(
+            codex["hookSpecificOutput"]["permissionDecisionReason"],
+            "Forge: no"
+        );
+    }
+
+    /// Un rechazo nunca sale sin motivo, en ningún formato.
+    #[test]
+    fn a_hook_denial_always_carries_a_reason() {
+        for format in ["agy", "gemini", "codex"] {
+            for why in ["", "   "] {
+                let v: serde_json::Value =
+                    serde_json::from_str(&hook_reply(format, Some(why.into()))).unwrap();
+                let reason = v["reason"]
+                    .as_str()
+                    .or_else(|| v["hookSpecificOutput"]["permissionDecisionReason"].as_str())
+                    .unwrap_or_default();
+                assert!(reason.trim().starts_with("Forge"), "{format}: {v}");
+            }
+        }
+    }
+
+    /// El registro del hook: una línea por llamada con rechazo, fallo o lentitud, sin
+    /// argumentos ni contenido; las llamadas normales y rápidas no escriben nada.
+    #[test]
+    fn hook_runs_are_logged_only_when_denied_failed_or_slow() {
+        let dir = std::env::temp_dir().join(format!("forge-hooklog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let log = dir.join("hooks.log");
+        let run = |outcome: &'static str, exit: i32, ms: u64| HookRun {
+            format: "agy",
+            tool: "read_file".into(),
+            outcome,
+            exit,
+            elapsed: Duration::from_millis(ms),
+            forge_env: vec!["FORGE_ORIGIN"],
+        };
+        log_hook_run(&log, &run("allow", 0, 40));
+        assert!(!log.exists(), "una llamada normal no se registra");
+        log_hook_run(&log, &run("deny:secret", 0, 40));
+        log_hook_run(&log, &run("allow", 0, HOOK_SLOW.as_millis() as u64 + 1));
+        log_hook_run(&log, &run("panic", 101, 5));
+        let text = std::fs::read_to_string(&log).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 3, "{text}");
+        assert!(
+            lines[0]
+                .contains("agy tool=read_file outcome=deny:secret exit=0 ms=40 env=FORGE_ORIGIN"),
+            "{text}"
+        );
+        assert!(lines[1].contains("outcome=allow"), "{text}");
+        assert!(lines[2].contains("outcome=panic exit=101"), "{text}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El registro no crece sin límite: al pasar del tope pasa a `hooks.log.1`.
+    #[test]
+    fn the_hook_log_rotates_at_its_size_limit() {
+        let dir = std::env::temp_dir().join(format!("forge-hookrot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("hooks.log");
+        std::fs::write(&log, vec![b'x'; HOOK_LOG_MAX as usize]).unwrap();
+        let run = HookRun {
+            format: "gemini",
+            tool: "run_shell_command".into(),
+            outcome: "deny:stray-copy",
+            exit: 0,
+            elapsed: Duration::from_millis(3),
+            forge_env: Vec::new(),
+        };
+        log_hook_run(&log, &run);
+        assert_eq!(
+            std::fs::metadata(dir.join("hooks.log.1")).unwrap().len(),
+            HOOK_LOG_MAX
+        );
+        let text = std::fs::read_to_string(&log).unwrap();
+        assert!(text.contains("env=none"), "{text}");
+        assert_eq!(text.lines().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn dangerous_commands_are_found_inside_a_shell_line() {

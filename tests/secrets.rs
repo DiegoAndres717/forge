@@ -184,10 +184,26 @@ fn agent_hooks_deny_secret_reads_in_each_format() {
         r#"{"toolCall":{"name":"run_command","args":{"CommandLine":"ls"}}}"#,
         true,
     );
+    // Antigravity toma `{}` (sin `decision`) por un rechazo con motivo vacío: sin salida
+    // sigue con sus propios permisos. Gemini CLI sí espera el JSON vacío.
     assert_eq!(
         (code, out.as_str()),
-        (0, "{}"),
-        "agy y Gemini esperan un JSON"
+        (0, ""),
+        "agy: sin decisión no se escribe nada"
     );
+    let (code, out) = hook(
+        "gemini",
+        r#"{"tool_name":"run_shell_command","tool_input":{"command":"ls"}}"#,
+        true,
+    );
+    assert_eq!((code, out.as_str()), (0, "{}"), "Gemini espera un JSON");
+    // Cada rechazo deja una línea en el registro de hooks (junto a la base de Forge), con
+    // la herramienta pero sin argumentos: ni la ruta del secreto.
+    let log = std::fs::read_to_string(dir.join("hooks.log")).unwrap();
+    assert!(
+        log.contains("agy tool=view_file outcome=deny:secret"),
+        "{log}"
+    );
+    assert!(!log.contains(".env"), "{log}");
     let _ = std::fs::remove_dir_all(dir);
 }
