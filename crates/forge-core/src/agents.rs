@@ -247,7 +247,8 @@ impl AgentSpec {
     }
 
     /// Añade los avisos del agente a Forge: hooks `Stop`/`Notification` en Claude Code,
-    /// `notify` en Codex, y hooks de ciclo de vida en Antigravity (`hooks.json`), que llaman a `forge agent-event`.
+    /// `notify` en Codex, hooks de ciclo de vida en Antigravity (`hooks.json`) y una extensión
+    /// global en Pi (`extensions/forge-events.js`), que llaman a `forge agent-event`.
     /// Otros agentes, sin cambios.
     /// `has_mod`: el mod de Forge para Claude Code se carga en las terminales de Forge
     /// (CLAUDE_CODE_PLUGIN_DIRS) y avisa él mismo; sin él, hooks de Claude por --settings.
@@ -302,8 +303,14 @@ impl AgentSpec {
                 }
                 return command.to_string();
             }
-            // OpenCode y Pi no tienen hooks de aviso: Forge los detecta por la salida.
-            Some(McpStyle::OpenCodeEnv | McpStyle::PiConfig) | None => {
+            Some(McpStyle::PiConfig) => {
+                if let Some(dir) = pi_agent_dir(home) {
+                    let _ = ensure_pi_events(&dir, forge);
+                }
+                return command.to_string();
+            }
+            // OpenCode no tiene hooks de aviso: Forge lo detecta por la salida.
+            Some(McpStyle::OpenCodeEnv) | None => {
                 return command.to_string();
             }
         };
@@ -480,7 +487,12 @@ impl AgentSpec {
     pub fn sends_events(&self) -> bool {
         matches!(
             self.mcp_style,
-            Some(McpStyle::ClaudeJson | McpStyle::CodexConfig | McpStyle::AgyConfig)
+            Some(
+                McpStyle::ClaudeJson
+                    | McpStyle::CodexConfig
+                    | McpStyle::AgyConfig
+                    | McpStyle::PiConfig
+            )
         )
     }
 
@@ -719,6 +731,40 @@ pub fn ensure_agy_hooks(home: &Path, forge: &str) -> Result<(), String> {
             changed
         },
     )
+}
+
+/// Primera línea de la extensión de avisos de Pi: solo se reescribe un archivo que la lleve.
+pub const PI_EVENTS_MARK: &str = "// forge-events";
+
+/// Instala en Pi (`<dir>/extensions/forge-events.js`, que Pi carga solo en todos los
+/// proyectos) la extensión que avisa a Forge al terminar (`agent_settled`) y al esperar al
+/// usuario (`ui_prompt_start`). Las extensiones del usuario no se tocan, ni un
+/// `forge-events.js` que no escribió Forge. Fuera de una terminal de Forge no hace nada.
+pub fn ensure_pi_events(dir: &Path, forge: &str) -> Result<(), String> {
+    // Pi ejecuta forge sin shell (`pi.exec`): la ruta va como cadena de JS (escapes de JSON),
+    // igual en macOS, Linux y Windows.
+    let path = serde_json::to_string(forge).map_err(|e| e.to_string())?;
+    let text = include_str!("pi_events.js").replacen("__FORGE__", &path, 1);
+    let file = dir.join("extensions").join("forge-events.js");
+    match std::fs::read_to_string(&file) {
+        Ok(current) if current == text => return Ok(()),
+        Ok(current) if !current.starts_with(PI_EVENTS_MARK) => {
+            return Err(format!("{}: not written by Forge", file.display()));
+        }
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("{}: {e}", file.display())),
+    }
+    let folder = file.parent().unwrap_or(dir);
+    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    // Se escribe aparte (sin extensión .js, Pi no lo carga) y se renombra: Pi nunca lee
+    // un archivo a medias.
+    let tmp = file.with_extension(format!("forge-{}", std::process::id()));
+    let written = std::fs::write(&tmp, &text).and_then(|()| std::fs::rename(&tmp, &file));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    written.map_err(|e| format!("{}: {e}", file.display()))
 }
 
 /// Registra en Gemini CLI (`~/.gemini/settings.json`, hooks `BeforeTool`) el hook de Forge
@@ -1886,6 +1932,57 @@ mod tests {
         std::fs::write(&settings, "{ // x").unwrap();
         gemini.with_events_at("gemini", "/bin/forge", false, Some(&home));
         assert_eq!(std::fs::read_to_string(&settings).unwrap(), "{ // x");
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pi_gets_forges_event_extension_next_to_the_users() {
+        let home = std::env::temp_dir().join(format!("forge-pi-events-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        let extensions = home.join(".pi/agent/extensions");
+        std::fs::create_dir_all(&extensions).unwrap();
+        std::fs::write(extensions.join("mine.ts"), "export default () => {}").unwrap();
+
+        let pi = builtins().into_iter().find(|a| a.id == "pi").unwrap();
+        assert!(
+            pi.sends_events(),
+            "Pi avisa él mismo: sin adivinar por la salida"
+        );
+        assert_eq!(
+            pi.with_events_at("pi", "/bin/forge", false, Some(&home)),
+            "pi"
+        );
+
+        let file = extensions.join("forge-events.js");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.starts_with(PI_EVENTS_MARK), "{text}");
+        // Pi ejecuta forge sin shell (pi.exec): la ruta va como cadena de JS, sin comillas de sh.
+        assert!(text.contains(r#"const FORGE = "/bin/forge";"#), "{text}");
+        for event in [
+            "agent_settled",
+            "ui_prompt_start",
+            "\"waiting\"",
+            "\"stop\"",
+        ] {
+            assert!(text.contains(event), "falta {event}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(extensions.join("mine.ts")).unwrap(),
+            "export default () => {}"
+        );
+
+        // En Windows la ruta lleva barras invertidas: escapadas como en JSON, sin PowerShell.
+        ensure_pi_events(&home.join(".pi/agent"), r"C:\Program Files\Forge\forge.exe").unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.contains(r#"const FORGE = "C:\\Program Files\\Forge\\forge.exe";"#),
+            "{text}"
+        );
+
+        // Un forge-events.js que no escribió Forge no se pisa.
+        std::fs::write(&file, "// del usuario").unwrap();
+        assert!(ensure_pi_events(&home.join(".pi/agent"), "/bin/forge").is_err());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "// del usuario");
         let _ = std::fs::remove_dir_all(&home);
     }
 
