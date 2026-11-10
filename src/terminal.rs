@@ -246,6 +246,85 @@ fn pwsh_args(script: &str) -> Vec<String> {
 
 type SpawnResult = Result<Terminal, Box<dyn std::error::Error + Send + Sync>>;
 
+/// ¿Está el editor de línea del shell (zle, readline) leyendo tecla a tecla? Lo dice el modo
+/// de la terminal: sin `ICANON`. Antes, en modo canónico, el sistema junta cada línea con un
+/// tope (1024 bytes en macOS) y descarta lo que sobra. En Windows no hay tal modo.
+struct LineEditor {
+    #[cfg(unix)]
+    fd: Option<std::os::fd::OwnedFd>,
+}
+
+impl LineEditor {
+    #[cfg_attr(windows, allow(unused_variables))]
+    fn of(master: &dyn MasterPty) -> Self {
+        // Una copia del descriptor: el hilo que escribe puede vivir más que la terminal.
+        #[cfg(unix)]
+        let fd = master.as_raw_fd().and_then(|fd| {
+            use std::os::fd::FromRawFd;
+            let copy = unsafe { libc::dup(fd) };
+            (copy >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(copy) })
+        });
+        Self {
+            #[cfg(unix)]
+            fd,
+        }
+    }
+
+    fn active(&self) -> bool {
+        #[cfg(unix)]
+        if let Some(fd) = &self.fd {
+            use std::os::fd::AsRawFd;
+            let mut t: libc::termios = unsafe { std::mem::zeroed() };
+            // Sin poder leerlo (no es una terminal), no se espera por esto.
+            return unsafe { libc::tcgetattr(fd.as_raw_fd(), &mut t) } != 0
+                || t.c_lflag & libc::ICANON == 0;
+        }
+        true
+    }
+}
+
+/// El comando que se escribe, en una sola línea para bash, zsh y ksh: cada salto dentro de
+/// comillas simples pasa a `'$'\n''` (cierra, salto con `$'…'`, reabre). Escrito tal cual, el
+/// shell acepta la primera línea, vuelve un momento al modo canónico mientras la lee y la
+/// siguiente, si pasa de 1024 bytes, llega cortada (bash 3.2 en el Mac del CI). Otros shells
+/// (fish, sh) no tienen `$'…'`: les llega como antes.
+fn one_line(input: &str, shell: &str) -> String {
+    let name = shell.rsplit('/').next().unwrap_or(shell);
+    if !matches!(name, "bash" | "zsh" | "ksh" | "mksh") || !input.contains('\n') {
+        return input.to_string();
+    }
+    #[derive(PartialEq)]
+    enum Q {
+        Fuera,
+        Simples,
+        Dobles,
+    }
+    let mut q = Q::Fuera;
+    let mut out = String::with_capacity(input.len() + 64);
+    let mut chars = input.chars();
+    while let Some(c) = chars.next() {
+        match (&q, c) {
+            (Q::Simples, '\n') => {
+                out.push_str(r"'$'\n''");
+                continue;
+            }
+            (Q::Simples, '\'') | (Q::Dobles, '"') => q = Q::Fuera,
+            (Q::Fuera, '\'') => q = Q::Simples,
+            (Q::Fuera, '"') => q = Q::Dobles,
+            (Q::Fuera | Q::Dobles, '\\') => {
+                out.push(c);
+                if let Some(next) = chars.next() {
+                    out.push(next);
+                }
+                continue;
+            }
+            _ => {}
+        }
+        out.push(c);
+    }
+    out
+}
+
 /// Shell elegido en Ajustes para las terminales nuevas (vacío: el del sistema).
 static SHELL_OVERRIDE: Mutex<String> = Mutex::new(String::new());
 
@@ -347,6 +426,14 @@ impl Terminal {
             cmd.env(key, value);
         }
         cmd.cwd(cwd);
+        let shell = match cmd.is_default_prog() {
+            true => cmd.get_shell(),
+            false => cmd
+                .get_argv()
+                .first()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        };
         let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
         #[cfg(windows)]
@@ -414,16 +501,22 @@ impl Terminal {
         // shell al cambiarlo (SIGWINCH) podía tapar la salida del comando: bash 3.2 con un
         // prompt más largo que la línea sube una fila y escribe el prompt encima (plan #210).
         // Si la interfaz no la dibuja (pestaña oculta), se escribe tras unos segundos igual.
+        // Y solo con el editor de línea del shell activo (zle, readline): un perfil lento
+        // (p10k instant prompt, nvm) enseña algo y calla mientras sigue cargando, con la
+        // terminal en modo canónico, donde macOS corta cada línea en 1024 bytes. El comando
+        // de un revisor de Codex (sus `-c` y el prompt) llegaba cortado y el shell quedaba en
+        // `quote>`. Por lo mismo, en bash y zsh va en una sola línea (ver `one_line`).
         // En Windows lo escrito va a PowerShell, que pasa los argumentos a su manera.
         let input = input.map(|i| match cfg!(windows) {
             true => forge_core::agents::powershell_line(i),
-            false => i.to_string(),
+            false => one_line(i, &shell),
         });
         let typed = Arc::new(Mutex::new(None));
         let sized: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         if let Some(input) = input {
             let (writer, output) = (writer.clone(), last_output.clone());
             let (typed, sized) = (typed.clone(), sized.clone());
+            let editor = LineEditor::of(&*pair.master);
             #[cfg(test)]
             let raw = transcript.clone();
             std::thread::spawn(move || {
@@ -433,7 +526,8 @@ impl Terminal {
                     let quiet = output
                         .lock()
                         .unwrap()
-                        .is_some_and(|at| at.elapsed() >= pause);
+                        .is_some_and(|at| at.elapsed() >= pause)
+                        && editor.active();
                     let sized = sized
                         .lock()
                         .unwrap()
@@ -443,7 +537,8 @@ impl Terminal {
                         t if quiet && t >= Duration::from_secs(5) => {
                             break "sin tamaño, tras la pausa";
                         }
-                        t if t >= Duration::from_secs(10) => break "espera agotada",
+                        // Un shell sin editor de línea (sh) nunca lo activa.
+                        t if t >= Duration::from_secs(30) => break "espera agotada",
                         _ => std::thread::sleep(Duration::from_millis(30)),
                     }
                 };
@@ -2712,6 +2807,96 @@ mod tests {
         }
         let (at, _) = term.typed.lock().unwrap().unwrap();
         assert!(at > sized, "{}", term.diagnose());
+    }
+
+    /// En bash y zsh el comando va en una línea y el agente recibe el mismo texto; en fish o
+    /// sh queda igual. Las comillas dobles y las barras no confunden dónde está cada salto.
+    #[cfg(unix)]
+    #[test]
+    fn a_multiline_command_is_typed_on_one_line_with_the_same_meaning() {
+        let prompt = "Review `x` (\"Módulos\") it's «ok»\nnotes: $HOME \\ \" '\n\nfin";
+        let command = format!(
+            "printf '%s|' \"a\\\"'b\" '{}' end",
+            prompt.replace('\'', r"'\''")
+        );
+        assert_eq!(one_line(&command, "/usr/bin/fish"), command);
+        assert_eq!(one_line(&command, "sh"), command);
+        for shell in ["bash", "zsh"] {
+            let line = one_line(&command, &format!("/bin/{shell}"));
+            assert!(!line.contains('\n'), "{line}");
+            let path = format!("/bin/{shell}");
+            if !Path::new(&path).exists() {
+                continue;
+            }
+            let run = |c: &str| {
+                let out = std::process::Command::new(&path).args(["-c", c]).output();
+                String::from_utf8(out.unwrap().stdout).unwrap()
+            };
+            assert_eq!(run(&line), format!("a\"'b|{prompt}|end|"), "{shell}");
+        }
+    }
+
+    /// Un shell cuyo perfil tarda (p10k instant prompt, nvm…) muestra algo, calla y sigue
+    /// cargando sin su editor de línea: la terminal está en modo canónico y macOS corta cada
+    /// línea en 1024 bytes. El comando largo de un revisor (los `-c` de Codex y el prompt de
+    /// varias líneas) llegaba cortado y el shell se quedaba en `quote>`. Tiene que llegar
+    /// entero, en bash y en zsh.
+    #[cfg(unix)]
+    #[test]
+    fn a_long_first_command_arrives_whole_after_a_slow_profile() {
+        let dir = std::env::temp_dir().join(format!("forge-slow-rc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rc = "printf 'instant> '; sleep 1; PS1='$ '\n";
+        std::fs::write(dir.join("bashrc"), rc).unwrap();
+        std::fs::write(dir.join(".zshrc"), rc).unwrap();
+        // Una primera línea de más de 1024 bytes y luego de todo: comillas, acentos, `$`, `\`.
+        let prompt = format!(
+            "{} it's `git diff` (\"Módulos\") «ok»\nPhase notes: $HOME \\n {}\nfin ' \"",
+            "x".repeat(1100),
+            "y".repeat(1500)
+        );
+        let quoted = format!("'{}'", prompt.replace('\'', r"'\''"));
+        let mut shells = vec!["bash"];
+        if Path::new("/bin/zsh").exists() {
+            shells.push("zsh");
+        }
+        for shell in shells {
+            let out = dir.join(format!("{shell}.out"));
+            let _ = std::fs::remove_file(&out);
+            let mut cmd = CommandBuilder::new(shell);
+            if shell == "bash" {
+                cmd.args(["--noprofile", "--rcfile"]);
+                cmd.arg(dir.join("bashrc"));
+            } else {
+                // Sin los /etc/zsh*: el compinit de Ubuntu pregunta por carpetas inseguras.
+                cmd.env("ZDOTDIR", &dir);
+                cmd.arg("-d");
+            }
+            cmd.arg("-i");
+            let command = format!("printf '%s' {quoted} > '{}'", out.display());
+            let ctx = egui::Context::default();
+            let mut term =
+                Terminal::start(&ctx, &dir, &HashMap::new(), cmd, Some(&command)).unwrap();
+            term.set_size(Size {
+                cols: 100,
+                rows: 30,
+            });
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                let got = std::fs::read_to_string(&out).ok();
+                if got.as_deref() == Some(prompt.as_str()) {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{shell}: el comando no llegó entero ({:?} bytes): {}",
+                    got.map(|g| g.len()),
+                    term.diagnose()
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
