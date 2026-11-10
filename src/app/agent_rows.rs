@@ -258,9 +258,11 @@ fn small(
 }
 
 /// Las filas de agentes de un proyecto, bajo su tarjeta. `panels`: la terminal de cada fila.
+/// `switch`: el proyecto en el que entrar antes de ir a la terminal, si no es el activo.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn agent_rows_ui(
     ui: &mut egui::Ui,
+    switch: Option<usize>,
     rows: &[Row],
     panels: &[PanelId],
     overlaps: &[Overlap],
@@ -269,6 +271,14 @@ pub(super) fn agent_rows_ui(
     now: i64,
     cmds: &mut Vec<UiCmd>,
 ) {
+    // Ir a la terminal de una fila: si es de otro proyecto, primero se entra en él (como un
+    // clic en su tarjeta), porque «ir al panel» actúa sobre el proyecto activo.
+    let go = |cmds: &mut Vec<UiCmd>, panel: PanelId| {
+        if let Some(i) = switch {
+            cmds.push(UiCmd::Activate(i));
+        }
+        cmds.push(UiCmd::GoToPanel(panel));
+    };
     // El tiempo de cada fila avanza solo (sin spinner no hay otro repintado).
     if !rows.is_empty() {
         ui.ctx().request_repaint_after(Duration::from_secs(10));
@@ -337,7 +347,7 @@ pub(super) fn agent_rows_ui(
         }
         highlight(ui, bg, &block);
         if block.clicked() {
-            cmds.push(UiCmd::GoToPanel(*panel));
+            go(cmds, *panel);
         }
         let is_unread = unread.contains(panel);
         block.context_menu(|ui| {
@@ -412,7 +422,7 @@ pub(super) fn agent_rows_ui(
             );
             highlight(ui, bg, &r);
             if r.clicked() {
-                cmds.push(UiCmd::GoToPanel(*panel));
+                go(cmds, *panel);
             }
         }
     }
