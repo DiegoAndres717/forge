@@ -541,6 +541,151 @@ mod unit {
         );
     }
 
+    /// Plan #237 fase 1: las normas del proyecto llegan al revisor solo si el cambio toca sus
+    /// rutas, el hallazgo nombra su norma y el revisor no sabe quién hizo el cambio.
+    #[test]
+    fn project_norms_reach_the_reviewer_only_where_they_apply_and_blind() {
+        let dir = std::env::temp_dir().join(format!("forge-norms-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".forge")).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        let sh = |cmd: &str| {
+            assert!(
+                Command::new("sh")
+                    .args(["-c", cmd])
+                    .current_dir(&dir)
+                    .status()
+                    .unwrap()
+                    .success(),
+                "{cmd}"
+            )
+        };
+        // Lo hizo un agente: autor, mensaje y rama lo delatan; nada de eso debe llegar al revisor.
+        sh(
+            "git init -q -b main && git config user.email smith@agents.example && git config user.name 'Agent Smith' && git config core.autocrlf false",
+        );
+        std::fs::write(dir.join("README.md"), "x\n").unwrap();
+        sh(
+            "git add README.md && git commit -qm 'start' -m 'Co-Authored-By: Claude Opus <noreply@anthropic.com>' && git checkout -qb claude/feature",
+        );
+        std::fs::create_dir_all(dir.join("src/api")).unwrap();
+        std::fs::create_dir_all(dir.join("lib")).unwrap();
+        std::fs::write(
+            dir.join("src/api/users.ts"),
+            "export function find(id: string) {\n  return db.query(\"SELECT * FROM users WHERE id = \" + id);\n}\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("lib/util.ts"), "export const one = 1;\n").unwrap();
+        sh("git add src lib");
+        std::fs::write(
+            dir.join(".forge/norms.toml"),
+            "[[norms]]\nid = \"sql-params\"\nseverity = \"blocking\"\npaths = [\"src/api/**\"]\n\
+             look_for = \"user input concatenated into SQL instead of bound parameters\"\n\n\
+             [[norms]]\nid = \"py-logs\"\nseverity = \"suggestion\"\npaths = [\"*.py\"]\n\
+             look_for = \"python handlers that log passwords or tokens\"\n",
+        )
+        .unwrap();
+
+        // Proveedor falso (sin gastar): guarda cada prompt y solo objeta si recibe la norma.
+        let prompts = dir.join("prompts.txt");
+        let block = "{\"verdict\":\"block\",\"confidence\":0.9,\"summary\":\"concatenated SQL\",\"findings\":[{\"severity\":\"blocking\",\"file\":\"src/api/users.ts\",\"line\":2,\"norm\":\"sql-params\",\"message\":\"query built by concatenation\"}]}";
+        let approve =
+            "{\"verdict\":\"approve\",\"confidence\":0.9,\"summary\":\"ok\",\"findings\":[]}";
+        let command = if cfg!(windows) {
+            format!(
+                "$p = [IO.StreamReader]::new([Console]::OpenStandardInput()).ReadToEnd(); Add-Content -LiteralPath '{}' -Value $p; if ($p.Contains('sql-params')) {{ echo '{block}' }} else {{ echo '{approve}' }}",
+                prompts.display()
+            )
+        } else {
+            format!(
+                "p=$(cat); printf '%s\\n' \"$p\" >> '{}'; case \"$p\" in *sql-params*) echo '{block}';; *) echo '{approve}';; esac",
+                prompts.display()
+            )
+        };
+        let mut config = crate::router::RouterConfig::default();
+        config.providers.insert(
+            "fake".into(),
+            crate::router::ProviderDef {
+                command,
+                format: crate::router::OutputFormat::Text,
+                cost_per_call_usd: 0.0,
+                local: true,
+            },
+        );
+        for task in ["classification", "code_review", "architecture", "security"] {
+            config.tasks.insert(
+                task.into(),
+                crate::router::TaskRoute {
+                    provider: "fake".into(),
+                    model: "m".into(),
+                    effort: None,
+                },
+            );
+        }
+        // Solo el revisor de normas: los demás incluidos no son lo que se prueba aquí.
+        let reviewers: Vec<_> = crate::reviewers::load(&dir)
+            .unwrap()
+            .into_iter()
+            .filter(|r| r.id == "norms")
+            .collect();
+        let handle = run(
+            &dir,
+            &dir,
+            rules("[commit]\nrequire_ai_review = true\n"),
+            Stage::Commit,
+            RunOptions {
+                env: Default::default(),
+                exceptions: vec![],
+                push_range: None,
+                evidence: vec![],
+                name: "test".into(),
+                routing: Some(config),
+                month_spent: 0.0,
+                reviewers,
+            },
+            || {},
+        );
+        wait(&handle);
+        handle.snapshot(|r| {
+            let all: Vec<String> = r
+                .items
+                .iter()
+                .map(|i| format!("{} {:?} {} {:?}", i.id, i.level, i.label, i.details))
+                .collect();
+            let norms = r
+                .items
+                .iter()
+                .find(|i| i.id == "reviewer:norms")
+                .unwrap_or_else(|| panic!("sin revisor de normas: {all:#?}"));
+            let details = norms.details.join("\n");
+            assert_eq!(norms.level, Level::Block, "{all:#?}");
+            assert!(
+                details.contains("sql-params") && details.contains("query built by concatenation"),
+                "el hallazgo nombra su norma: {details}"
+            );
+            assert!(!details.contains("py-logs"), "{details}");
+        });
+        let sent = std::fs::read_to_string(&prompts).unwrap();
+        assert!(
+            sent.contains("user input concatenated into SQL"),
+            "la norma de su ruta llega: {sent}"
+        );
+        assert!(
+            !sent.contains("py-logs") && !sent.contains("python handlers"),
+            "una norma de otra ruta no se envía"
+        );
+        // Revisión a ciegas: ni autor, ni mensaje del commit, ni rama.
+        for leak in [
+            "Agent Smith",
+            "smith@agents",
+            "Co-Authored-By",
+            "claude/feature",
+        ] {
+            assert!(!sent.contains(leak), "el revisor no debe ver «{leak}»");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn reviewers_disagreement() {
         let o = |name: &str, verdict| (name.to_string(), verdict, 0.9, String::new());

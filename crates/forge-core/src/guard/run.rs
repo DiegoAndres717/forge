@@ -364,7 +364,11 @@ pub fn run(
                 &options.routing.clone().unwrap_or_default(),
             );
             for a in &active {
-                let details = vec![tr!("archivos de su área: {p0}", p0 = a.files.join(", "))];
+                let mut details = vec![tr!("archivos de su área: {p0}", p0 = a.files.join(", "))];
+                if !a.norms.is_empty() {
+                    let ids: Vec<&str> = a.norms.iter().map(|n| n.id.as_str()).collect();
+                    details.push(tr!("normas que aplican: {p0}", p0 = ids.join(", ")));
+                }
                 items.push(item(
                     format!("reviewer:{}", a.reviewer.id),
                     Level::Pending,
@@ -738,8 +742,15 @@ impl AiRun<'_> {
         if jobs.is_empty() {
             return;
         }
-        let signature =
-            |a: &Activation| router::reviewer_route(self.config, &a.reviewer, local).label();
+        // Firma: la ruta y, con normas, su huella (si cambian, la aprobación previa no vale).
+        let signature = |a: &Activation| {
+            let route = router::reviewer_route(self.config, &a.reviewer, local).label();
+            if a.norms.is_empty() {
+                route
+            } else {
+                format!("{route}|norms:{}", crate::norms::fingerprint(&a.norms))
+            }
+        };
         // Aprobaciones previas del mismo candidato (y misma ruta): no se repiten.
         let mut pending = Vec::new();
         for (n, a) in jobs {

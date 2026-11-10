@@ -34,6 +34,7 @@ Uso:
   forge ai route [commit|push|pr]       riesgo del cambio y qué modelos lo revisarían (sin gastar)
   forge ai usage                        consumo de modelos de este mes
   forge ai init                         crea .forge/routing.toml
+  forge norms init                      crea .forge/norms.toml con normas de seguridad de partida
   forge memory search <texto> [--kind k]   busca en Forge Memory (memoria del proyecto)
   forge memory add <tipo> \"título\" \"texto\" [--tags a,b]
   forge memory embed                       calcula los vectores de la búsqueda por significado
@@ -90,6 +91,7 @@ Usage:
   forge ai route [commit|push|pr]       change risk and which models would review it (free)
   forge ai usage                        model usage this month
   forge ai init                         creates .forge/routing.toml
+  forge norms init                      creates .forge/norms.toml with starter security norms
   forge memory search <text> [--kind k]    searches Forge Memory (project memory)
   forge memory add <kind> \"title\" \"text\" [--tags a,b]
   forge memory embed                       computes the vectors for search by meaning
@@ -228,6 +230,7 @@ pub const COMMANDS: &[&str] = &[
     "ideas",
     "mcp",
     "memory",
+    "norms",
     "plans",
     "review",
     "review-stats",
@@ -445,6 +448,14 @@ pub fn run(args: &[String]) -> i32 {
             out.line(&format!(
                 "Creado {}",
                 project.join(".forge/routing.toml").display()
+            ));
+            0
+        }),
+        // Plantilla de normas: solo se crea si se pide; corren donde la etapa ya pide IA.
+        (Some("norms"), Some("init")) => forge_core::norms::write_template(&project).map(|file| {
+            out.line(&tr!("Creado {p0}", p0 = file.display()));
+            out.line(tr!(
+                "Las normas corren en las etapas con require_ai_review (rules.toml) y con forge review."
             ));
             0
         }),
@@ -1651,6 +1662,10 @@ fn ai_route(out: &Out, project: &Path, stage: Stage) -> Result<i32, String> {
                 p2 = a.files.len(),
                 kind = kind
             ));
+            if !a.norms.is_empty() {
+                let ids: Vec<&str> = a.norms.iter().map(|n| n.id.as_str()).collect();
+                out.line(&tr!("    normas que aplican: {p0}", p0 = ids.join(", ")));
+            }
         }
         for (name, why) in skipped {
             out.line(&out.paint("2", &format!("  ○ {name}: {why}")));

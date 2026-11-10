@@ -239,6 +239,7 @@ Per project, in `.forge/` (commit it to share with your team):
 | `rules.toml` | Guard rules and checks per stage |
 | `agents.toml` | Agents and how to launch them |
 | `routing.toml` | Model routing for AI reviews (`forge ai init`) |
+| `norms.toml` | Project norms the AI reviewer checks, each only on its paths (`forge norms init`) |
 
 Global settings live in `~/.config/forge/config.toml` (fonts and more). Plans, memory and history are stored in Forge's own database, never in the repo.
 

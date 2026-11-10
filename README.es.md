@@ -242,6 +242,7 @@ Por proyecto, en `.forge/` (súbelo al repo para compartirlo con tu equipo):
 | `rules.toml` | Reglas y comprobaciones de Guard por etapa |
 | `agents.toml` | Agentes y cómo se lanzan |
 | `routing.toml` | Enrutado de modelos para revisiones con IA (`forge ai init`) |
+| `norms.toml` | Normas del proyecto que comprueba el revisor con IA, cada una solo en sus rutas (`forge norms init`) |
 
 La configuración global está en `~/.config/forge/config.toml` (fuentes y más). Planes, memoria e historial se guardan en la base de datos de Forge, nunca en el repo.
 

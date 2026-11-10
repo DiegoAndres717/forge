@@ -75,6 +75,8 @@ pub struct ReviewerSpec {
     /// En qué se fija (va al prompt).
     pub focus: String,
     pub detector: Option<Detector>,
+    /// Normas del proyecto que lleva (solo el revisor de normas, plan #237).
+    pub norms: Vec<crate::norms::Norm>,
 }
 
 pub fn builtins() -> Vec<ReviewerSpec> {
@@ -90,6 +92,7 @@ pub fn builtins() -> Vec<ReviewerSpec> {
         paths: Vec::new(),
         focus: focus.into(),
         detector: Some(detector),
+        norms: Vec::new(),
     };
     vec![
         reviewer(
@@ -198,6 +201,11 @@ pub fn load(project: &Path) -> Result<Vec<ReviewerSpec>, String> {
         Ok(text) => toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?,
     };
     let mut reviewers = builtins();
+    // Las normas del proyecto van como un revisor más, ajustable con `[[reviewers]] id = "norms"`.
+    let norms = crate::norms::load(project)?;
+    if !norms.is_empty() {
+        reviewers.push(crate::norms::reviewer(norms));
+    }
     for entry in file.reviewers {
         let i = match reviewers.iter().position(|r| r.id == entry.id) {
             Some(i) => i,
@@ -221,6 +229,7 @@ pub fn load(project: &Path) -> Result<Vec<ReviewerSpec>, String> {
                     paths: Vec::new(),
                     focus: tr!("el área \"{p0}\"", p0 = entry.id),
                     detector: None,
+                    norms: Vec::new(),
                 });
                 reviewers.len() - 1
             }
@@ -256,6 +265,8 @@ pub struct Activation {
     pub reviewer: ReviewerSpec,
     /// Archivos de su área (los únicos que recibe).
     pub files: Vec<String>,
+    /// Normas que tocan esos archivos (las únicas que se le envían).
+    pub norms: Vec<crate::norms::Norm>,
 }
 
 const DATABASE: [&str; 10] = [
@@ -300,6 +311,7 @@ pub fn activate(
     };
     let mut active = Vec::new();
     let mut skipped = Vec::new();
+    let paths: Vec<String> = files.iter().map(|f| f.path.clone()).collect();
     for r in reviewers.iter().filter(|r| r.enabled) {
         let pick = |pred: &dyn Fn(&str) -> bool| {
             files
@@ -308,7 +320,13 @@ pub fn activate(
                 .filter(|p| pred(p))
                 .collect::<Vec<_>>()
         };
-        let (matched, why_not) = if !r.paths.is_empty() {
+        let norms = crate::norms::applicable(&r.norms, &paths);
+        let (matched, why_not) = if !r.norms.is_empty() {
+            (
+                pick(&|p| norms.iter().any(|n| n.applies_to(p))),
+                tr!("el cambio no toca las rutas de ninguna norma"),
+            )
+        } else if !r.paths.is_empty() {
             (
                 pick(&|p| r.paths.iter().any(|g| glob_match(g, p))),
                 tr!("no toca sus rutas"),
@@ -365,9 +383,17 @@ pub fn activate(
         if matched.is_empty() {
             skipped.push((r.name.clone(), why_not.to_string()));
         } else {
+            let mut reviewer = r.clone();
+            // Bloquea solo si alguna de las normas que aplican es bloqueante.
+            if !r.norms.is_empty() {
+                reviewer.blocking &= norms
+                    .iter()
+                    .any(|n| n.severity == crate::norms::Severity::Blocking);
+            }
             active.push(Activation {
-                reviewer: r.clone(),
+                reviewer,
                 files: matched,
+                norms,
             });
         }
     }
@@ -516,6 +542,43 @@ mod tests {
         assert_eq!(ids(&config, RiskLevel::High), ["readability"]);
         // Con riesgo medio entra la primera de las elegidas.
         assert_eq!(ids(&config, RiskLevel::Medium), ["readability"]);
+    }
+
+    #[test]
+    fn the_norms_reviewer_runs_only_with_the_norms_the_change_touches() {
+        let norm = |id: &str, severity, path: &str| crate::norms::Norm {
+            id: id.into(),
+            look_for: id.into(),
+            severity,
+            paths: vec![path.into()],
+        };
+        use crate::norms::Severity::{Blocking, Suggestion};
+        let spec = crate::norms::reviewer(vec![
+            norm("sql", Blocking, "src/api/**"),
+            norm("logs", Suggestion, "*.py"),
+        ]);
+        assert!(spec.blocking);
+        let ids = |files: &[FileChange]| {
+            let (active, skipped) = activate(std::slice::from_ref(&spec), files, &low(), &cfg());
+            (
+                active
+                    .iter()
+                    .map(|a| {
+                        let norms: Vec<&str> = a.norms.iter().map(|n| n.id.as_str()).collect();
+                        (norms.join(","), a.files.join(","), a.reviewer.blocking)
+                    })
+                    .collect::<Vec<_>>(),
+                skipped,
+            )
+        };
+        let (active, _) = ids(&[file("src/api/users.ts"), file("lib/util.ts")]);
+        assert_eq!(active, [("sql".into(), "src/api/users.ts".into(), true)]);
+        // Solo una sugerencia aplica: no bloquea.
+        let (active, _) = ids(&[file("jobs/run.py")]);
+        assert_eq!(active, [("logs".into(), "jobs/run.py".into(), false)]);
+        let (active, skipped) = ids(&[file("docs/a.md")]);
+        assert!(active.is_empty());
+        assert!(skipped[0].1.contains("ninguna norma"), "{skipped:?}");
     }
 
     #[test]

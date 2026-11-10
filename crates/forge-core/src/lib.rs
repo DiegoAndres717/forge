@@ -23,6 +23,7 @@ pub mod launch;
 pub mod live;
 pub mod mcp;
 pub mod memory;
+pub mod norms;
 pub mod parallel;
 pub mod ports;
 pub mod pr;
