@@ -2743,6 +2743,11 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
         !said.contains("zzresuelto"),
         "no el ya resuelto: {said}\n--- pantalla ---\n{screen}"
     );
+    // Plan #238: el agente sabe dónde está el repositorio, sea cual sea su carpeta.
+    assert!(
+        said.contains(&format!("git -C \"{}\"", path.display())),
+        "con la ruta del repositorio: {said}\n--- pantalla ---\n{screen}"
+    );
 }
 
 /// «Aprender»: de los comentarios resueltos se propone qué recordar; solo se guarda en la
