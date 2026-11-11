@@ -646,13 +646,17 @@ impl App {
     ) {
         let Some(i) = self.active else { return };
         let ws = &mut self.workspaces[i];
-        let Some(prompt) = ws
-            .ideas
-            .items
-            .iter()
-            .find(|p| p.id == id)
-            .and_then(|p| forge_core::ideas::fix_prompt(p, phase, &ws.ideas.comments))
-        else {
+        // La ruta del repositorio va en el mensaje: el agente no depende de su carpeta actual.
+        let worktree = phase_worktree(ws, id, phase);
+        let Some(prompt) = ws.ideas.items.iter().find(|p| p.id == id).and_then(|p| {
+            forge_core::ideas::fix_prompt(
+                p,
+                phase,
+                &ws.ideas.comments,
+                &ws.project.path,
+                worktree.as_deref(),
+            )
+        }) else {
             return;
         };
         // Sin repositorio o sin la rama aquí, el agente no podría corregir nada (plan #238).
@@ -686,23 +690,14 @@ impl App {
                 .find(|s| s.id == a.agent)
                 .map(|s| s.name.clone())
         });
-        let worktree = idea
-            .phases
-            .get(phase)
-            .and_then(|p| p.branch.as_deref())
-            .and_then(|branch| {
-                let repo = ws.ideas.repo.as_ref()?;
-                let root = forge_core::worktrees::root()?;
-                forge_core::worktrees::records_of_main(repo, &root)
-                    .into_iter()
-                    .find(|r| r.branch == branch && r.path.exists())
-                    .map(|r| r.path)
-            });
+        let worktree = phase_worktree(ws, id, phase);
         let context = forge_core::ideas::ReviewContext {
             author: author.as_deref(),
             worktree: worktree.as_deref(),
         };
-        let Some(prompt) = forge_core::ideas::review_prompt(idea, phase, &context) else {
+        let Some(prompt) =
+            forge_core::ideas::review_prompt(idea, phase, &ws.project.path, &context)
+        else {
             return;
         };
         // Sin repositorio o sin la rama aquí, el revisor no podría leer el diff (plan #238).
@@ -766,6 +761,25 @@ impl App {
             None => &mut self.general,
         }
     }
+}
+
+/// El worktree de Forge donde está la rama de la fase `phase` del plan `id`, si existe.
+fn phase_worktree(ws: &Workspace, id: i64, phase: usize) -> Option<std::path::PathBuf> {
+    let branch = ws
+        .ideas
+        .items
+        .iter()
+        .find(|p| p.id == id)?
+        .phases
+        .get(phase)?
+        .branch
+        .as_deref()?;
+    let repo = ws.ideas.repo.as_ref()?;
+    let root = forge_core::worktrees::root()?;
+    forge_core::worktrees::records_of_main(repo, &root)
+        .into_iter()
+        .find(|r| r.branch == branch && r.path.exists())
+        .map(|r| r.path)
 }
 
 /// ¿Se puede abrir un agente sobre la fase `phase` del plan `id`? La carpeta del proyecto tiene
