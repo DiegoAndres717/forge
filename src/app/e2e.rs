@@ -2743,9 +2743,11 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
         !said.contains("zzresuelto"),
         "no el ya resuelto: {said}\n--- pantalla ---\n{screen}"
     );
-    // Plan #238: el agente sabe dónde está el repositorio, sea cual sea su carpeta.
+    // Plan #238: el agente sabe dónde está el repositorio, sea cual sea su carpeta. Write-Host
+    // (Windows) enseña tal cual el escape de los argumentos nativos (\"): se deshace al comparar.
     assert!(
-        said.contains(&format!("git -C \"{}\"", path.display())),
+        said.replace("\\\"", "\"")
+            .contains(&format!("git -C \"{}\"", path.display())),
         "con la ruta del repositorio: {said}\n--- pantalla ---\n{screen}"
     );
 }
