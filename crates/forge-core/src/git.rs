@@ -68,6 +68,48 @@ pub fn is_not_a_repo(error: &str) -> bool {
     error == not_a_repo()
 }
 
+/// Antes de abrir un agente que revisa o corrige una fase (plan #238): `repo` tiene que ser un
+/// repositorio git y la rama de la fase, si tiene, existir en él, local o de algún remoto (sin
+/// red: lo que ya se trajo). Si no, el agente no podría leer el diff; el error dice qué hacer.
+pub fn phase_preflight(repo: &Path, branch: Option<&str>) -> Result<(), String> {
+    git(repo, &["rev-parse", "--git-dir"]).map_err(|e| {
+        if is_not_a_repo(&e) {
+            crate::tr!(
+                "{why}: no se puede revisar ni corregir la fase. Abre el proyecto donde está su rama.",
+                why = not_a_repo()
+            )
+        } else {
+            e
+        }
+    })?;
+    let Some(branch) = branch else {
+        return Ok(());
+    };
+    let refs = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    )?;
+    let here = refs.lines().any(|r| {
+        r.strip_prefix("refs/heads/") == Some(branch)
+            || r.strip_prefix("refs/remotes/")
+                .and_then(|r| r.split_once('/'))
+                .is_some_and(|(_, b)| b == branch)
+    });
+    if here {
+        Ok(())
+    } else {
+        Err(crate::tr!(
+            "La rama «{branch}» no existe en este proyecto. Abre el proyecto donde está, o súbela allí y tráela aquí (git push / git fetch).",
+            branch = branch
+        ))
+    }
+}
+
 /// El error de git para quien lo lee: «fatal: not a git repository (or any parent up to mount
 /// point…)» no le dice nada, y no es un fallo: la carpeta simplemente no es un repositorio.
 pub(crate) fn error(stderr: &str) -> String {
@@ -425,6 +467,28 @@ pub(crate) fn test_repo(name: &str, script: &str) -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan #238: la rama de la fase vale local o traída de un remoto; sin repositorio, nada.
+    #[test]
+    fn phase_preflight_needs_a_repository_and_the_branch_here() {
+        let dir = test_repo(
+            "preflight",
+            "git branch feat/local && git update-ref refs/remotes/upstream/feat/remota HEAD",
+        );
+        assert_eq!(phase_preflight(&dir, None), Ok(()));
+        assert_eq!(phase_preflight(&dir, Some("feat/local")), Ok(()));
+        assert_eq!(phase_preflight(&dir, Some("feat/remota")), Ok(()));
+        // Solo coincide el nombre entero, no un trozo.
+        for missing in ["feat/otra", "remota", "local"] {
+            let err = phase_preflight(&dir, Some(missing)).unwrap_err();
+            assert!(err.contains(missing), "{err}");
+        }
+        let plain =
+            std::env::temp_dir().join(format!("forge-preflight-plain-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        let err = phase_preflight(&plain, None).unwrap_err();
+        assert!(err.starts_with(not_a_repo()), "{err}");
+    }
 
     #[test]
     fn ignored_tells_which_of_the_given_paths_git_ignores() {

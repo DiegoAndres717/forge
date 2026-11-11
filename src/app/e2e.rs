@@ -63,6 +63,23 @@ fn project(name: &str) -> PathBuf {
     dir
 }
 
+/// Crea la rama `name` en el repositorio de `project()` sin tocar HEAD, el índice ni los
+/// archivos: Forge solo revisa o corrige una fase cuya rama existe (plan #238).
+fn with_branch(dir: &std::path::Path, name: &str) {
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let tree = git(&["write-tree"]);
+    let commit = git(&["commit-tree", &tree, "-m", "base"]);
+    git(&["branch", name, &commit]);
+}
+
 fn app(project: PathBuf) -> Harness<'static, App> {
     let mut harness = Harness::builder()
         .with_size([1280.0, 800.0])
@@ -2645,6 +2662,7 @@ fn fixing_a_phase_sends_only_its_open_comments_to_the_chosen_agent() {
     use forge_core::ideas::{NewComment, Phase};
     let _serial = serial();
     let dir = project("fix-phase");
+    with_branch(&dir, "feat/webhook");
     let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
     std::fs::write(
         dir.join(".forge/agents.toml"),
@@ -2888,6 +2906,7 @@ fn starting_a_review_records_it_so_the_phase_can_show_its_progress() {
     use forge_core::ideas::Phase;
     let _serial = serial();
     let dir = project("review-run");
+    with_branch(&dir, "feat/webhook");
     let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
     std::fs::write(
         dir.join(".forge/agents.toml"),
@@ -2921,6 +2940,112 @@ fn starting_a_review_records_it_so_the_phase_can_show_its_progress() {
             .any(|r| r.agent == "fake" && r.ended_at.is_none())
     });
     wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
+}
+
+/// Plan #238: un proyecto con un plan cuya fase tiene rama y un comentario abierto, listo para
+/// «Revisar» y «Corregir». `git` dice si la carpeta es un repositorio; `branch`, si la rama de
+/// la fase existe en él.
+fn review_preflight_case(name: &str, git: bool, branch: bool) -> (Harness<'static, App>, i64) {
+    use forge_core::ideas::{NewComment, Phase};
+    let dir = project(name);
+    if branch {
+        with_branch(&dir, "feat/cuentas");
+    }
+    if !git {
+        std::fs::remove_dir_all(dir.join(".git")).unwrap();
+    }
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} revisa:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let path = ws(h.state()).project.path.clone();
+    let mut phase = Phase::new("Módulos de cuentas");
+    phase.branch = Some("feat/cuentas".into());
+    let plan = h
+        .state_mut()
+        .db(|s| s.add_plan(Some(&path), "Facturación", "", &[phase], "claude-code"))
+        .unwrap();
+    let comment = NewComment {
+        text: "zzabierto",
+        file: None,
+        line: None,
+    };
+    h.state_mut()
+        .db(|s| s.add_review_comment(Some(&path), plan, 0, comment, "codex"))
+        .unwrap();
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(&mut h, "plan y comentario cargados", |a| {
+        !ws(a).ideas.items.is_empty() && !ws(a).ideas.comments.is_empty()
+    });
+    (h, plan)
+}
+
+/// Pulsa «Revisar» y luego «Corregir»: ninguno abre al agente; devuelve el aviso de cada uno.
+fn review_and_fix_are_refused(h: &mut Harness<'static, App>, plan: i64) -> Vec<String> {
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    let mut errors = Vec::new();
+    for cmd in [
+        UiCmd::ReviewPhase(plan, 0, "fake".into()),
+        UiCmd::FixPhase(plan, 0, "fake".into()),
+    ] {
+        h.state_mut().apply(&ctx, cmd, area);
+        h.run_steps(5);
+        assert_eq!(ws(h.state()).panel_count(), 1, "no se abre ningún agente");
+        errors.push(h.state_mut().error.take().unwrap_or_default());
+    }
+    ws_mut(h.state_mut()).ideas.dirty = true;
+    wait_until(h, "se relee", |a| !ws(a).ideas.dirty);
+    assert!(ws(h.state()).ideas.runs.is_empty(), "no se anota revisión");
+    errors
+}
+
+/// El caso real del plan #238: «Revisar con Codex» en un proyecto cuya carpeta no es un
+/// repositorio git. Forge no abre al agente (no podría leer el diff) y dice por qué.
+#[test]
+fn reviewing_a_phase_outside_a_git_repository_is_refused_with_a_reason() {
+    let _serial = serial();
+    let (mut h, plan) = review_preflight_case("review-no-git", false, false);
+    for error in review_and_fix_are_refused(&mut h, plan) {
+        assert!(
+            error.contains(forge_core::git::not_a_repo()),
+            "el aviso dice que no es un repositorio: {error:?}"
+        );
+    }
+}
+
+/// La rama de la fase vive en otro proyecto: Forge no abre al agente y nombra la rama.
+#[test]
+fn reviewing_a_phase_whose_branch_is_not_here_is_refused_with_a_reason() {
+    let _serial = serial();
+    let (mut h, plan) = review_preflight_case("review-no-branch", true, false);
+    for error in review_and_fix_are_refused(&mut h, plan) {
+        assert!(
+            error.contains("feat/cuentas"),
+            "el aviso nombra la rama: {error:?}"
+        );
+    }
+}
+
+/// Con la rama en el repositorio, «Revisar» abre al revisor como siempre.
+#[test]
+fn reviewing_a_phase_whose_branch_exists_opens_the_reviewer() {
+    let _serial = serial();
+    let (mut h, plan) = review_preflight_case("review-branch-ok", true, true);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::ReviewPhase(plan, 0, "fake".into()), area);
+    wait_until(&mut h, "el revisor se abre", |a| ws(a).panel_count() == 2);
+    assert!(h.state().error.is_none());
 }
 
 /// Una fase lista para revisar muestra «Revisar» aunque Forge no encuentre ningún agente: el
@@ -5740,6 +5865,7 @@ fn launching_in_parallel_refuses_a_phase_without_a_branch_or_an_agent_without_a_
 fn finished_phase(name: &str, agents: &[&str], setup: impl FnOnce(&App)) -> Harness<'static, App> {
     use forge_core::ideas::{Phase, Task};
     let dir = project(name);
+    with_branch(&dir, "feat/webhook");
     let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
     let toml: String = agents
         .iter()
