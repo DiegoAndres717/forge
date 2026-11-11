@@ -655,6 +655,11 @@ impl App {
         else {
             return;
         };
+        // Sin repositorio o sin la rama aquí, el agente no podría corregir nada (plan #238).
+        if let Err(why) = phase_preflight(ws, id, phase) {
+            self.error = Some(why);
+            return;
+        }
         ws.ideas.open = false; // que se vea al agente trabajando
         ws.ask_agent(ctx, agent, &prompt, area);
     }
@@ -700,6 +705,11 @@ impl App {
         let Some(prompt) = forge_core::ideas::review_prompt(idea, phase, &context) else {
             return;
         };
+        // Sin repositorio o sin la rama aquí, el revisor no podría leer el diff (plan #238).
+        if let Err(why) = phase_preflight(ws, id, phase) {
+            self.error = Some(why);
+            return;
+        }
         let path = ws.project.path.clone();
         // Quién hizo la fase queda con la revisión: cada hallazgo lo lleva (plan #84, fase 3).
         let author_id = ws.ideas.authors.get(&(id, phase)).map(|a| a.agent.clone());
@@ -756,6 +766,19 @@ impl App {
             None => &mut self.general,
         }
     }
+}
+
+/// ¿Se puede abrir un agente sobre la fase `phase` del plan `id`? La carpeta del proyecto tiene
+/// que ser un repositorio y la rama de la fase, si tiene, existir en él.
+fn phase_preflight(ws: &Workspace, id: i64, phase: usize) -> Result<(), String> {
+    let branch = ws
+        .ideas
+        .items
+        .iter()
+        .find(|p| p.id == id)
+        .and_then(|p| p.phases.get(phase))
+        .and_then(|p| p.branch.as_deref());
+    forge_core::git::phase_preflight(&ws.project.path, branch)
 }
 
 /// Lo que comparte cada elemento al dibujarse.

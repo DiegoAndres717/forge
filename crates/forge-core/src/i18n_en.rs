@@ -732,6 +732,14 @@ pub const EN: &[(&str, &str)] = &[
         "This folder is not a git repository",
     ),
     (
+        "{why}: no se puede revisar ni corregir la fase. Abre el proyecto donde está su rama.",
+        "{why}: the phase cannot be reviewed or fixed. Open the project where its branch lives.",
+    ),
+    (
+        "La rama «{branch}» no existe en este proyecto. Abre el proyecto donde está, o súbela allí y tráela aquí (git push / git fetch).",
+        "The branch \"{branch}\" does not exist in this project. Open the project where it lives, or push it there and fetch it here (git push / git fetch).",
+    ),
+    (
         "Esta carpeta no es un repositorio git: no hay worktrees",
         "This folder is not a git repository: no worktrees",
     ),
