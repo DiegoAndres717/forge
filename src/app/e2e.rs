@@ -81,18 +81,21 @@ fn with_branch(dir: &std::path::Path, name: &str) {
 }
 
 fn app(project: PathBuf) -> Harness<'static, App> {
-    let mut harness = Harness::builder()
-        .with_size([1280.0, 800.0])
-        .build_eframe(move |cc| {
-            crate::install_fonts(&cc.egui_ctx, &Settings::default()).unwrap();
-            App::with_store(
-                &cc.egui_ctx,
-                Settings::default(),
-                None,
-                Some(project),
-                Store::in_memory(),
-            )
-        });
+    app_sized(project, [1280.0, 800.0])
+}
+
+/// Como `app`, con otro tamaño de ventana (para ver los paneles estrechos).
+fn app_sized(project: PathBuf, size: [f32; 2]) -> Harness<'static, App> {
+    let mut harness = Harness::builder().with_size(size).build_eframe(move |cc| {
+        crate::install_fonts(&cc.egui_ctx, &Settings::default()).unwrap();
+        App::with_store(
+            &cc.egui_ctx,
+            Settings::default(),
+            None,
+            Some(project),
+            Store::in_memory(),
+        )
+    });
     harness.run_steps(3);
     harness
 }
@@ -2579,6 +2582,50 @@ fn continue_phase_types_the_phase_into_the_active_terminal() {
         text.contains("zzcarrito") && text.contains("feat/zzsync")
     });
     assert!(h.state().error.is_none());
+}
+
+/// Cada fase dice «Plan #X · Fase N» (plan #322, fase 1), también con el panel estrecho
+/// (compacto, sin la línea «#id · origen · hace…»), y un clic copia ese texto.
+#[test]
+fn each_phase_shows_its_plan_and_phase_number_and_copies_it() {
+    for (name, size) in [
+        ("phase-ref-wide", [1280.0, 800.0]),
+        ("phase-ref-narrow", [420.0, 800.0]),
+    ] {
+        let _serial = serial();
+        let dir = project(name);
+        let mut h = app_sized(dir.clone(), size);
+        let plan = plan_to_continue(&mut h, &dir);
+        h.key_press_modifiers(CMD_SHIFT, Key::I);
+        h.run_steps(4);
+        let narrow = size[0] < 1000.0;
+        // Estrecho de verdad: sin la línea de metadatos del plan.
+        assert_eq!(
+            h.query_all_by_label_contains(&format!("#{plan} · x ·"))
+                .count(),
+            usize::from(!narrow),
+            "{name}: la línea de metadatos solo se ve con el panel ancho"
+        );
+        for phase in [1, 2] {
+            let text = super::ideas_panel::phase_ref(plan, phase);
+            assert!(text.contains(&format!("#{plan}")), "{text}");
+            assert_eq!(
+                h.query_all_by_label(&text).count(),
+                1,
+                "{name}: la fase {phase} muestra «{text}»"
+            );
+        }
+        let text = super::ideas_panel::phase_ref(plan, 2);
+        h.get_by_label(&text).click();
+        h.step();
+        let copied = h
+            .output()
+            .platform_output
+            .commands
+            .iter()
+            .any(|c| matches!(c, egui::OutputCommand::CopyText(t) if *t == text));
+        assert!(copied, "{name}: el clic copia «{text}»");
+    }
 }
 
 /// Sin terminal activa (el panel enfocado es un proceso), se avisa y no se escribe nada.
