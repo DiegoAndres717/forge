@@ -2102,6 +2102,22 @@ impl Workspace {
         self.focus
     }
 
+    /// Escribe `text` en la terminal enfocada y pulsa Enter, sea cual sea el agente (o el
+    /// shell) que corre en ella. `false` si la enfocada no es una terminal, ya terminó o es
+    /// la de un revisor (de solo lectura y ocupada con otra cosa).
+    pub fn submit_to_focused(&self, text: &str) -> bool {
+        if self.reviewing.contains(&self.focus) {
+            return false;
+        }
+        match self.panels.get(&self.focus).map(|p| &p.content) {
+            Some(Content::Shell(t)) if !t.exited() => {
+                t.submit(text);
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Agente de la terminal enfocada (el que el usuario está usando), si es de agente.
     pub fn focused_agent(&self) -> Option<String> {
         self.panels.get(&self.focus)?.agent.clone()

@@ -1970,6 +1970,23 @@ pub const EN: &[(&str, &str)] = &[
         "Plan idea #{id} from Forge's plans (“{title}”) in phases. Look at the project as much as needed, propose the phases in order (with a branch only where it deserves one) and their tasks, and save it with plan_update (phases). Don't write code yet.",
     ),
     ("Empezar con {agent}", "Start with {agent}"),
+    ("Continuar con esta fase", "Continue with this phase"),
+    (
+        "Escribe en la terminal activa que siga con esta fase y pulsa Enter (vale para cualquier agente)",
+        "Types into the active terminal to continue with this phase and presses Enter (works with any agent)",
+    ),
+    (
+        "sigue con la fase {n} del plan #{id}: {title} ({branch})",
+        "continue with phase {n} of plan #{id}: {title} ({branch})",
+    ),
+    (
+        "sigue con la fase {n} del plan #{id}: {title}",
+        "continue with phase {n} of plan #{id}: {title}",
+    ),
+    (
+        "No hay ninguna terminal activa: haz clic en la terminal del agente y vuelve a pulsar «Continuar con esta fase»",
+        "There is no active terminal: click the agent's terminal and press “Continue with this phase” again",
+    ),
     (
         "El agente marca la primera fase en curso, crea su rama y se pone a trabajar en ella",
         "The agent marks the first phase in progress, creates its branch and starts working on it",
