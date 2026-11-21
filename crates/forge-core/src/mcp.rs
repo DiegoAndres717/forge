@@ -79,6 +79,9 @@ pub const CHORES_DELEGATE: &str = "Forge Jev: hand git and GitHub chores (commit
 /// Plan #194: los agentes en paralelo dejaban worktrees y clones sueltos como basura.
 pub const WORKTREES: &str = "Parallel work: never create worktrees or clones of this project by hand (git worktree add, git clone into /tmp or a sibling folder). Run `forge worktree new <branch> [--from <base>]`: it creates the worktree in Forge's folder, registers it and prints its path; cd there. When you finish, remove it with `git worktree remove <path>` or leave it to the cleanup Forge offers. A read-only review snapshot (`git worktree add --detach --no-checkout <tmp> <commit>`) is allowed; remove it afterwards with `git worktree remove`.";
 
+/// Plan #322: el dueño oía «la fase #321» y no sabía si era un plan, una fase o un PR.
+pub const NAMING: &str = "Plan ids, phase numbers and pull request numbers are separate series: when you talk to the owner, name a phase \"Plan #X, phase N\" (e.g. \"Plan #322, phase 2\"), never by a bare number like \"#321\", and a pull request \"PR #N\".";
+
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
 fn instructions(modes: Modes) -> String {
@@ -94,6 +97,8 @@ fn instructions_in(modes: Modes, lang: crate::i18n::Lang) -> String {
     let mut out = String::from(
         "Forge Memory: the project's shared memory. Check memory_search before important decisions or when debugging; save decisions, solved errors (also mistakes a review caught, if they could repeat elsewhere: the fix in Git doesn't warn the next agent) and conventions you discover with memory_save (if a similar one exists, update it with memory_update; if the new one makes an old one obsolete, pass replaces=<old id>). When the user corrects how you work or tells you something you must not do, save it as a convention in Forge Memory, not only in your own memory: every agent on the project reads it. memory_search returns titles and snippets: read the details with memory_get. Pending work goes in the plans (plans_list, plan_add, plan_update): when the user describes something they want to build, create a phased plan (each phase with its branch when it deserves one, and its tasks); anything for later goes to the backlog (plan_add without phases). When you start a phase mark it in_progress and set its branch, and tick tasks as you finish them; Forge marks the phase done once its branch reaches main (mark it yourself only if it has no branch). Before you start a phase, run memory_search with the phase title and its main keywords: reviews of earlier phases saved there the repeatable mistakes they caught, so you do not repeat them. If plans_list shows open review comments on a phase you did, check each one and answer it with review_comment_resolve; if you are asked to review a phase, leave one review_comment_add per finding.",
     );
+    out.push(' ');
+    out.push_str(NAMING);
     out.push_str(&format!(
         " Write plans and backlog ideas (titles, notes, phases and tasks) in {language}: the owner reads them in Forge, whose interface is in {language}."
     ));
@@ -147,7 +152,7 @@ pub fn codex_skills() -> Vec<(String, String)> {
         (
             "forge-plans",
             "Forge: the project's plans and backlog and where each one stands",
-            "Use plans_list from the `forge` MCP server and summarize in a few lines where each plan stands and what comes next.",
+            "Use plans_list from the `forge` MCP server and summarize in a few lines where each plan stands and what comes next. Name each phase \"Plan #X, phase N\" and each pull request \"PR #N\", never a bare \"#N\".",
         ),
         (
             "forge-plan",
@@ -1131,8 +1136,9 @@ pub fn project_context(project: &Path, store: &Store) -> String {
     if !doing.is_empty() {
         out.push(tr!("Planes en progreso (plans_list para el detalle):").into());
         out.extend(doing.iter().take(8).map(|plan| match plan.current_phase() {
+            // «Plan #X» y no «#X» a secas: no se confunde con un PR (plan #322).
             Some((n, phase)) => format!(
-                "  #{} {} — {}",
+                "  Plan #{} {} — {}",
                 plan.id,
                 plan.title,
                 tr!(
@@ -1142,7 +1148,7 @@ pub fn project_context(project: &Path, store: &Store) -> String {
                     phase = phase.title
                 )
             ),
-            None => format!("  #{} {}", plan.id, plan.title),
+            None => format!("  Plan #{} {}", plan.id, plan.title),
         }));
     }
     if !backlog.is_empty() {
@@ -1613,6 +1619,8 @@ mod tests {
         let (_, plans) = call(&mut server, "plans_list", json!({}));
         assert!(plans.contains("Falta validar la entrada"), "{plans}");
         assert!(plans.contains("src/a.rs:42"), "{plans}");
+        // Plan #322: el comentario nombra la fase con su plan.
+        assert!(plans.contains("] Plan #1, phase 1: src/a.rs:42"), "{plans}");
         // Lo que escribe otro agente sale como una sola línea marcada, sin poder fingir otro
         // comentario ni órdenes en líneas nuevas, y con tope de largo.
         let long = "x".repeat(2000);
@@ -1879,6 +1887,70 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("review_comment_resolve"), "{text}");
+    }
+
+    /// Plan #322, fase 2: el dueño oía «la fase #321» sin saber si era un plan, una fase o
+    /// un PR. Todos los agentes nombran las fases con su plan y los PR como «PR #N».
+    #[test]
+    fn agents_name_phases_with_their_plan_and_prs_as_pr() {
+        let ask = Modes {
+            ask_first: true,
+            ..Modes::default()
+        };
+        for modes in [Modes::default(), ask] {
+            let text = instructions(modes);
+            assert!(text.contains("\"Plan #X, phase N\""), "{text}");
+            assert!(text.contains("\"PR #N\""), "{text}");
+        }
+        let (_, plans) = codex_skills()
+            .into_iter()
+            .find(|(name, _)| name == "forge-plans")
+            .unwrap();
+        assert!(
+            plans.contains("\"Plan #X, phase N\"") && plans.contains("\"PR #N\""),
+            "{plans}"
+        );
+
+        // La salida de plans_list y del contexto inicial lleva «Plan» delante del número.
+        let store = Store::in_memory().unwrap();
+        let project = Path::new("/p/naming");
+        let id = store
+            .add_idea(Some(project), "Vacunas", "", "claude-code")
+            .unwrap();
+        let phase = |title: &str, status: &str| crate::ideas::Phase {
+            title: title.into(),
+            status: status.into(),
+            ..Default::default()
+        };
+        store
+            .set_phases(
+                Some(project),
+                id,
+                &[phase("Modelo", "done"), phase("Pantalla", "doing")],
+                "claude-code",
+            )
+            .unwrap();
+        let plan = store.get_idea(Some(project), id).unwrap().unwrap();
+        let listed = ideas::render(&plan);
+        assert!(
+            listed.starts_with(&format!("Plan #{id} ◐ Vacunas")),
+            "{listed}"
+        );
+        let ctx = project_context(project, &store);
+        assert!(
+            ctx.contains(&format!("Plan #{id} Vacunas — fase 2 de 2: Pantalla")),
+            "{ctx}"
+        );
+        // Una idea sin fases no es un plan: sigue con su número solo.
+        let idea = store
+            .add_idea(Some(project), "Idea", "", "claude-code")
+            .unwrap();
+        let idea = store.get_idea(Some(project), idea).unwrap().unwrap();
+        let listed = ideas::render(&idea);
+        assert!(
+            listed.starts_with(&format!("#{} ○ Idea", idea.id)),
+            "{listed}"
+        );
     }
 
     #[test]

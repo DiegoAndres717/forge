@@ -13,6 +13,9 @@ Plans and the backlog live in Forge (not in the repo) and are read and changed o
 - `plan_update`: changes a plan. `phase` + `phase_status` (`in_progress`, `done`); `phase` + `task` + `task_done` to tick a task; `phase` + `add_task` to add one; `phase` + `task` + `task_text` to rename one and `phase` + `task` + `remove_task` to delete one (the later tasks of that phase move up one number; other phases, branches and statuses stay); `phases` to replace them all, only when the plan itself changes.
 - `plan_delete`: deletes a plan or an idea.
 
+## Naming
+Plan ids, phase numbers and PR numbers are separate series. When you talk to the owner, name a phase "Plan #X, phase N" (e.g. "Plan #322, phase 2"), never a bare "#321", and a pull request "PR #N".
+
 ## Working a phase
 1. `plans_list` and read the whole phase.
 2. Mark it `in_progress`, create its branch (`forge-branch-pr` skill) and set it on the phase (`plan_update` with `branch`) if the plan didn't already have it. Forge marks the phase done by itself once that branch reaches main.

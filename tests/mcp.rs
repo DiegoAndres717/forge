@@ -7,6 +7,24 @@ use serde_json::{Value, json};
 
 const FORGE: &str = env!("CARGO_BIN_EXE_forge");
 
+/// Plan #322, fase 2: las skills del repositorio también piden nombrar las fases con su
+/// plan («Plan #X, phase N») y los pull requests como «PR #N».
+#[test]
+fn repo_skills_name_phases_with_their_plan() {
+    let root = env!("CARGO_MANIFEST_DIR");
+    for file in [
+        "skills/forge-plans/SKILL.md",
+        "skills/forge-branch-pr/SKILL.md",
+        "AGENTS.md",
+    ] {
+        let text = std::fs::read_to_string(format!("{root}/{file}")).unwrap();
+        assert!(
+            text.contains("\"Plan #X, phase N\"") && text.contains("\"PR #N\""),
+            "{file}"
+        );
+    }
+}
+
 #[test]
 fn mcp_server_shares_memory_between_clients() {
     // SAFETY: todos los tests fijan el mismo valor; los textos esperados están en español.
@@ -153,12 +171,18 @@ fn mcp_server_shares_memory_between_clients() {
         "plan_update",
         json!({"id": 3, "phase": 1, "phase_status": "in_progress"}),
     );
-    assert!(started.starts_with("#3 ◐ Vacunas por lote"), "{started}");
+    assert!(
+        started.starts_with("Plan #3 ◐ Vacunas por lote"),
+        "{started}"
+    );
     assert!(
         started.contains("1. ◐ Modelo y migración [feat/vacunas-lote]"),
         "{started}"
     );
-    assert!(call(10, "project_context", json!({})).contains("fase 1 de 2: Modelo y migración"));
+    assert!(
+        call(10, "project_context", json!({}))
+            .contains("Plan #3 Vacunas por lote — fase 1 de 2: Modelo y migración")
+    );
     let ticked = call(
         11,
         "plan_update",
@@ -174,7 +198,7 @@ fn mcp_server_shares_memory_between_clients() {
         json!({"id": 3, "phase": 2, "phase_status": "done"}),
     );
     assert!(
-        done.starts_with("#3 ✓"),
+        done.starts_with("Plan #3 ✓"),
         "todas las fases completadas: {done}"
     );
     let list = call(13, "plans_list", json!({}));
@@ -337,7 +361,7 @@ fn mcp_server_shares_memory_between_clients() {
     );
     let reopened = plans(&["phase", "3", "2", "backlog"]);
     assert!(
-        reopened.starts_with("#3 ◐"),
+        reopened.starts_with("Plan #3 ◐"),
         "una fase reabierta: en progreso de nuevo\n{reopened}"
     );
     // Recordatorio por mensaje (hook del mod): el plan en curso y la memoria.

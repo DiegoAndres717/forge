@@ -8,6 +8,7 @@ Forge is a native macOS workspace (Rust + egui) for coding with AI agents. These
 - Code and identifiers in English. Code comments in Spanish. UI text in Spanish through `tr!` with its English translation.
 - Commits, PR titles and descriptions, and anything written for agents (skills, instructions, MCP prompts) in English.
 - Plans and backlog ideas (Forge plans) in the language of the owner's Forge interface: the owner reads them there.
+- To the owner, a plan phase is "Plan #X, phase N" and a pull request is "PR #N", never a bare "#N" (plan, phase and PR numbers are separate series).
 - Whatever Forge offers to agents must work for every supported agent, not just one.
 - No embedded browser and no buttons that open URLs: ports and addresses are shown as text.
 - Before calling something done: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings` and, as the very last step, `cargo fmt --all --check`.
