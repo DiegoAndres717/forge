@@ -446,6 +446,10 @@ enum HeaderAction {
     CloseTab(PanelId),
     /// Reordenar: la terminal pasa a esta posición de su grupo.
     MoveTab(PanelId, usize),
+    /// Llevar esta terminal, como pestaña, al hueco donde está esa otra.
+    JoinTab(PanelId),
+    /// Sacar esta terminal de su grupo a un panel propio.
+    DetachTab,
     Rotate,
     /// Con un panel maximizado: maximizar este otro en su lugar.
     Show(PanelId),
@@ -2085,6 +2089,12 @@ impl Workspace {
             .count()
     }
 
+    /// Terminales a la vista, una por hueco del diseño (tests).
+    #[cfg(test)]
+    pub fn slots(&self) -> Vec<PanelId> {
+        self.layout.ids()
+    }
+
     /// Orientación de la división del panel enfocado (tests).
     #[cfg(test)]
     pub fn focused_split(&self) -> Option<Dir> {
@@ -2423,6 +2433,26 @@ impl Workspace {
         if let Some(file) = self.history_file(id) {
             let _ = std::fs::remove_file(file);
         }
+        self.take_out_of_slot(id);
+        self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
+        self.closed_panels.push(id);
+        self.branch_conflicts.remove(&id);
+        self.limited.retain(|p| *p != id);
+        self.compacting.retain(|p| *p != id);
+        if self.maximized == Some(id) {
+            self.maximized = None;
+        }
+        if self.renaming.as_ref().is_some_and(|(r, _)| *r == id) {
+            self.renaming = None;
+        }
+        if self.focus == id {
+            self.focus = self.layout.ids()[0];
+        }
+    }
+
+    /// Quita la terminal `id` de su hueco sin cerrarla: si estaba a la vista en un grupo, ocupa
+    /// su sitio la siguiente; si estaba sola, el hueco desaparece.
+    fn take_out_of_slot(&mut self, id: PanelId) {
         // En un grupo: si estaba a la vista, ocupa su hueco la siguiente del grupo.
         let mut replaced = false;
         if let Some(g) = self.tabs.iter().position(|g| g.contains(&id)) {
@@ -2446,20 +2476,46 @@ impl Workspace {
         if !replaced {
             self.layout.remove(id);
         }
-        self.panels.remove(&id); // Drop mata el shell; un proceso administrado sigue en marcha.
-        self.closed_panels.push(id);
-        self.branch_conflicts.remove(&id);
-        self.limited.retain(|p| *p != id);
-        self.compacting.retain(|p| *p != id);
-        if self.maximized == Some(id) {
-            self.maximized = None;
+    }
+
+    /// Lleva la terminal `id` (viva, con su salida) como pestaña al hueco donde se ve
+    /// `target`, y la pone a la vista.
+    fn join_tab(&mut self, id: PanelId, target: PanelId) {
+        if id == target || !self.layout.ids().contains(&target) {
+            return;
         }
-        if self.renaming.as_ref().is_some_and(|(r, _)| *r == id) {
-            self.renaming = None;
+        self.maximized = None;
+        self.take_out_of_slot(id);
+        match self.tabs.iter_mut().find(|g| g.contains(&target)) {
+            Some(group) => group.push(id),
+            None => self.tabs.push(vec![target, id]),
         }
-        if self.focus == id {
-            self.focus = self.layout.ids()[0];
-        }
+        self.show_tab(id);
+    }
+
+    /// Saca la terminal `id` de su grupo a un panel propio junto al hueco que deja.
+    fn detach_tab(&mut self, id: PanelId, area: Rect) {
+        let Some(others) = self
+            .tabs
+            .iter()
+            .find(|g| g.contains(&id))
+            .map(|g| g.iter().copied().filter(|p| *p != id).collect::<Vec<_>>())
+        else {
+            return;
+        };
+        self.maximized = None;
+        self.take_out_of_slot(id);
+        let ids = self.layout.ids();
+        let Some(anchor) = others.into_iter().find(|p| ids.contains(p)) else {
+            return;
+        };
+        let dir = self
+            .rects(area)
+            .into_iter()
+            .find(|(p, _)| *p == anchor)
+            .map_or(Dir::Row, |(_, r)| layout::auto_dir(r));
+        self.layout.split(anchor, dir, id);
+        self.focus = id;
     }
 
     /// Sin paneles: la app cierra el workspace.
@@ -2719,6 +2775,8 @@ impl Workspace {
                         group.insert(to, tab);
                     }
                 }
+                HeaderAction::JoinTab(target) => self.join_tab(id, target),
+                HeaderAction::DetachTab => self.detach_tab(id, area),
                 HeaderAction::Show(other) => {
                     self.focus = other;
                     self.maximized = Some(other);
@@ -3162,6 +3220,18 @@ impl Workspace {
                 actions.push(HeaderAction::Rotate);
             }
         }
+        // Revisor metido como pestaña en otro panel: volver a sacarlo a uno propio.
+        let reviewer = self.reviewing.contains(&id);
+        if reviewer
+            && tabs.len() > 1
+            && button(
+                icon::ARROW_SQUARE_OUT,
+                tr!("Sacar a un panel aparte"),
+                "detach",
+            )
+        {
+            actions.push(HeaderAction::DetachTab);
+        }
         let panel = self.panels.get(&id);
         let process = match panel.map(|p| &p.content) {
             Some(Content::Process(p)) => self.processes.get(p),
@@ -3206,6 +3276,37 @@ impl Workspace {
                 for a in &targets {
                     if ui.button(tr!("Seguir con «{p0}»", p0 = a.name)).clicked() {
                         actions.push(HeaderAction::Handoff(a.id));
+                    }
+                }
+            });
+        }
+
+        // Revisor en su propio panel: meterlo como pestaña en otro (elige cuál).
+        let others: Vec<PanelId> = self.layout.ids().into_iter().filter(|p| *p != id).collect();
+        if reviewer && tabs.len() == 1 && !others.is_empty() {
+            let r = Rect::from_center_size(
+                egui::pos2(right - size / 2.0, rect.center().y),
+                Vec2::splat(size),
+            );
+            right -= size + 2.0;
+            let hint = tr!("Poner como pestaña de otro panel");
+            let response = ui
+                .interact(r, egui::Id::new(("join-tab", &key, id)), Sense::click())
+                .on_hover_text(hint);
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, hint));
+            let color = if focused {
+                theme::TEXT_3
+            } else {
+                theme::TEXT_4
+            };
+            theme::paint_icon_button(ui, r, icon::ARROW_SQUARE_IN, &response, color);
+            egui::Popup::menu(&response).show(|ui| {
+                ui.set_min_width(220.0);
+                for other in &others {
+                    let text = tr!("Como pestaña de «{p0}»", p0 = self.tab_name(*other));
+                    if ui.button(text).clicked() {
+                        actions.push(HeaderAction::JoinTab(*other));
                     }
                 }
             });
