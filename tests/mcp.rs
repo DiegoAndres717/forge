@@ -20,6 +20,15 @@ fn mcp_server_shares_memory_between_clients() {
         "[project]\nname = \"Bovinapp\"\n",
     )
     .unwrap();
+    // Un repositorio (sin remoto): fuera de git, plan_add añade el aviso del plan #238.
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&project)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .status()
+        .unwrap();
+    assert!(init.success());
     let db = base.join("forge.db");
     let project_arg = project.to_string_lossy().into_owned();
 

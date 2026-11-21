@@ -830,7 +830,7 @@ impl<'a> Server<'a> {
                     &phases,
                     &self.client,
                 )?;
-                Ok(if phases.is_empty() {
+                let done = if phases.is_empty() {
                     tr!("Anotada en el backlog como #{id}.", id = id)
                 } else {
                     tr!(
@@ -838,6 +838,19 @@ impl<'a> Server<'a> {
                         id = id,
                         n = phases.len()
                     )
+                };
+                // Plan #238: un proyecto sin git (una carpeta desde la que se abrió el agente
+                // para trabajar en otro repositorio) guarda el plan lejos de su código.
+                Ok(match list {
+                    Some(project) if !crate::git::is_repo(project) => format!(
+                        "{done}\n\n{}",
+                        tr!(
+                            "Aviso: {why} ({path}), así que queda guardado con esa carpeta: sus fases, si las tiene, no se pueden revisar ni se cierran al fusionar su rama. Si el trabajo es de otro repositorio, díselo a la persona para que abra ese proyecto en Forge y lo cree allí.",
+                            why = crate::git::not_a_repo(),
+                            path = project.display()
+                        )
+                    ),
+                    _ => done,
                 })
             }),
             "plan_update" | "idea_update" => match args["id"].as_i64() {
@@ -1174,6 +1187,44 @@ pub fn serve(project: &Path, store: &Store, modes: Modes) -> std::io::Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Plan #238, fase 3: el plan #234 quedó bajo «aprende», una carpeta sin git desde la que
+    /// se abrió el agente, en vez de bajo el repositorio donde trabajaba. Crear un plan en un
+    /// proyecto que no es un repositorio avisa al agente (el plan se crea igual).
+    #[test]
+    fn plan_add_warns_when_the_project_is_not_a_git_repository() {
+        let store = Store::in_memory().unwrap();
+        let add = |project: &Path, args: Value| {
+            let mut server = Server::new(project, &store);
+            let r = server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "plan_add", "arguments": args}}))
+                .unwrap();
+            assert_eq!(r["result"]["isError"], json!(false), "{r}");
+            r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let plain = std::env::temp_dir().join(format!("forge-plan-no-git-{}", std::process::id()));
+        std::fs::create_dir_all(&plain).unwrap();
+        let plan = json!({"title": "Plan", "phases": [{"title": "Uno", "branch": "feat/uno"}]});
+        let text = add(&plain, plan.clone());
+        assert!(text.contains("#1"), "se crea igual: {text}");
+        assert!(text.contains(crate::git::not_a_repo()), "{text}");
+        assert!(text.contains(&plain.display().to_string()), "{text}");
+        // Una idea del backlog también queda bajo esa carpeta.
+        let text = add(&plain, json!({"title": "Idea"}));
+        assert!(text.contains(crate::git::not_a_repo()), "{text}");
+        // La lista general no es de ningún proyecto: sin aviso.
+        let text = add(&plain, json!({"title": "General", "scope": "general"}));
+        assert!(!text.contains(crate::git::not_a_repo()), "{text}");
+        // En un repositorio, sin aviso.
+        let repo = crate::git::test_repo("plan-add-repo", "true");
+        let text = add(&repo, plan);
+        assert!(!text.contains(crate::git::not_a_repo()), "{text}");
+        let _ = std::fs::remove_dir_all(&plain);
+        let _ = std::fs::remove_dir_all(&repo);
+    }
 
     #[test]
     fn agents_archive_memories_instead_of_deleting_them() {

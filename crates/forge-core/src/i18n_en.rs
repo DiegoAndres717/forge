@@ -740,6 +740,10 @@ pub const EN: &[(&str, &str)] = &[
         "The branch \"{branch}\" does not exist in this project. Open the project where it lives, or push it there and fetch it here (git push / git fetch).",
     ),
     (
+        "Aviso: {why} ({path}), así que queda guardado con esa carpeta: sus fases, si las tiene, no se pueden revisar ni se cierran al fusionar su rama. Si el trabajo es de otro repositorio, díselo a la persona para que abra ese proyecto en Forge y lo cree allí.",
+        "Warning: {why} ({path}), so it is stored under that folder: its phases, if any, can't be reviewed and won't close when their branch merges. If the work belongs to another repository, tell the person so they open that project in Forge and create it there.",
+    ),
+    (
         "Esta carpeta no es un repositorio git: no hay worktrees",
         "This folder is not a git repository: no worktrees",
     ),
