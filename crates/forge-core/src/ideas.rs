@@ -214,8 +214,8 @@ pub fn review_prompt(
          {notes}Tasks of the phase:\n{tasks}\n\
          Done criterion: the phase is done when {criterion}.\n\
          This review is READ-ONLY. Do NOT edit files, and do NOT run git checkout, switch, stash, reset, commit or anything else that changes the working tree or the branch: another agent may be working in this folder. Your working directory may not be this repository: run every git command with `{git}`. Read the changes with `{git} diff main...{branch}` and `{git} log main..{branch}` (use the repository's default branch if it is not main, and the branch's remote-tracking ref, such as `origin/{branch}`, if it only exists on a remote). {files}\n\
-         Check, in this order: 1) bugs and wrong behavior; 2) every task above is really done; 3) tests that cannot fail or are missing; 4) the project's conventions (read them with project_context and memory_search from Forge's MCP tools). Tell Forge how far you are with its MCP tool review_progress (plan={id}, phase={n}): call it once when you start with the total number of steps you expect (step=0), after each step with step and total, and at the end with done=true, so the person can see how long is left. For every finding call Forge's MCP tool review_comment_add (plan={id}, phase={n}, text, and file and line when you have them) so it is saved in the phase, one call per finding, ordered by severity; the text says what is wrong and why.\n\
-         Separate real bugs from style. Start the text of each finding with its label: [bug/high], [bug/medium] or [bug/low] for something that is really wrong (wrong behavior, a crash, lost data, a security hole, a task not really done, a test that cannot fail), or [style] for style and nitpicks that do not change behavior. Report real bugs first and do not pad the review with style findings. Then summarize your findings in your reply (if the tool is not available, list them there with file and line). If you find no real bug, say so plainly. Do not fix anything: the agent that wrote the phase will fix what you report.",
+         Check, in this order: 1) bugs and wrong behavior; 2) every task above is really done; 3) tests that cannot fail or are missing; 4) the project's conventions (read them with project_context and memory_search from Forge's MCP tools). Tell Forge how far you are with its MCP tool review_progress (plan={id}, phase={n}): call it once when you start with the total number of steps you expect (step=0), after each step with step and total, and at the end with done=true, so the person can see how long is left. For every finding call Forge's MCP tool review_comment_add (plan={id}, phase={n}, text, and file and line when you have them) as soon as you find it, before looking for the next one: do not wait until the end, so nothing is lost if you run out of time or tokens. One call per finding; the text says what is wrong and why.\n\
+         Separate real bugs from style. Start the text of each finding with its label: [bug/high], [bug/medium] or [bug/low] for something that is really wrong (wrong behavior, a crash, lost data, a security hole, a task not really done, a test that cannot fail), or [style] for style and nitpicks that do not change behavior. Do not pad the review with style findings. When you finish, summarize your findings in your reply, real bugs first by severity (if the tool is not available, list them there with file and line). If you find no real bug, say so plainly. Do not fix anything: the agent that wrote the phase will fix what you report.",
         n = index + 1,
         title = phase.title,
         id = idea.id,
@@ -2741,7 +2741,7 @@ mod tests {
         ];
         let mut agents = 0;
         for agent in crate::agents::builtins() {
-            for prompt in &prompts {
+            for (i, prompt) in prompts.iter().enumerate() {
                 let Some(command) = agent.with_prompt(&agent.command, prompt) else {
                     continue;
                 };
@@ -2762,6 +2762,18 @@ mod tests {
                     "{}: {got}",
                     agent.id
                 );
+                // Plan #320: cada revisor guarda cada hallazgo al encontrarlo, no al final, para
+                // no perderlos si se queda sin tokens a mitad (OpenCode revisa mucho rato).
+                if i == 0 {
+                    assert!(
+                        got.contains("review_comment_add")
+                            && got.contains("as soon as you find it")
+                            && got.contains("do not wait until the end")
+                            && got.contains("When you finish, summarize"),
+                        "{}: {got}",
+                        agent.id
+                    );
+                }
             }
             if agent.with_prompt(&agent.command, "x").is_some() {
                 agents += 1;
