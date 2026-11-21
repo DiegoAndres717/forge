@@ -809,6 +809,12 @@ pub(super) fn continue_phase_text(
     }
 }
 
+/// Cómo se nombra una fase al hablar de ella: «Plan #12 · Fase 3» (fase desde 1). Así no se
+/// confunde con un número de PR (plan #322).
+pub(super) fn phase_ref(id: i64, phase: usize) -> String {
+    tr!("Plan #{id} · Fase {n}", id = id, n = phase).to_string()
+}
+
 /// Aviso cuando no hay terminal activa a la que escribir.
 pub(super) fn no_active_terminal() -> String {
     tr!("No hay ninguna terminal activa: haz clic en la terminal del agente y vuelve a pulsar «Continuar con esta fase»").to_string()
@@ -1161,9 +1167,11 @@ fn phase_row(
                 ui.ctx()
                     .request_repaint_after(std::time::Duration::from_secs(5));
             }
-            // Rama (clic: copiar) y tareas hechas, en una línea que se parte si no cabe.
+            // «Plan #X · Fase N» y rama (clic: copiar) y tareas hechas, en una línea que se
+            // parte si no cabe (también en compacto).
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
+                phase_ref_chip(ui, idea.id, index + 1);
                 if let Some(branch) = &phase.branch {
                     branch_chip(ui, branch);
                 }
@@ -1983,17 +1991,30 @@ fn branch_chip(ui: &mut egui::Ui, branch: &str) {
     let text = RichText::new(format!("{}  {shown}", icon::GIT_BRANCH))
         .size(11.5)
         .color(theme::TEXT_2);
-    let chip = ui
-        .add(
-            egui::Button::new(text)
-                .fill(theme::SURFACE_HOVER)
-                .corner_radius(9.0)
-                .min_size(Vec2::new(0.0, 20.0)),
-        )
-        .on_hover_text(tr!("Copiar «{branch}»", branch = branch));
-    if chip.clicked() {
+    if chip(ui, text, tr!("Copiar «{branch}»", branch = branch)).clicked() {
         ui.ctx().copy_text(branch.to_string());
     }
+}
+
+/// Chip «Plan #12 · Fase 3» de una fase (fase desde 1): es como se nombra al hablar de ella
+/// y un clic copia el texto.
+fn phase_ref_chip(ui: &mut egui::Ui, id: i64, phase: usize) {
+    let label = phase_ref(id, phase);
+    let text = RichText::new(&label).size(11.5).color(theme::TEXT_2);
+    if chip(ui, text, tr!("Copiar «{text}»", text = label)).clicked() {
+        ui.ctx().copy_text(label);
+    }
+}
+
+/// Chip redondeado con su ayuda al pasar el ratón.
+fn chip(ui: &mut egui::Ui, text: RichText, tip: impl Into<egui::WidgetText>) -> egui::Response {
+    ui.add(
+        egui::Button::new(text)
+            .fill(theme::SURFACE_HOVER)
+            .corner_radius(9.0)
+            .min_size(Vec2::new(0.0, 20.0)),
+    )
+    .on_hover_text(tip)
 }
 
 /// Barra fina de avance (verde al completarse).

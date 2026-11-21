@@ -1989,6 +1989,8 @@ pub const EN: &[(&str, &str)] = &[
         "sigue con la fase {n} del plan #{id}: {title}",
         "continue with phase {n} of plan #{id}: {title}",
     ),
+    ("Plan #{id} · Fase {n}", "Plan #{id} · Phase {n}"),
+    ("Copiar «{text}»", "Copy “{text}”"),
     (
         "No hay ninguna terminal activa: haz clic en la terminal del agente y vuelve a pulsar «Continuar con esta fase»",
         "There is no active terminal: click the agent's terminal and press “Continue with this phase” again",
