@@ -1644,6 +1644,12 @@ pub const EN: &[(&str, &str)] = &[
         "{author} did the phase, {from}. With “Review” you can pick another reviewer.",
     ),
     ("Revisión", "Review"),
+    ("Sacar a un panel aparte", "Move out to its own panel"),
+    (
+        "Poner como pestaña de otro panel",
+        "Move into another panel as a tab",
+    ),
+    ("Como pestaña de «{p0}»", "As a tab of “{p0}”"),
     (
         "Pedirle a otro agente que revise esta fase",
         "Ask another agent to review this phase",

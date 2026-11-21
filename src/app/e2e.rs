@@ -2676,6 +2676,80 @@ fn a_reviewer_opens_in_its_own_panel_next_to_the_agent_that_works() {
     });
 }
 
+/// El revisor se mete como pestaña en otro panel y se vuelve a sacar a uno aparte desde su
+/// cabecera, sin cerrar su proceso ni perder lo que escribió.
+#[test]
+fn a_reviewer_goes_into_another_panel_as_a_tab_and_back_out() {
+    let _serial = serial();
+    let dir = project("review-tab-toggle");
+    let echo = if cfg!(windows) { "Write-Host" } else { "echo" };
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        format!(
+            "[[agents]]\nid = \"fake\"\nname = \"Agente de prueba\"\ncommand = \"{echo} pedido:\"\n"
+        ),
+    )
+    .unwrap();
+    let mut h = app(dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    let first = ws(h.state()).focused();
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut().workspaces[0].review_agent(&ctx, "fake", "revisa-la-fase", area);
+    wait_until(&mut h, "el revisor tiene su panel", |a| {
+        ws(a).slots().len() == 2 && ws(a).shell_text().contains("pedido: revisa-la-fase")
+    });
+    let reviewer = ws(h.state()).focused();
+    let pids = |a: &App| {
+        let mut pids = ws(a).pids();
+        pids.sort();
+        pids
+    };
+    let before = pids(h.state());
+    let name = ws(h.state()).tab_name(first);
+
+    // Meterlo como pestaña del otro panel: un solo hueco con las dos terminales.
+    h.get_by_label(forge_core::tr!("Poner como pestaña de otro panel"))
+        .click();
+    h.run_steps(3);
+    h.get_by_label(&forge_core::tr!("Como pestaña de «{p0}»", p0 = name))
+        .click();
+    h.run_steps(3);
+    assert_eq!(ws(h.state()).slots(), vec![reviewer], "un solo hueco");
+    assert_eq!(ws(h.state()).panel_tabs(first), vec![first, reviewer]);
+    assert_eq!(ws(h.state()).focused(), reviewer, "el revisor a la vista");
+    assert_eq!(pids(h.state()), before, "ningún proceso se cierra");
+    assert!(
+        ws(h.state())
+            .shell_text()
+            .contains("pedido: revisa-la-fase")
+    );
+
+    // Sacarlo otra vez: vuelve a su propio panel, junto al otro.
+    h.get_by_label(forge_core::tr!("Sacar a un panel aparte"))
+        .click();
+    h.run_steps(3);
+    let mut slots = ws(h.state()).slots();
+    slots.sort();
+    assert_eq!(slots, vec![first, reviewer], "dos huecos otra vez");
+    assert_eq!(ws(h.state()).panel_tabs(reviewer), vec![reviewer]);
+    assert_eq!(ws(h.state()).panel_tabs(first), vec![first]);
+    assert_eq!(ws(h.state()).focused(), reviewer);
+    assert_eq!(pids(h.state()), before, "ningún proceso se cierra");
+    assert_eq!(
+        ws(h.state()).review_panel_count(),
+        1,
+        "sigue siendo revisor"
+    );
+    assert!(
+        ws(h.state())
+            .shell_text()
+            .contains("pedido: revisa-la-fase")
+    );
+}
+
 /// Los comentarios de una revisión salen en el panel de planes y se resuelven, reabren y
 /// borran desde él.
 #[test]

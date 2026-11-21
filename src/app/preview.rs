@@ -1120,6 +1120,46 @@ fn ui_preview() {
     settle(&mut harness);
     harness.state_mut().settings_open = false;
     harness.state_mut().workspaces[0].ideas.open = false;
+    // Revisor en su propio panel: el botón de su cabecera lo mete como pestaña de otro panel
+    // (menú abierto) y, ya dentro, otro botón lo vuelve a sacar.
+    let ctx = harness.ctx.clone();
+    harness.state_mut().workspaces[0]
+        .project
+        .agents
+        .push(forge_core::agents::AgentSpec {
+            id: "demo-reviewer".into(),
+            name: "Codex".into(),
+            command: "sleep 600".into(),
+            resume: None,
+            headless: None,
+            mcp: false,
+            mcp_style: None,
+            install_hint: None,
+            enabled: true,
+            default: false,
+            configured: true,
+            environment: HashMap::new(),
+        });
+    assert!(harness.state_mut().workspaces[0].review_agent(&ctx, "demo-reviewer", "2", area));
+    settle(&mut harness);
+    harness
+        .get_by_label(forge_core::tr!("Poner como pestaña de otro panel"))
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "17c-revisor-a-pestana");
+    let prefix = forge_core::tr!("Como pestaña de «{p0}»", p0 = "");
+    let prefix = prefix.trim_end_matches(['»', '”']).to_string();
+    harness
+        .get_all_by(|n| n.label().is_some_and(|l| l.starts_with(&prefix)))
+        .next()
+        .unwrap()
+        .click();
+    settle(&mut harness);
+    save(&mut harness, &out, "17d-revisor-en-pestana");
+    harness
+        .get_by_label(forge_core::tr!("Sacar a un panel aparte"))
+        .click();
+    settle(&mut harness);
 
     // La cuenta de un agente llegó a su límite: franja para seguir con otra.
     let focused = harness.state().workspaces[0].focused();
