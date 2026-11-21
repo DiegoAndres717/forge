@@ -63,6 +63,20 @@ pub fn not_a_repo() -> &'static str {
     crate::tr!("Esta carpeta no es un repositorio git")
 }
 
+/// ¿Está `path` dentro de un repositorio git?
+pub fn is_repo(path: &Path) -> bool {
+    // Sin el GIT_DIR heredado (un hook de git lo pone): si no, cualquier carpeta lo parecería.
+    Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(path)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// ¿Es `error` el de una carpeta fuera de git (ya traducido por `error`)?
 pub fn is_not_a_repo(error: &str) -> bool {
     error == not_a_repo()
