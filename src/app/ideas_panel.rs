@@ -755,12 +755,63 @@ impl App {
         ws.ask_agent(ctx, &agent, &prompt, area);
     }
 
+    /// «Continuar con esta fase»: escribe en la terminal activa qué fase seguir y pulsa Enter.
+    pub(super) fn continue_phase(&mut self, id: i64, phase: usize) {
+        let Some(i) = self.active else { return };
+        let ws = &mut self.workspaces[i];
+        let Some(p) = ws
+            .ideas
+            .items
+            .iter()
+            .find(|idea| idea.id == id)
+            .and_then(|idea| idea.phases.get(phase))
+        else {
+            return;
+        };
+        let text = continue_phase_text(id, phase, &p.title, p.branch.as_deref());
+        if ws.submit_to_focused(&text) {
+            ws.ideas.open = false; // que se vea el agente trabajando
+        } else {
+            self.error = Some(no_active_terminal());
+        }
+    }
+
     fn ideas_view(&mut self, target: IdeasTarget) -> &mut IdeasView {
         match target {
             Some(i) => &mut self.workspaces[i].ideas,
             None => &mut self.general,
         }
     }
+}
+
+/// Lo que «Continuar con esta fase» escribe en la terminal: fase (desde 0), plan, título y
+/// rama. El título va al final del `tr!` para que unas llaves en él no se sustituyan.
+pub(super) fn continue_phase_text(
+    id: i64,
+    phase: usize,
+    title: &str,
+    branch: Option<&str>,
+) -> String {
+    match branch {
+        Some(branch) => tr!(
+            "sigue con la fase {n} del plan #{id}: {title} ({branch})",
+            n = phase + 1,
+            id = id,
+            branch = branch,
+            title = title
+        ),
+        None => tr!(
+            "sigue con la fase {n} del plan #{id}: {title}",
+            n = phase + 1,
+            id = id,
+            title = title
+        ),
+    }
+}
+
+/// Aviso cuando no hay terminal activa a la que escribir.
+pub(super) fn no_active_terminal() -> String {
+    tr!("No hay ninguna terminal activa: haz clic en la terminal del agente y vuelve a pulsar «Continuar con esta fase»").to_string()
 }
 
 /// El worktree de Forge donde está la rama de la fase `phase` del plan `id`, si existe.
@@ -1115,6 +1166,29 @@ fn phase_row(
                 ui.spacing_mut().item_spacing.x = 8.0;
                 if let Some(branch) = &phase.branch {
                     branch_chip(ui, branch);
+                }
+                // Solo en un proyecto (la lista general no tiene terminales) y en fases sin
+                // terminar.
+                if ctx.target.is_some() && phase.status != "done" {
+                    let go = ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(format!(
+                                    "{} {}",
+                                    icon::PLAY,
+                                    tr!("Continuar con esta fase")
+                                ))
+                                .size(11.0)
+                                .color(theme::ACCENT),
+                            )
+                            .frame(false),
+                        )
+                        .on_hover_text(tr!(
+                            "Escribe en la terminal activa que siga con esta fase y pulsa Enter (vale para cualquier agente)"
+                        ));
+                    if go.clicked() {
+                        cmds.push(UiCmd::ContinuePhase(idea.id, index));
+                    }
                 }
                 if phase.reviewable() && offer.is_none() {
                     if ctx.reviewers.is_empty() {

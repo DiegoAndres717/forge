@@ -2529,6 +2529,85 @@ fn a_planned_backlog_item_offers_to_start_it_with_an_agent() {
     h.get_by_label_contains("Planificar con");
 }
 
+/// Un plan en curso: la fase 1 hecha y la 2 por hacer, con rama.
+fn plan_to_continue(h: &mut Harness<'static, App>, dir: &std::path::Path) -> i64 {
+    use forge_core::ideas::Phase;
+    let mut done = Phase::new("Preparar");
+    done.status = "done".into();
+    let mut next = Phase::new("Sincronizar zzcarrito");
+    next.status = "doing".into();
+    next.branch = Some("feat/zzsync".into());
+    h.state_mut()
+        .db(|s| s.add_plan(Some(dir), "Carrito offline", "", &[done, next], "x"))
+        .unwrap()
+}
+
+/// «Continuar con esta fase» (plan #320, fase 2): solo en las fases sin terminar, y escribe
+/// en la terminal activa qué fase seguir (con su rama) y pulsa Enter. Vale para cualquier
+/// agente: es texto en la terminal.
+#[test]
+fn continue_phase_types_the_phase_into_the_active_terminal() {
+    let _serial = serial();
+    let dir = project("continue-phase");
+    let mut h = app(dir.clone());
+    let plan = plan_to_continue(&mut h, &dir);
+    wait_until(&mut h, "shell listo", |a| {
+        ws(a).is_quiet(Duration::from_millis(500))
+    });
+    h.key_press_modifiers(CMD_SHIFT, Key::I);
+    h.run_steps(4);
+    assert_eq!(
+        h.query_all_by_label_contains("Continuar con esta fase")
+            .count(),
+        1,
+        "solo la fase sin terminar lo ofrece"
+    );
+    h.get_by_label_contains("Continuar con esta fase").click();
+    h.run_steps(2);
+    let expected = super::ideas_panel::continue_phase_text(
+        plan,
+        1,
+        "Sincronizar zzcarrito",
+        Some("feat/zzsync"),
+    );
+    assert!(expected.contains(&format!("#{plan}")), "{expected}");
+    assert!(expected.contains("feat/zzsync"), "{expected}");
+    // Trozos cortos: la línea entera puede partirse en dos filas de la terminal.
+    wait_until(&mut h, "el texto llega a la terminal", |a| {
+        let text = ws(a).shell_text();
+        text.contains("zzcarrito") && text.contains("feat/zzsync")
+    });
+    assert!(h.state().error.is_none());
+}
+
+/// Sin terminal activa (el panel enfocado es un proceso), se avisa y no se escribe nada.
+#[test]
+fn continue_phase_without_an_active_terminal_says_so() {
+    let _serial = serial();
+    let dir = project("continue-phase-none");
+    std::fs::write(
+        dir.join(".forge/project.toml"),
+        "[[processes]]\nid = \"api\"\nname = \"API\"\ncommand = \"sleep 30\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    plan_to_continue(&mut h, &dir);
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::ShowProcess("api".into()), area);
+    h.key_press_modifiers(CMD_SHIFT, Key::I);
+    h.run_steps(4);
+    h.get_by_label_contains("Continuar con esta fase").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().error.as_deref(),
+        Some(super::ideas_panel::no_active_terminal().as_str())
+    );
+    h.run_steps(4);
+    assert!(!ws(h.state()).shell_text().contains("zzcarrito"));
+}
+
 /// "Planificar con…": sin el agente abierto se abre con la petición como primer mensaje;
 /// con él abierto, se le escribe en su panel (sin abrir otro).
 #[test]
