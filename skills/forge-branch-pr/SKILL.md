@@ -45,6 +45,7 @@ The author of a change reviews what they meant to write, not what they wrote; a 
   2. What to review first, and what is intentionally out of scope.
   3. What was tested: the commands you ran and their real result. Leave out what you didn't verify, or say it wasn't verified.
   4. Limits or pending items.
+- When you mention it to the owner, call it "PR #N"; a plan phase is "Plan #X, phase N", never a bare "#N".
 - Don't merge it yourself and don't enable auto-merge: the project owner merges.
 - If `main` moved and there are conflicts: `git merge origin/main` on your branch, resolve keeping both sides, and run every check again.
 

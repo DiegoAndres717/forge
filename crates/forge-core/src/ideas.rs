@@ -857,8 +857,9 @@ pub fn render_review_comments(idea: &Idea, comments: &[ReviewComment]) -> String
                 _ => String::new(),
             };
             Some(format!(
-                "      [comment #{}] phase {n}: {place}— {} (by {})",
+                "      [comment #{}] Plan #{}, phase {n}: {place}— {} (by {})",
                 c.id,
+                idea.id,
                 one_line(&c.text, 400),
                 one_line(&c.reviewer, 40)
             ))
@@ -1605,11 +1606,13 @@ fn mark(status: &str) -> &'static str {
     }
 }
 
-/// Para agentes y CLI: `#3 ◐ Notificar vacunas vencidas (claude-code)`, la nota y, si es
-/// un plan, sus fases numeradas con rama y tareas.
+/// Para agentes y CLI: `#3 ○ Notificar vacunas vencidas (claude-code)`, la nota y, si es
+/// un plan, sus fases numeradas con rama y tareas. Un plan con fases empieza por «Plan #3»
+/// para que el agente lo nombre así y no lo confunda con un PR (plan #322).
 pub fn render(idea: &Idea) -> String {
+    let kind = if idea.phases.is_empty() { "" } else { "Plan " };
     let mut line = format!(
-        "#{} {} {} ({})",
+        "{kind}#{} {} {} ({})",
         idea.id,
         mark(&idea.status),
         idea.title,
