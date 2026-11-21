@@ -2572,9 +2572,10 @@ fn continue_phase_types_the_phase_into_the_active_terminal() {
     );
     assert!(expected.contains(&format!("#{plan}")), "{expected}");
     assert!(expected.contains("feat/zzsync"), "{expected}");
-    // Trozos cortos: la línea entera puede partirse en dos filas de la terminal.
+    // La línea puede partirse en filas de la terminal (un prompt largo, como el del CI de
+    // macOS, parte hasta la rama): se juntan las filas y se buscan trozos cortos.
     wait_until(&mut h, "el texto llega a la terminal", |a| {
-        let text = ws(a).shell_text();
+        let text = ws(a).shell_text().replace('\n', "");
         text.contains("zzcarrito") && text.contains("feat/zzsync")
     });
     assert!(h.state().error.is_none());
