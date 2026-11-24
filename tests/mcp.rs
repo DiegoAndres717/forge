@@ -576,6 +576,8 @@ fn mcp_started_outside_any_project_asks_to_choose_one() {
         .current_dir(&elsewhere)
         .env("FORGE_DB", &db)
         .env_remove("FORGE_PROJECT")
+        // Aunque la carpeta temporal estuviera dentro de un repositorio.
+        .env("GIT_CEILING_DIRECTORIES", &base)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -628,6 +630,50 @@ fn mcp_started_outside_any_project_asks_to_choose_one() {
             .unwrap()
             .is_empty()
     );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// Un proyecto de Forge que es una carpeta sin git ni `.forge/` sigue siendo el proyecto del
+/// servidor que arranca en ella sin FORGE_PROJECT, como antes del Plan #337, fase 2.
+#[test]
+fn mcp_started_in_a_known_plain_folder_keeps_it_as_project() {
+    let base = std::env::temp_dir().join(format!("forge-it-mcp-plain-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("notas");
+    std::fs::create_dir_all(&project).unwrap();
+    let db = base.join("forge.db");
+    forge_core::store::Store::open(&db)
+        .unwrap()
+        .touch(&project, "Notas")
+        .unwrap();
+    let mut child = Command::new(FORGE)
+        .arg("mcp")
+        .current_dir(&project)
+        .env("FORGE_DB", &db)
+        .env_remove("FORGE_PROJECT")
+        .env("GIT_CEILING_DIRECTORIES", &base)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    for message in [
+        json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "agy", "version": "1"}}}),
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "plan_add", "arguments": {"title": "Repasar"}}}),
+    ] {
+        writeln!(stdin, "{message}").unwrap();
+    }
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    stdout.read_line(&mut line).unwrap();
+    line.clear();
+    stdout.read_line(&mut line).unwrap();
+    drop(stdin);
+    let _ = child.wait();
+    assert!(line.contains("\"isError\":false"), "{line}");
+    let store = forge_core::store::Store::open(&db).unwrap();
+    assert_eq!(store.list_ideas(Some(&project), false).unwrap().len(), 1);
     let _ = std::fs::remove_dir_all(&base);
 }
 

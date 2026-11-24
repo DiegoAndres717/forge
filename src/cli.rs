@@ -202,7 +202,8 @@ fn positional(args: &[String]) -> Vec<&str> {
 
 /// Carpeta con `.forge/` más cercana; si no, la raíz del repositorio; si no, la actual.
 fn find_project(args: &[String]) -> PathBuf {
-    if let Some(p) = flag(args, "--project") {
+    // `--project ""` no es un proyecto: sería la ruta vacía.
+    if let Some(p) = flag(args, "--project").filter(|p| !p.is_empty()) {
         return PathBuf::from(p);
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -222,23 +223,38 @@ fn project_around(dir: &Path) -> Option<PathBuf> {
 /// proyectos): el de la terminal de Forge que abrió el agente (FORGE_PROJECT), no la carpeta
 /// donde se lance el servidor; si no, el de la carpeta actual.
 fn mcp_project(args: &[String], found: &Path) -> PathBuf {
-    match std::env::var_os("FORGE_PROJECT") {
-        Some(p) if flag(args, "--project").is_none() => PathBuf::from(p),
+    match forge_project_env() {
+        Some(p) if flag(args, "--project").is_none() => p,
         _ => found.to_path_buf(),
     }
+}
+
+/// FORGE_PROJECT si tiene algo: una variable vacía no es un proyecto (sería la ruta "").
+fn forge_project_env() -> Option<PathBuf> {
+    std::env::var_os("FORGE_PROJECT")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
 }
 
 /// Proyecto con el que arranca `forge mcp`. Sin --project, sin FORGE_PROJECT y fuera de todo
 /// proyecto (la app de Gemini lo lanza en /private/tmp), ninguno: el agente elige uno con
 /// project_use en vez de guardar bajo la carpeta de trabajo (Plan #337, fase 2).
-fn mcp_server_project(args: &[String], found: &Path) -> Option<PathBuf> {
-    let explicit = flag(args, "--project").is_some() || std::env::var_os("FORGE_PROJECT").is_some();
+/// Una carpeta sin git ni `.forge/` que Forge tiene como proyecto sigue valiendo, con la ruta
+/// tal como Forge la guardó (/var y /private/var son la misma carpeta, no la misma clave).
+fn mcp_server_project(args: &[String], found: &Path, store: &Store) -> Option<PathBuf> {
+    let explicit =
+        flag(args, "--project").is_some_and(|p| !p.is_empty()) || forge_project_env().is_some();
     let cwd = std::env::current_dir().ok();
     if explicit || cwd.as_deref().and_then(project_around).is_some() {
-        Some(mcp_project(args, found))
-    } else {
-        None
+        return Some(mcp_project(args, found));
     }
+    let cwd = forge_core::canonical(&cwd?);
+    store
+        .recent()
+        .unwrap_or_default()
+        .into_iter()
+        .find(|p| forge_core::canonical(&p.path) == cwd)
+        .map(|p| p.path)
 }
 
 /// `forge mcp-config`: la línea para pegar en apps sin terminal (por stdout, sola, para
@@ -361,7 +377,7 @@ pub fn run(args: &[String]) -> i32 {
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
         (Some("mcp-config"), _) => mcp_config(&mcp_project(args, &project), args),
         (Some("mcp"), _) => open_store().and_then(|store| {
-            let project = mcp_server_project(args, &project);
+            let project = mcp_server_project(args, &project, &store);
             forge_core::mcp::serve(
                 project.as_deref(),
                 &store,

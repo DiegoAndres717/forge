@@ -984,12 +984,16 @@ impl<'a> Server<'a> {
             return Err("missing `project`: a name, folder or key from projects_list".into());
         }
         let projects = self.store.recent().map_err(|e| e.to_string())?;
+        // Una carpeta solo si es absoluta: un nombre suelto («erp») no se resuelve contra la
+        // carpeta donde arrancó el servidor. La clave git solo se calcula si se pide una.
+        let wanted_path = Path::new(wanted);
         let by_path: Vec<_> = projects
             .iter()
             .filter(|p| {
-                p.path == Path::new(wanted)
-                    || crate::canonical(&p.path) == crate::canonical(Path::new(wanted))
-                    || key_preview(&p.path) == wanted
+                (wanted_path.is_absolute()
+                    && (p.path == wanted_path
+                        || crate::canonical(&p.path) == crate::canonical(wanted_path)))
+                    || (wanted.starts_with("git:") && key_preview(&p.path) == wanted)
             })
             .collect();
         let found = if by_path.is_empty() {
@@ -1002,9 +1006,15 @@ impl<'a> Server<'a> {
         };
         match found.as_slice() {
             [p] if p.path.is_dir() => {
-                self.project = Some(p.path.clone());
+                // Cambiar de proyecto a mitad de sesión se dice, para que el agente lo cuente.
+                let before = self
+                    .project
+                    .replace(p.path.clone())
+                    .filter(|old| *old != p.path)
+                    .map(|old| format!(" (it was {} until now)", old.display()))
+                    .unwrap_or_default();
                 Ok(format!(
-                    "Using the Forge project {} ({}) for this session.",
+                    "Using the Forge project {} ({}) for this session{before}.",
                     p.name,
                     p.path.display()
                 ))
@@ -1017,8 +1027,13 @@ impl<'a> Server<'a> {
             [] => Err(format!(
                 "Forge doesn't know a project called {wanted}: call projects_list and pass a name, folder or key from it."
             )),
-            _ => Err(format!(
-                "Several Forge projects are called {wanted}: pass the folder instead."
+            several => Err(format!(
+                "Several Forge projects match {wanted}: pass one of these folders instead:\n{}",
+                several
+                    .iter()
+                    .map(|p| format!("- {}", p.path.display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             )),
         }
     }
@@ -1035,26 +1050,26 @@ fn reply(result: Result<String, String>, reads_memory: bool) -> Value {
     }
 }
 
-/// ¿Usa la herramienta el proyecto de la sesión? Los planes y revisiones con scope=general
-/// son de la lista general, de ningún proyecto.
+/// ¿Usa la herramienta el proyecto de la sesión? Por defecto sí (una herramienta nueva no
+/// cae nunca en un proyecto sin elegir); solo los planes y revisiones con scope=general,
+/// que son de la lista general, no lo usan.
 fn needs_project(tool: &str, args: &Value) -> bool {
     let general = args["scope"].as_str() == Some("general");
-    match tool {
-        "memory_search" | "memory_get" | "memory_list" | "memory_save" | "memory_update"
-        | "memory_delete" | "project_context" | "work_status" => true,
+    let general_list = matches!(
+        tool,
         "plans_list"
-        | "ideas_list"
-        | "plan_add"
-        | "idea_add"
-        | "plan_update"
-        | "idea_update"
-        | "plan_delete"
-        | "idea_delete"
-        | "review_comment_add"
-        | "review_progress"
-        | "review_comment_resolve" => !general,
-        _ => false,
-    }
+            | "ideas_list"
+            | "plan_add"
+            | "idea_add"
+            | "plan_update"
+            | "idea_update"
+            | "plan_delete"
+            | "idea_delete"
+            | "review_comment_add"
+            | "review_progress"
+            | "review_comment_resolve"
+    );
+    !(general && general_list)
 }
 
 /// La clave con la que Forge guarda la memoria y los planes de una carpeta, sin escribir
@@ -2302,6 +2317,32 @@ mod tests {
                 .is_empty()
         );
 
+        // Todas las herramientas de siempre, sin scope=general, se niegan: también las que se
+        // añadan mañana.
+        for tool in raw_tools().as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            let (error, text) = call(
+                &mut server,
+                name,
+                json!({"id": 1, "title": "x", "body": "x"}),
+            );
+            assert!(error && text == NO_PROJECT, "{name}: {text}");
+        }
+        let prompt = send(&mut server, "prompts/get", json!({"name": "forge-plans"}));
+        assert!(
+            prompt["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("project_use")
+        );
+        assert!(store.list_ideas(None, false).unwrap().is_empty());
+        assert!(
+            store
+                .list_memories(&ganaderia, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+
         // La lista general no es de ningún proyecto: sigue funcionando.
         let (error, text) = call(
             &mut server,
@@ -2317,11 +2358,34 @@ mod tests {
         assert!(text.contains(&ganaderia.display().to_string()), "{text}");
 
         // Solo vale un proyecto que Forge conoce: nada de carpetas inventadas.
-        let (error, text) = call(&mut server, "project_use", json!({"project": "/no/such"}));
-        assert!(error, "{text}");
+        for wanted in ["/no/such", "", "ganaderia/../ganaderia", "git:nope"] {
+            let (error, text) = call(&mut server, "project_use", json!({"project": wanted}));
+            assert!(error, "{wanted}: {text}");
+        }
+        // Un nombre repetido no elige ninguno: pide la carpeta.
+        let twin = dir.join("otra/ganaderia");
+        std::fs::create_dir_all(&twin).unwrap();
+        store.touch(&twin, "Ganaderia").unwrap();
+        let (error, text) = call(&mut server, "project_use", json!({"project": "Ganaderia"}));
+        assert!(
+            error && text.contains(&twin.display().to_string()),
+            "{text}"
+        );
+        // Por carpeta absoluta sí.
+        let (error, text) = call(
+            &mut server,
+            "project_use",
+            json!({"project": twin.display().to_string()}),
+        );
+        assert!(!error, "{text}");
+        store.remove(&twin).unwrap();
+        // Cambiar de proyecto se dice.
         let (error, text) = call(&mut server, "project_use", json!({"project": "ganaderia"}));
         assert!(!error, "{text}");
-        assert!(text.contains("Ganaderia"), "{text}");
+        assert!(
+            text.contains("Ganaderia") && text.contains("it was"),
+            "{text}"
+        );
 
         let (error, text) = call(&mut server, "plan_add", json!({"title": "Vacunas"}));
         assert!(!error, "{text}");
