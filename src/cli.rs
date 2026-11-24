@@ -206,11 +206,16 @@ fn find_project(args: &[String]) -> PathBuf {
         return PathBuf::from(p);
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    cwd.ancestors()
+    project_around(&cwd).unwrap_or(cwd)
+}
+
+/// Carpeta con `.forge/` más cercana a `dir` o la raíz de su repositorio; `None` si `dir` no
+/// está dentro de ningún proyecto.
+fn project_around(dir: &Path) -> Option<PathBuf> {
+    dir.ancestors()
         .find(|p| p.join(".forge").is_dir())
         .map(Path::to_path_buf)
-        .or_else(|| guard::repo_root(&cwd).ok())
-        .unwrap_or(cwd)
+        .or_else(|| guard::repo_root(dir).ok())
 }
 
 /// Proyecto del servidor MCP. Sin --project (agy guarda una configuración para todos los
@@ -220,6 +225,19 @@ fn mcp_project(args: &[String], found: &Path) -> PathBuf {
     match std::env::var_os("FORGE_PROJECT") {
         Some(p) if flag(args, "--project").is_none() => PathBuf::from(p),
         _ => found.to_path_buf(),
+    }
+}
+
+/// Proyecto con el que arranca `forge mcp`. Sin --project, sin FORGE_PROJECT y fuera de todo
+/// proyecto (la app de Gemini lo lanza en /private/tmp), ninguno: el agente elige uno con
+/// project_use en vez de guardar bajo la carpeta de trabajo (Plan #337, fase 2).
+fn mcp_server_project(args: &[String], found: &Path) -> Option<PathBuf> {
+    let explicit = flag(args, "--project").is_some() || std::env::var_os("FORGE_PROJECT").is_some();
+    let cwd = std::env::current_dir().ok();
+    if explicit || cwd.as_deref().and_then(project_around).is_some() {
+        Some(mcp_project(args, found))
+    } else {
+        None
     }
 }
 
@@ -343,8 +361,12 @@ pub fn run(args: &[String]) -> i32 {
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
         (Some("mcp-config"), _) => mcp_config(&mcp_project(args, &project), args),
         (Some("mcp"), _) => open_store().and_then(|store| {
-            let project = mcp_project(args, &project);
-            forge_core::mcp::serve(&project, &store, forge_core::mcp::Modes::from_args(args))
+            let project = mcp_server_project(args, &project);
+            forge_core::mcp::serve(
+                project.as_deref(),
+                &store,
+                forge_core::mcp::Modes::from_args(args),
+            )
                 .map(|_| 0)
                 .map_err(|e| e.to_string())
         }),

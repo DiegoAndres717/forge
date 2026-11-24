@@ -554,6 +554,83 @@ fn failure_hint_names_the_known_note_once_per_session() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
+/// Plan #337, fase 2: la app de Gemini lanza `forge mcp` sin --project ni FORGE_PROJECT y
+/// en /private/tmp. Ese servidor no guarda en la carpeta de trabajo: pide elegir proyecto, y
+/// con el elegido guarda allí.
+#[test]
+fn mcp_started_outside_any_project_asks_to_choose_one() {
+    let base = std::env::temp_dir().join(format!("forge-it-mcp-choose-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("ganaderia");
+    std::fs::create_dir_all(&project).unwrap();
+    let elsewhere = base.join("tmp");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let db = base.join("forge.db");
+    forge_core::store::Store::open(&db)
+        .unwrap()
+        .touch(&project, "Ganaderia")
+        .unwrap();
+
+    let mut child = Command::new(FORGE)
+        .arg("mcp")
+        .current_dir(&elsewhere)
+        .env("FORGE_DB", &db)
+        .env_remove("FORGE_PROJECT")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut request = |id: i64, method: &str, params: Value| -> Value {
+        let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+        writeln!(stdin, "{message}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        serde_json::from_str(&line).unwrap()
+    };
+    let tool = |name: &str, args: Value| json!({"name": name, "arguments": args});
+    request(
+        0,
+        "initialize",
+        json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "gemini", "version": "1"}}),
+    );
+    let refused = request(
+        1,
+        "tools/call",
+        tool("plan_add", json!({"title": "Vacunas"})),
+    );
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+    let listed = request(2, "tools/call", tool("projects_list", json!({})));
+    assert!(listed.to_string().contains("Ganaderia"), "{listed}");
+    let used = request(
+        3,
+        "tools/call",
+        tool("project_use", json!({"project": "Ganaderia"})),
+    );
+    assert_eq!(used["result"]["isError"], false, "{used}");
+    let added = request(
+        4,
+        "tools/call",
+        tool("plan_add", json!({"title": "Vacunas"})),
+    );
+    assert_eq!(added["result"]["isError"], false, "{added}");
+    drop(stdin);
+    let _ = child.wait();
+
+    let store = forge_core::store::Store::open(&db).unwrap();
+    let plans = store.list_ideas(Some(&project), false).unwrap();
+    assert_eq!(plans.len(), 1, "{plans:?}");
+    assert!(
+        store
+            .list_ideas(Some(&elsewhere), false)
+            .unwrap()
+            .is_empty()
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// Una sesión MCP de `client` (su nombre de cliente) que hace `calls` y devuelve sus textos.
 fn mcp_session(
     db: &std::path::Path,
