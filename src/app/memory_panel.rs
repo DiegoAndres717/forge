@@ -102,21 +102,56 @@ impl App {
             ),
         };
         ui.label(RichText::new(sharing).small().color(color));
-        if let Some(server) = server {
-            let command = std::iter::once(server.command.clone())
-                .chain(server.args.clone())
-                .collect::<Vec<_>>()
-                .join(" ");
-            if ui
-                .link(RichText::new(tr!("{p0}  Copiar comando MCP", p0 = icon::COPY)).size(12.0))
-                .on_hover_text(tr!(
-                    "Para OpenCode u otros clientes (opencode mcp add):\n{command}",
-                    command = command
-                ))
-                .clicked()
-            {
-                ui.ctx().copy_text(command);
+        if let Some(mut server) = server {
+            use forge_core::mcp_connect;
+            // Con comillas donde haga falta: las apps sin terminal (Gemini de escritorio)
+            // lo pasan a un shell y una ruta con espacios se partiría.
+            let command = mcp_connect::command_line(&server, mcp_connect::Shell::native());
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .link(RichText::new(tr!("{p0}  Copiar comando MCP", p0 = icon::COPY)).size(12.0))
+                    .on_hover_text(tr!(
+                        "Para OpenCode, la app de Gemini u otros clientes:\n{command}",
+                        command = command
+                    ))
+                    .clicked()
+                {
+                    ui.ctx().copy_text(command);
+                }
+                server.name = mcp_connect::server_id(&ws.project.path);
+                if ui
+                    .link(
+                        RichText::new(tr!("{p0}  Guardar JSON para importar", p0 = icon::DOWNLOAD_SIMPLE))
+                            .size(12.0),
+                    )
+                    .on_hover_text(tr!(
+                        "Archivo mcpServers para «Import JSON Config» de la app de Gemini u otras apps que lo acepten"
+                    ))
+                    .clicked()
+                {
+                    ws.memory.json_saved = Some(save_mcp_json(&server, ws.memory.json_dir.as_deref()));
+                }
+            });
+            match &ws.memory.json_saved {
+                Some(Ok(path)) => {
+                    ui.label(
+                        RichText::new(tr!("✓ Guardado en {p0}", p0 = path))
+                            .small()
+                            .color(tone_color(processes::Tone::Ok)),
+                    );
+                }
+                Some(Err(e)) => {
+                    ui.label(RichText::new(e.as_str()).small().color(theme::RED));
+                }
+                None => {}
             }
+            ui.label(
+                RichText::new(tr!(
+                    "En la app de Gemini, elige «Acceso completo» en el entorno aislado del servidor."
+                ))
+                .small()
+                .color(Color32::from_gray(0x90)),
+            );
         }
 
         // Buscador y tipo; en un panel estrecho, uno debajo del otro.
@@ -504,4 +539,25 @@ fn usage(stats: forge_core::memory::MemoryStats) -> String {
         out.push_str(&tr!(" · ignorada {n}", n = stats.forgotten));
     }
     out
+}
+
+/// Guarda el JSON del servidor MCP en `dir` (por defecto Descargas, que el selector de
+/// archivos de cualquier app encuentra) y devuelve la ruta para mostrarla.
+pub(super) fn save_mcp_json(
+    server: &forge_core::agents::McpServer,
+    dir: Option<&std::path::Path>,
+) -> Result<String, String> {
+    let dir = match dir {
+        Some(d) => d.to_path_buf(),
+        None => {
+            let home =
+                forge_core::home_dir().ok_or_else(|| tr!("no se encontró $HOME").to_string())?;
+            let downloads = home.join("Downloads");
+            if downloads.is_dir() { downloads } else { home }
+        }
+    };
+    let path = dir.join(format!("{}.json", server.name));
+    std::fs::write(&path, forge_core::mcp_connect::config_json(server))
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path.display().to_string())
 }

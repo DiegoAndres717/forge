@@ -475,6 +475,9 @@ fn ui_preview() {
     harness.state_mut().workspaces[0].guard.open = false;
     harness.state_mut().workspaces[0].memory.open = true;
     harness.state_mut().workspaces[0].memory.dirty = true;
+    // Con el JSON del MCP ya guardado (la línea de confirmación bajo «Copiar comando MCP»).
+    harness.state_mut().workspaces[0].memory.json_saved =
+        Some(Ok("~/Downloads/forge-acme-store.json".into()));
     settle(&mut harness);
     save(&mut harness, &out, "3-memoria");
     harness.state_mut().workspaces[0].memory.form = Some(crate::workspace::NoteForm {

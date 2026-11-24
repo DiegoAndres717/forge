@@ -22,6 +22,7 @@ pub mod ideas;
 pub mod launch;
 pub mod live;
 pub mod mcp;
+pub mod mcp_connect;
 pub mod memory;
 pub mod norms;
 pub mod parallel;

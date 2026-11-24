@@ -424,6 +424,10 @@ pub struct MemoryView {
     /// Hay que volver a consultar (cambió la búsqueda o se guardó algo).
     pub dirty: bool,
     pub form: Option<NoteForm>,
+    /// Resultado de «Guardar JSON para importar»: la ruta o el error.
+    pub json_saved: Option<Result<String, String>>,
+    /// Carpeta donde guardar ese JSON (None: Descargas; los tests ponen una temporal).
+    pub json_dir: Option<PathBuf>,
 }
 
 #[derive(Default)]
@@ -1291,7 +1295,7 @@ impl Workspace {
         match memory.provider {
             MemoryProvider::Local => {
                 let exe = std::env::current_exe().ok()?;
-                let exe = forge_core::canonical(&exe);
+                let exe = forge_core::mcp_connect::stable_exe(&forge_core::canonical(&exe));
                 Some(forge_core::agents::McpServer {
                     name: "forge".into(),
                     command: exe.to_string_lossy().into_owned(),

@@ -284,9 +284,27 @@ pub const EN: &[(&str, &str)] = &[
         "Not shared with agents ([memory] share_with_agents = false).",
     ),
     ("{p0}  Copiar comando MCP", "{p0}  Copy MCP command"),
+    ("JSON guardado en {p0}", "JSON saved to {p0}"),
     (
-        "Para OpenCode u otros clientes (opencode mcp add):\n{command}",
-        "For OpenCode or other clients (opencode mcp add):\n{command}",
+        "no existe la carpeta del proyecto: {p0}",
+        "the project folder doesn't exist: {p0}",
+    ),
+    (
+        "Para OpenCode, la app de Gemini u otros clientes:\n{command}",
+        "For OpenCode, the Gemini app or other clients:\n{command}",
+    ),
+    (
+        "{p0}  Guardar JSON para importar",
+        "{p0}  Save JSON to import",
+    ),
+    (
+        "Archivo mcpServers para «Import JSON Config» de la app de Gemini u otras apps que lo acepten",
+        "mcpServers file for the Gemini app's \"Import JSON Config\" or other apps that accept it",
+    ),
+    ("✓ Guardado en {p0}", "✓ Saved to {p0}"),
+    (
+        "En la app de Gemini, elige «Acceso completo» en el entorno aislado del servidor.",
+        "In the Gemini app, pick \"Full Access\" in the server's sandbox setting.",
     ),
     ("{p0}  Buscar (sin tildes también)", "{p0}  Search"),
     ("Todos", "All"),
