@@ -2,7 +2,7 @@
 // como herramientas para Claude Code, Codex, OpenCode u otro cliente MCP.
 use crate::tr;
 use std::io::{BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
 
@@ -81,6 +81,12 @@ pub const WORKTREES: &str = "Parallel work: never create worktrees or clones of 
 
 /// Plan #322: el dueño oía «la fase #321» y no sabía si era un plan, una fase o un PR.
 pub const NAMING: &str = "Plan ids, phase numbers and pull request numbers are separate series: when you talk to the owner, name a phase \"Plan #X, phase N\" (e.g. \"Plan #322, phase 2\"), never by a bare number like \"#321\", and a pull request \"PR #N\".";
+
+/// Plan #337, fase 2: solo para un servidor arrancado sin proyecto.
+pub const CHOOSE_PROJECT: &str = "No Forge project is set for this server: it serves every project Forge knows. Before using Forge Memory, plans, reviews, project_context or work_status, call projects_list and then project_use with the project the user is working on (ask the user if it is not clear; never guess). Until a project is chosen those tools refuse, so nothing is stored in the wrong project. Plans with scope=general (the list that belongs to no project) work without one.";
+
+/// Lo que responde una herramienta del proyecto cuando aún no se eligió ninguno.
+pub const NO_PROJECT: &str = "No Forge project chosen for this session, so nothing was read or stored. Call projects_list to see the projects Forge knows, then project_use with the one the user is working on (ask the user if it is not clear). Plans with scope=general work without a project.";
 
 pub const ASK_FIRST: &str = "Ask-first mode: for a large request, ask up to three questions to clarify what is essential before creating the plan. Once the user answers, create the plan with plan_add before writing code.";
 
@@ -222,7 +228,9 @@ fn hints(name: &str) -> Value {
     // (solo lee, destructiva, idempotente)
     let (read_only, destructive, idempotent) = match name {
         "memory_search" | "memory_get" | "memory_list" | "plans_list" | "project_context"
-        | "work_status" => (true, false, true),
+        | "work_status" | "projects_list" => (true, false, true),
+        // Solo cambia el proyecto de la sesión.
+        "project_use" => (false, false, true),
         "memory_save" | "plan_add" | "review_comment_add" => (false, false, false),
         "review_progress" => (false, false, true),
         // Editar guarda versiones, y borrar una memoria la archiva: nada se pierde.
@@ -242,8 +250,11 @@ fn hints(name: &str) -> Value {
     })
 }
 
-fn tools() -> Value {
+fn tools(chooser: bool) -> Value {
     let mut list = raw_tools();
+    if chooser && let Some(all) = list.as_array_mut() {
+        all.extend(chooser_tools());
+    }
     for tool in list.as_array_mut().into_iter().flatten() {
         let name = tool["name"].as_str().unwrap_or_default().to_string();
         tool["annotations"] = hints(&name);
@@ -453,8 +464,33 @@ fn raw_tools() -> Value {
     ])
 }
 
+/// Herramientas para elegir proyecto: solo en un servidor arrancado sin él (para agentes,
+/// en inglés).
+fn chooser_tools() -> [Value; 2] {
+    [
+        json!({
+            "name": "projects_list",
+            "description": "Lists the projects Forge knows (name, folder and key). This server was started without a project: call it first, then project_use.",
+            "inputSchema": {"type": "object", "properties": {}}
+        }),
+        json!({
+            "name": "project_use",
+            "description": "Chooses the Forge project for this session: memory, plans, reviews and project_context then work on it. Pass the project's name, folder or key exactly as projects_list shows them. Only projects Forge knows are accepted.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"project": {"type": "string", "description": "Name, folder or key from projects_list"}},
+                "required": ["project"]
+            }
+        }),
+    ]
+}
+
 pub struct Server<'a> {
-    project: &'a Path,
+    /// Proyecto de la sesión: el de arranque o, sin él, el que el agente eligió con
+    /// project_use. `None` hasta entonces: nada se guarda en un proyecto no elegido.
+    project: Option<PathBuf>,
+    /// Arrancado con proyecto (--project, FORGE_PROJECT o la carpeta): no se cambia.
+    fixed: bool,
     store: &'a Store,
     /// Cliente conectado (clientInfo.name): queda como autor de lo que guarde.
     client: String,
@@ -465,10 +501,21 @@ pub struct Server<'a> {
 impl<'a> Server<'a> {
     pub fn new(project: &'a Path, store: &'a Store) -> Self {
         Self {
-            project,
+            project: Some(project.to_path_buf()),
+            fixed: true,
             store,
             client: "agente".into(),
             modes: Modes::from_env(),
+        }
+    }
+
+    /// Servidor sin proyecto (Plan #337, fase 2): una app sin terminal registra un solo
+    /// servidor para todos los proyectos y el agente elige uno con project_use.
+    pub fn unbound(store: &'a Store) -> Self {
+        Self {
+            project: None,
+            fixed: false,
+            ..Self::new(Path::new(""), store)
         }
     }
 
@@ -487,11 +534,15 @@ impl<'a> Server<'a> {
                     "protocolVersion": version,
                     "capabilities": {"tools": {}, "prompts": {}},
                     "serverInfo": {"name": "forge", "version": env!("CARGO_PKG_VERSION")},
-                    "instructions": instructions(self.modes)
+                    "instructions": if self.fixed {
+                        instructions(self.modes)
+                    } else {
+                        format!("{}\n\n{CHOOSE_PROJECT}", instructions(self.modes))
+                    }
                 }))
             }
             "ping" => Ok(json!({})),
-            "tools/list" => Ok(json!({"tools": tools()})),
+            "tools/list" => Ok(json!({"tools": tools(!self.fixed)})),
             // Los comandos /forge-… para todos los agentes que muestran los prompts MCP.
             "prompts/list" => Ok(json!({"prompts": prompts()})),
             "prompts/get" => self.prompt(
@@ -516,11 +567,19 @@ impl<'a> Server<'a> {
     /// memoria), para que el agente no tenga que pedirlos.
     fn prompt(&self, name: &str, args: &Value) -> Result<Value, Value> {
         let arg = |k: &str| args[k].as_str().unwrap_or_default().trim().to_string();
+        // Los comandos que leen el proyecto, sin proyecto elegido, explican cómo elegirlo.
+        let project = match &self.project {
+            Some(p) => p.as_path(),
+            None if matches!(name, "forge-plans" | "forge-memory") => {
+                return Err(json!({"code": -32602, "message": NO_PROJECT}));
+            }
+            None => Path::new(""),
+        };
         let text = match name {
             "forge-plans" => {
                 let plans = self
                     .store
-                    .list_ideas(Some(self.project), false)
+                    .list_ideas(Some(project), false)
                     .map_err(|e| json!({"code": -32603, "message": e}))?;
                 let listing = if plans.is_empty() {
                     tr!("No hay planes ni ideas en el backlog.").to_string()
@@ -544,7 +603,7 @@ impl<'a> Server<'a> {
                 let query = arg("query");
                 let found = self
                     .store
-                    .search_memories(self.project, &query, None, 10)
+                    .search_memories(project, &query, None, 10)
                     .map_err(|e| json!({"code": -32603, "message": e}))?;
                 let listing = if found.is_empty() {
                     tr!("No hay memorias que coincidan.").to_string()
@@ -589,17 +648,29 @@ impl<'a> Server<'a> {
         Ok(json!({"messages": [{"role": "user", "content": {"type": "text", "text": text}}]}))
     }
 
-    fn call(&self, tool: &str, args: &Value) -> Value {
-        let text = |s: String, error: bool| json!({"content": [{"type": "text", "text": s}], "isError": error});
+    fn call(&mut self, tool: &str, args: &Value) -> Value {
+        let result = match tool {
+            "projects_list" if !self.fixed => Ok(self.projects_list()),
+            "project_use" if !self.fixed => self.use_project(args["project"].as_str()),
+            _ if self.project.is_none() && needs_project(tool, args) => Err(NO_PROJECT.into()),
+            _ => return self.call_project(tool, args),
+        };
+        reply(result, false)
+    }
+
+    /// Las herramientas de siempre, sobre el proyecto de la sesión. Sin proyecto solo llegan
+    /// aquí las que no lo usan (la lista general, una herramienta desconocida).
+    fn call_project(&self, tool: &str, args: &Value) -> Value {
+        let project = self.project.as_deref().unwrap_or(Path::new(""));
         let limit = args["limit"].as_u64().unwrap_or(10).clamp(1, 50) as usize;
         let kind = args["kind"].as_str();
-        let list = (args["scope"].as_str() != Some("general")).then_some(self.project);
+        let list = (args["scope"].as_str() != Some("general")).then_some(project);
         let reads_memory = matches!(tool, "memory_search" | "memory_get" | "memory_list");
         let result = match tool {
             "memory_search" => self
                 .store
                 .search_memories(
-                    self.project,
+                    project,
                     args["query"].as_str().unwrap_or_default(),
                     kind,
                     limit,
@@ -613,7 +684,7 @@ impl<'a> Server<'a> {
             "memory_get" => match args["id"].as_i64() {
                 Some(id) => self
                     .store
-                    .get_memory(self.project, id)
+                    .get_memory(project, id)
                     .map(|found| match found {
                         Some(memory) => {
                             let _ = self.store.note_memory_reads(&[memory.id]);
@@ -625,7 +696,7 @@ impl<'a> Server<'a> {
             },
             "memory_list" => self
                 .store
-                .list_memories(self.project, kind, limit)
+                .list_memories(project, kind, limit)
                 .map(|found| listing(&found, tr!("La memoria está vacía."))),
             // Sin contenido no hay memoria: se dice qué falta en vez de guardar solo el
             // título (los agentes a veces mandan `content` o un objeto).
@@ -637,7 +708,7 @@ impl<'a> Server<'a> {
                 if !args["force"].as_bool().unwrap_or(false)
                     && args["replaces"].as_i64().is_none()
                     && let Ok(Some(m)) = self.store.similar_memory(
-                        self.project,
+                        project,
                         args["title"].as_str().unwrap_or_default(),
                     ) =>
             {
@@ -650,7 +721,7 @@ impl<'a> Server<'a> {
             "memory_save" => self
                 .store
                 .add_memory(
-                    self.project,
+                    project,
                     kind.unwrap_or("note"),
                     args["title"].as_str().unwrap_or_default(),
                     body(args).unwrap_or_default(),
@@ -661,7 +732,7 @@ impl<'a> Server<'a> {
                     Some(old)
                         if self
                             .store
-                            .set_memory_status(self.project, old, "superseded", Some(id))
+                            .set_memory_status(project, old, "superseded", Some(id))
                             .unwrap_or(false) =>
                     {
                         tr!(
@@ -690,7 +761,7 @@ impl<'a> Server<'a> {
                 Some(id) => self
                     .store
                     .update_memory(
-                        self.project,
+                        project,
                         id,
                         kind,
                         args["title"].as_str(),
@@ -699,7 +770,7 @@ impl<'a> Server<'a> {
                     )
                     .and_then(|ok| match args["status"].as_str() {
                         Some(status) if ok => {
-                            self.store.set_memory_status(self.project, id, status, None)
+                            self.store.set_memory_status(project, id, status, None)
                         }
                         _ => Ok(ok),
                     })
@@ -714,7 +785,7 @@ impl<'a> Server<'a> {
             },
             "memory_delete" => match args["id"].as_i64() {
                 // Un agente nunca borra del todo: archiva, y la persona decide desde el panel.
-                Some(id) => self.store.set_memory_status(self.project, id, "archived", None).map(|ok| {
+                Some(id) => self.store.set_memory_status(project, id, "archived", None).map(|ok| {
                     if ok {
                         tr!("Memoria #{id} archivada.", id = id)
                     } else {
@@ -872,22 +943,142 @@ impl<'a> Server<'a> {
                 }),
                 None => Err(tr!("falta `id`").into()),
             },
-            "project_context" => Ok(project_context(self.project, self.store)),
+            "project_context" => Ok(project_context(project, self.store)),
             "work_status" => Ok(crate::activity::work_status(
                 self.store,
-                self.project,
+                project,
                 crate::store::current_session_id().as_deref(),
                 crate::store::now(),
             )),
             _ => Err(format!("herramienta desconocida: {tool}")),
         };
-        match result {
-            // Lo leído de la memoria va marcado como datos, no como órdenes.
-            Ok(s) if reads_memory => text(format!("{s}\n\n{MEMORY_IS_DATA}"), false),
-            Ok(s) => text(s, false),
-            Err(e) => text(e, true),
+        reply(result, reads_memory)
+    }
+
+    /// projects_list: los proyectos que Forge conoce, del más reciente al más antiguo.
+    fn projects_list(&self) -> String {
+        let projects = self.store.recent().unwrap_or_default();
+        if projects.is_empty() {
+            return "Forge knows no projects yet: the person has to open one in Forge first."
+                .into();
+        }
+        projects
+            .iter()
+            .map(|p| {
+                format!(
+                    "- {} · {} · key {}",
+                    p.name,
+                    p.path.display(),
+                    key_preview(&p.path)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// project_use: solo un proyecto que Forge conoce, por nombre (si no se repite), carpeta
+    /// o clave; nunca una carpeta cualquiera.
+    fn use_project(&mut self, wanted: Option<&str>) -> Result<String, String> {
+        let wanted = wanted.map(str::trim).unwrap_or_default();
+        if wanted.is_empty() {
+            return Err("missing `project`: a name, folder or key from projects_list".into());
+        }
+        let projects = self.store.recent().map_err(|e| e.to_string())?;
+        // Una carpeta solo si es absoluta: un nombre suelto («erp») no se resuelve contra la
+        // carpeta donde arrancó el servidor. La clave git solo se calcula si se pide una.
+        let wanted_path = Path::new(wanted);
+        let by_path: Vec<_> = projects
+            .iter()
+            .filter(|p| {
+                (wanted_path.is_absolute()
+                    && (p.path == wanted_path
+                        || crate::canonical(&p.path) == crate::canonical(wanted_path)))
+                    || (wanted.starts_with("git:") && key_preview(&p.path) == wanted)
+            })
+            .collect();
+        let found = if by_path.is_empty() {
+            projects
+                .iter()
+                .filter(|p| p.name.eq_ignore_ascii_case(wanted))
+                .collect()
+        } else {
+            by_path
+        };
+        match found.as_slice() {
+            [p] if p.path.is_dir() => {
+                // Cambiar de proyecto a mitad de sesión se dice, para que el agente lo cuente.
+                let before = self
+                    .project
+                    .replace(p.path.clone())
+                    .filter(|old| *old != p.path)
+                    .map(|old| format!(" (it was {} until now)", old.display()))
+                    .unwrap_or_default();
+                Ok(format!(
+                    "Using the Forge project {} ({}) for this session{before}.",
+                    p.name,
+                    p.path.display()
+                ))
+            }
+            [p] => Err(format!(
+                "The folder of {} no longer exists ({}): choose another project.",
+                p.name,
+                p.path.display()
+            )),
+            [] => Err(format!(
+                "Forge doesn't know a project called {wanted}: call projects_list and pass a name, folder or key from it."
+            )),
+            several => Err(format!(
+                "Several Forge projects match {wanted}: pass one of these folders instead:\n{}",
+                several
+                    .iter()
+                    .map(|p| format!("- {}", p.path.display()))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )),
         }
     }
+}
+
+/// Respuesta MCP de una herramienta. Lo leído de la memoria va marcado como datos, no como
+/// órdenes.
+fn reply(result: Result<String, String>, reads_memory: bool) -> Value {
+    let text = |s: String, error: bool| json!({"content": [{"type": "text", "text": s}], "isError": error});
+    match result {
+        Ok(s) if reads_memory => text(format!("{s}\n\n{MEMORY_IS_DATA}"), false),
+        Ok(s) => text(s, false),
+        Err(e) => text(e, true),
+    }
+}
+
+/// ¿Usa la herramienta el proyecto de la sesión? Por defecto sí (una herramienta nueva no
+/// cae nunca en un proyecto sin elegir); solo los planes y revisiones con scope=general,
+/// que son de la lista general, no lo usan.
+fn needs_project(tool: &str, args: &Value) -> bool {
+    let general = args["scope"].as_str() == Some("general");
+    let general_list = matches!(
+        tool,
+        "plans_list"
+            | "ideas_list"
+            | "plan_add"
+            | "idea_add"
+            | "plan_update"
+            | "idea_update"
+            | "plan_delete"
+            | "idea_delete"
+            | "review_comment_add"
+            | "review_progress"
+            | "review_comment_resolve"
+    );
+    !(general && general_list)
+}
+
+/// La clave con la que Forge guarda la memoria y los planes de una carpeta, sin escribir
+/// nada (Store::project_key migra datos al calcularla).
+fn key_preview(project: &Path) -> String {
+    crate::git::remote_identity(project).map_or_else(
+        || project.to_string_lossy().into_owned(),
+        |id| format!("git:{id}"),
+    )
 }
 
 impl Server<'_> {
@@ -1166,8 +1357,12 @@ pub fn project_context(project: &Path, store: &Store) -> String {
 /// Bucle del servidor: un mensaje JSON por línea en stdin, respuestas por stdout.
 /// `modes` también llegan como argumentos porque algunos agentes (Codex) lanzan sus
 /// servidores MCP sin el entorno de la terminal.
-pub fn serve(project: &Path, store: &Store, modes: Modes) -> std::io::Result<()> {
-    let mut server = Server::new(project, store);
+/// Sin `project` el servidor sirve a todos los proyectos y el agente elige uno (Plan #337).
+pub fn serve(project: Option<&Path>, store: &Store, modes: Modes) -> std::io::Result<()> {
+    let mut server = match project {
+        Some(project) => Server::new(project, store),
+        None => Server::unbound(store),
+    };
     server.modes = server.modes.or(modes);
     let stdout = std::io::stdout();
     for line in std::io::stdin().lock().lines() {
@@ -2048,9 +2243,207 @@ mod tests {
         );
     }
 
+    /// Plan #337, fase 2: un servidor arrancado sin proyecto (la app de Gemini lo lanza en
+    /// /private/tmp) no guarda nada hasta que el agente elige un proyecto de forma explícita;
+    /// la lista general sigue funcionando.
+    #[test]
+    fn a_server_without_project_refuses_project_tools_until_one_is_chosen() {
+        let store = Store::in_memory().unwrap();
+        let dir = std::env::temp_dir().join(format!("forge-mcp-choose-{}", std::process::id()));
+        let ganaderia = dir.join("ganaderia");
+        std::fs::create_dir_all(&ganaderia).unwrap();
+        store.touch(&ganaderia, "Ganaderia").unwrap();
+        let mut server = Server::unbound(&store);
+        let send = |server: &mut Server, method: &str, params: Value| {
+            server
+                .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}))
+                .unwrap()
+        };
+        let call = |server: &mut Server, name: &str, args: Value| {
+            let r = send(
+                server,
+                "tools/call",
+                json!({"name": name, "arguments": args}),
+            );
+            let text = r["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            (r["result"]["isError"] == true, text)
+        };
+        let init = send(
+            &mut server,
+            "initialize",
+            json!({"clientInfo": {"name": "gemini"}}),
+        );
+        let instructions = init["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.contains("project_use"), "{instructions}");
+        let tools = send(&mut server, "tools/list", json!({}));
+        let names: Vec<&str> = tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"projects_list") && names.contains(&"project_use"));
+
+        // Sin proyecto elegido: rechaza y dice cómo elegirlo, sin guardar nada.
+        for (tool, args) in [
+            ("plan_add", json!({"title": "Vacunas"})),
+            ("memory_save", json!({"title": "Pagos", "body": "Stripe"})),
+            ("memory_search", json!({"query": "pagos"})),
+            ("plans_list", json!({})),
+            ("project_context", json!({})),
+            ("work_status", json!({})),
+        ] {
+            let (error, text) = call(&mut server, tool, args);
+            assert!(error, "{tool}: {text}");
+            assert!(
+                text.contains("projects_list") && text.contains("project_use"),
+                "{tool}: {text}"
+            );
+        }
+        assert!(
+            store
+                .list_ideas(Some(&ganaderia), false)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(store.list_ideas(None, false).unwrap().is_empty());
+        assert!(
+            store
+                .list_memories(&ganaderia, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+
+        // Todas las herramientas de siempre, sin scope=general, se niegan: también las que se
+        // añadan mañana.
+        for tool in raw_tools().as_array().unwrap() {
+            let name = tool["name"].as_str().unwrap();
+            let (error, text) = call(
+                &mut server,
+                name,
+                json!({"id": 1, "title": "x", "body": "x"}),
+            );
+            assert!(error && text == NO_PROJECT, "{name}: {text}");
+        }
+        let prompt = send(&mut server, "prompts/get", json!({"name": "forge-plans"}));
+        assert!(
+            prompt["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("project_use")
+        );
+        assert!(store.list_ideas(None, false).unwrap().is_empty());
+        assert!(
+            store
+                .list_memories(&ganaderia, None, 10)
+                .unwrap()
+                .is_empty()
+        );
+
+        // La lista general no es de ningún proyecto: sigue funcionando.
+        let (error, text) = call(
+            &mut server,
+            "plan_add",
+            json!({"title": "Idea suelta", "scope": "general"}),
+        );
+        assert!(!error, "{text}");
+        assert_eq!(store.list_ideas(None, false).unwrap().len(), 1);
+
+        let (error, text) = call(&mut server, "projects_list", json!({}));
+        assert!(!error, "{text}");
+        assert!(text.contains("Ganaderia"), "{text}");
+        assert!(text.contains(&ganaderia.display().to_string()), "{text}");
+
+        // Solo vale un proyecto que Forge conoce: nada de carpetas inventadas.
+        for wanted in ["/no/such", "", "ganaderia/../ganaderia", "git:nope"] {
+            let (error, text) = call(&mut server, "project_use", json!({"project": wanted}));
+            assert!(error, "{wanted}: {text}");
+        }
+        // Un nombre repetido no elige ninguno: pide la carpeta.
+        let twin = dir.join("otra/ganaderia");
+        std::fs::create_dir_all(&twin).unwrap();
+        store.touch(&twin, "Ganaderia").unwrap();
+        let (error, text) = call(&mut server, "project_use", json!({"project": "Ganaderia"}));
+        assert!(
+            error && text.contains(&twin.display().to_string()),
+            "{text}"
+        );
+        // Por carpeta absoluta sí.
+        let (error, text) = call(
+            &mut server,
+            "project_use",
+            json!({"project": twin.display().to_string()}),
+        );
+        assert!(!error, "{text}");
+        store.remove(&twin).unwrap();
+        // Cambiar de proyecto se dice.
+        let (error, text) = call(&mut server, "project_use", json!({"project": "ganaderia"}));
+        assert!(!error, "{text}");
+        assert!(
+            text.contains("Ganaderia") && text.contains("it was"),
+            "{text}"
+        );
+
+        let (error, text) = call(&mut server, "plan_add", json!({"title": "Vacunas"}));
+        assert!(!error, "{text}");
+        let plans = store.list_ideas(Some(&ganaderia), false).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].title, "Vacunas");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Un servidor arrancado con proyecto se queda como estaba: sin herramientas para elegir
+    /// otro y sin el aviso en las instrucciones.
+    #[test]
+    fn a_server_started_with_a_project_cannot_switch_project() {
+        let store = Store::in_memory().unwrap();
+        let other = std::env::temp_dir().join(format!("forge-mcp-fixed-{}", std::process::id()));
+        std::fs::create_dir_all(&other).unwrap();
+        store.touch(&other, "Otro").unwrap();
+        let mut server = Server::new(Path::new("/p/fijo"), &store);
+        let init = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+            .unwrap();
+        assert!(
+            !init["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("project_use")
+        );
+        let tools = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
+            .unwrap();
+        assert!(
+            tools["result"]["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|t| t["name"] != "project_use" && t["name"] != "projects_list")
+        );
+        let used = server
+            .handle(&json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "project_use", "arguments": {"project": "Otro"}}}))
+            .unwrap();
+        assert_eq!(used["result"]["isError"], true);
+        server
+            .handle(&json!({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "plan_add", "arguments": {"title": "Fijo"}}}))
+            .unwrap();
+        assert_eq!(
+            store
+                .list_ideas(Some(Path::new("/p/fijo")), false)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(store.list_ideas(Some(&other), false).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&other);
+    }
+
     #[test]
     fn every_tool_says_whether_it_only_reads_or_changes_things() {
-        let tools = tools();
+        let tools = tools(true);
         let hint = |name: &str, key: &str| {
             let tool = tools
                 .as_array()
@@ -2074,6 +2467,7 @@ mod tests {
             "plans_list",
             "project_context",
             "work_status",
+            "projects_list",
         ] {
             assert_eq!(hint(name, "readOnlyHint"), Some(true), "{name}");
         }
