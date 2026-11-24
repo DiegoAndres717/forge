@@ -54,6 +54,8 @@ Uso:
   forge work-status [--main-check]      qué agente está en qué worktree, qué toca y dónde se pisan
   forge memory failure-hint             (stdin: salida de un comando que falló) las notas que lo nombran
   forge mcp                             servidor MCP (memoria y contexto) para agentes
+  forge mcp-config [--json <archivo>]   comando del MCP para apps sin terminal (Gemini de escritorio);
+                                        con --json, también el JSON para importar
 
 Opciones:
   --project <carpeta>   proyecto (por defecto: la carpeta con .forge/ más cercana o la raíz del repo)
@@ -111,6 +113,8 @@ Usage:
   forge work-status [--main-check]      which agent is on which worktree, what it touches and where they overlap
   forge memory failure-hint             (stdin: output of a failed command) the notes that name it
   forge mcp                             MCP server (memory and context) for agents
+  forge mcp-config [--json <file>]      MCP command for apps without a terminal (Gemini desktop);
+                                        with --json, also the JSON to import
 
 Options:
   --project <folder>    project (default: nearest folder with .forge/ or the repo root)
@@ -186,6 +190,7 @@ fn positional(args: &[String]) -> Vec<&str> {
                 | "--tags"
                 | "--from"
                 | "--rename"
+                | "--json"
         ) {
             skip = true;
         } else if !a.starts_with("--") {
@@ -206,6 +211,46 @@ fn find_project(args: &[String]) -> PathBuf {
         .map(Path::to_path_buf)
         .or_else(|| guard::repo_root(&cwd).ok())
         .unwrap_or(cwd)
+}
+
+/// Proyecto del servidor MCP. Sin --project (agy guarda una configuración para todos los
+/// proyectos): el de la terminal de Forge que abrió el agente (FORGE_PROJECT), no la carpeta
+/// donde se lance el servidor; si no, el de la carpeta actual.
+fn mcp_project(args: &[String], found: &Path) -> PathBuf {
+    match std::env::var_os("FORGE_PROJECT") {
+        Some(p) if flag(args, "--project").is_none() => PathBuf::from(p),
+        _ => found.to_path_buf(),
+    }
+}
+
+/// `forge mcp-config`: la línea para pegar en apps sin terminal (por stdout, sola, para
+/// poder copiarla o usarla en un script) y, con --json, el archivo para importar.
+fn mcp_config(project: &Path, args: &[String]) -> Result<i32, String> {
+    use forge_core::mcp_connect;
+    // Una carpeta que no existe (FORGE_PROJECT de un worktree borrado, una errata en
+    // --project) daría un comando que no arranca: mejor decirlo ya.
+    if !project.is_dir() {
+        return Err(tr!(
+            "no existe la carpeta del proyecto: {p0}",
+            p0 = project.display()
+        )
+        .to_string());
+    }
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let server = mcp_connect::server(
+        &mcp_connect::stable_exe(&forge_core::canonical(&exe)),
+        &forge_core::canonical(project),
+    );
+    println!(
+        "{}",
+        mcp_connect::command_line(&server, mcp_connect::Shell::native())
+    );
+    if let Some(file) = flag(args, "--json") {
+        std::fs::write(&file, mcp_connect::config_json(&server))
+            .map_err(|e| format!("{file}: {e}"))?;
+        eprintln!("{}", tr!("JSON guardado en {p0}", p0 = file));
+    }
+    Ok(0)
 }
 
 fn open_store() -> Result<Store, String> {
@@ -229,6 +274,7 @@ pub const COMMANDS: &[&str] = &[
     "hooks",
     "ideas",
     "mcp",
+    "mcp-config",
     "memory",
     "norms",
     "plans",
@@ -295,13 +341,9 @@ pub fn run(args: &[String]) -> i32 {
                 .unwrap_or(Stage::Commit),
         ),
         (Some("ai"), Some("usage")) => ai_usage(&out, &project),
+        (Some("mcp-config"), _) => mcp_config(&mcp_project(args, &project), args),
         (Some("mcp"), _) => open_store().and_then(|store| {
-            // Sin --project (agy guarda una configuración para todos los proyectos): el de la
-            // terminal de Forge que abrió el agente, no la carpeta donde se lance el servidor.
-            let project = match std::env::var_os("FORGE_PROJECT") {
-                Some(p) if flag(args, "--project").is_none() => PathBuf::from(p),
-                _ => project.clone(),
-            };
+            let project = mcp_project(args, &project);
             forge_core::mcp::serve(&project, &store, forge_core::mcp::Modes::from_args(args))
                 .map(|_| 0)
                 .map_err(|e| e.to_string())

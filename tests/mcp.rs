@@ -692,3 +692,125 @@ fn review_stats_summarize_the_findings_by_author_and_reviewer() {
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// Plan #337, fase 1: `forge mcp-config` imprime el comando para apps sin terminal (la de
+/// Gemini de escritorio): ruta real del binario y `--project`, con comillas si hay espacios.
+mod mcp_config {
+    use super::*;
+    use forge_core::mcp_connect::{Shell, quote};
+    use std::path::{Path, PathBuf};
+
+    fn base(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("forge-it-mcp-config-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let project = dir.join("mis proyectos").join("His ERP");
+        std::fs::create_dir_all(project.join("src")).unwrap();
+        let init = Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&project)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .status()
+            .unwrap();
+        assert!(init.success());
+        forge_core::canonical(&project)
+    }
+
+    fn run(args: &[&str], cwd: &Path, env_project: Option<&Path>) -> std::process::Output {
+        let mut cmd = Command::new(FORGE);
+        cmd.args(["mcp-config"])
+            .args(args)
+            .current_dir(cwd)
+            .env("FORGE_LANG", "en")
+            .env_remove("FORGE_PROJECT")
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE");
+        if let Some(p) = env_project {
+            cmd.env("FORGE_PROJECT", p);
+        }
+        let out = cmd.output().unwrap();
+        assert!(out.status.success(), "{out:?}");
+        out
+    }
+
+    fn expected(project: &Path) -> String {
+        let exe = forge_core::canonical(Path::new(FORGE));
+        let shell = Shell::native();
+        format!(
+            "{} mcp --project {}",
+            quote(&exe.to_string_lossy(), shell),
+            quote(&project.to_string_lossy(), shell)
+        )
+    }
+
+    #[test]
+    fn prints_the_full_command_quoting_paths_with_spaces() {
+        let project = base("spaces");
+        let arg = project.to_string_lossy().into_owned();
+        let out = run(&["--project", &arg], &std::env::temp_dir(), None);
+        let line = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert_eq!(line, expected(&project));
+        let quoted = if cfg!(windows) {
+            format!("\"{arg}\"")
+        } else {
+            format!("'{arg}'")
+        };
+        assert!(line.ends_with(&quoted), "{line}");
+    }
+
+    #[test]
+    fn project_comes_from_forge_project_or_the_repo_root_of_the_cwd() {
+        let project = base("resolve");
+        // Desde una subcarpeta del repositorio: la raíz.
+        let out = run(&[], &project.join("src"), None);
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            expected(&project)
+        );
+        // FORGE_PROJECT (el proyecto de la terminal de Forge) gana a la carpeta actual.
+        let out = run(&[], &std::env::temp_dir(), Some(&project));
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            expected(&project)
+        );
+    }
+
+    #[test]
+    fn a_missing_project_folder_is_an_error_not_a_broken_command() {
+        let missing = std::env::temp_dir().join("forge-it-mcp-config-no-existe");
+        let out = Command::new(FORGE)
+            .args(["mcp-config", "--project"])
+            .arg(&missing)
+            .env_remove("FORGE_PROJECT")
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{out:?}");
+        // Los errores de la CLI salen por stdout: lo que no puede salir es un comando.
+        assert!(
+            !String::from_utf8_lossy(&out.stdout).contains(" mcp --project"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn json_flag_writes_the_mcp_servers_config() {
+        let project = base("json");
+        let file = project.parent().unwrap().join("forge mcp.json");
+        let (p, f) = (project.to_string_lossy(), file.to_string_lossy());
+        run(
+            &["--project", p.as_ref(), "--json", f.as_ref()],
+            &std::env::temp_dir(),
+            None,
+        );
+        let json: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let exe = forge_core::canonical(Path::new(FORGE));
+        assert_eq!(
+            json,
+            json!({"mcpServers": {"forge-his-erp": {
+                "command": exe.to_string_lossy(),
+                "args": ["mcp", "--project", p.as_ref()],
+            }}})
+        );
+    }
+}

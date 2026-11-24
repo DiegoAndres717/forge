@@ -6326,3 +6326,57 @@ fn a_review_that_cannot_open_is_not_recorded() {
             .is_some()
     );
 }
+
+/// Plan #337, fase 1: desde el panel de memoria se copia el comando MCP con comillas (la
+/// carpeta tiene espacios) y se guarda el JSON `mcpServers` para importar en la app de Gemini.
+#[test]
+fn memory_panel_copies_the_quoted_mcp_command_and_saves_the_json() {
+    let _serial = serial();
+    let dir = project("mcp con espacios");
+    let out = std::env::temp_dir().join(format!("forge-e2e-mcp-json-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out);
+    std::fs::create_dir_all(&out).unwrap();
+    let mut h = app(dir.clone());
+    h.state_mut().workspaces[0].memory.json_dir = Some(out.clone());
+    h.key_press_modifiers(CMD_SHIFT, Key::M);
+    h.run_steps(2);
+
+    h.get_by_label_contains("Copiar comando MCP").click();
+    h.step();
+    let shell = forge_core::mcp_connect::Shell::native();
+    let quoted = forge_core::mcp_connect::quote(&dir.to_string_lossy(), shell);
+    assert_ne!(quoted, dir.to_string_lossy(), "la ruta lleva comillas");
+    let copied = h
+        .output()
+        .platform_output
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+        .expect("copia el comando");
+    assert!(
+        copied.contains(&format!(" mcp --project {quoted}")),
+        "{copied}"
+    );
+
+    h.get_by_label_contains("Guardar JSON").click();
+    h.run_steps(2);
+    let id = forge_core::mcp_connect::server_id(&dir);
+    let file = out.join(format!("{id}.json"));
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let args = &json["mcpServers"][&id]["args"];
+    assert_eq!(args[0], "mcp");
+    assert_eq!(args[2], dir.to_string_lossy().as_ref());
+    assert!(
+        ws(h.state())
+            .memory
+            .json_saved
+            .as_ref()
+            .is_some_and(|r| r.is_ok()),
+        "muestra dónde lo guardó"
+    );
+    let _ = std::fs::remove_dir_all(&out);
+}
