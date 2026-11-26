@@ -3573,4 +3573,28 @@ pub const EN: &[(&str, &str)] = &[
         "revísala a mano; si sobra, bórrala tú y la limpieza la podará",
         "check it by hand; if you don't need it, delete it yourself and the cleanup will prune it",
     ),
+    ("Un agente está trabajando", "An agent is working"),
+    ("Suspensión", "Sleep"),
+    (
+        "Mientras al menos un agente trabaja, en cualquier proyecto, el Mac no se suspende por inactividad (la pantalla sí se apaga). Deja de impedirlo unos segundos después de que ninguno trabaje; esperar tu permiso o respuesta no cuenta como trabajar. Si Forge se cierra o se cae, el Mac vuelve a suspenderse con normalidad.",
+        "While at least one agent is working, in any project, the Mac doesn't go to sleep when idle (the display still turns off). It stops preventing it a few seconds after no agent is working; waiting for your permission or answer doesn't count as working. If Forge quits or crashes, the Mac sleeps normally again.",
+    ),
+    (
+        "Mientras al menos un agente trabaja, en cualquier proyecto, el equipo no se suspende por inactividad (la pantalla sí se apaga). Deja de impedirlo unos segundos después de que ninguno trabaje; esperar tu permiso o respuesta no cuenta como trabajar. Si Forge se cierra o se cae, el equipo vuelve a suspenderse con normalidad.",
+        "While at least one agent is working, in any project, the computer doesn't go to sleep when idle (the display still turns off). It stops preventing it a few seconds after no agent is working; waiting for your permission or answer doesn't count as working. If Forge quits or crashes, the computer sleeps normally again.",
+    ),
+    (
+        "Mantener el Mac despierto mientras un agente trabaja",
+        "Keep the Mac awake while an agent is working",
+    ),
+    (
+        "Mantener el equipo despierto mientras un agente trabaja",
+        "Keep the computer awake while an agent is working",
+    ),
+    ("Mac despierto", "Mac kept awake"),
+    ("Equipo despierto", "Computer kept awake"),
+    (
+        "Un agente está trabajando: Forge impide la suspensión por inactividad hasta que ninguno trabaje (Ajustes, General).",
+        "An agent is working: Forge prevents idle sleep until none is working (Settings, General).",
+    ),
 ];

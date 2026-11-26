@@ -39,6 +39,7 @@ mod git_panel;
 mod guard_form;
 mod guard_panel;
 mod ideas_panel;
+mod keep_awake;
 mod memory_panel;
 mod menu;
 mod new_agent;
@@ -398,6 +399,10 @@ pub struct App {
     /// Lista de terminales de un panel abajo, como fila de pestañas (Ajustes, General); si no,
     /// a la derecha.
     tabs_below: bool,
+    /// Mantener el equipo despierto mientras un agente trabaja (Ajustes, General; plan #348).
+    keep_awake_on: bool,
+    keep_awake: forge_core::keep_awake::KeepAwake<Box<dyn forge_core::keep_awake::Inhibitor>>,
+    keep_awake_checked: Option<Instant>,
     error: Option<String>,
     /// Dónde se guardan las claves de las cuentas con API (el llavero; las pruebas, memoria).
     secrets: Arc<dyn forge_core::secrets::SecretStore>,
@@ -519,6 +524,9 @@ impl App {
             drawer_width: GUARD_WIDTH,
             autosave: false,
             tabs_below: false,
+            keep_awake_on: false,
+            keep_awake: keep_awake::new(),
+            keep_awake_checked: None,
             error,
             secrets: Arc::new(forge_core::secrets::Keychain),
             api_form: None,
@@ -599,6 +607,7 @@ impl App {
             app.drawer_width = w.max(DRAWER_MIN);
         }
         app.autosave = app.db(|s| s.setting("autosave")).flatten().as_deref() == Some("1");
+        app.keep_awake_on = app.db(|s| s.setting("keep_awake")).flatten().as_deref() == Some("1");
         app.tabs_below =
             app.db(|s| s.setting("terminal_tabs")).flatten().as_deref() == Some("bottom");
         let active = app.db(|s| s.setting("active")).flatten();
@@ -1726,6 +1735,12 @@ fn hide_app() {
 }
 
 impl eframe::App for App {
+    // También corre con la ventana escondida: soltar a tiempo no puede depender de verla.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.agent_events_tick(ctx);
+        self.keep_awake_tick(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let mut cmds = Vec::new();

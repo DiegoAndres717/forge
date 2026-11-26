@@ -374,6 +374,7 @@ impl App {
             );
             self.tabs_position_ui(ui);
             self.autosave_ui(ui);
+            self.keep_awake_ui(ui);
             hint(
                 ui,
                 tr!("Fuentes propias y más opciones: ~/.config/forge/config.toml"),
@@ -618,6 +619,37 @@ impl App {
         if on != self.autosave {
             self.autosave = on;
             self.db(|s| s.set_setting("autosave", if on { "1" } else { "" }));
+        }
+    }
+
+    /// Mantener el equipo despierto mientras un agente trabaja (plan #348).
+    fn keep_awake_ui(&mut self, ui: &mut egui::Ui) {
+        let mut on = self.keep_awake_on;
+        let mac = cfg!(target_os = "macos");
+        row(
+            ui,
+            tr!("Suspensión"),
+            if mac {
+                tr!(
+                    "Mientras al menos un agente trabaja, en cualquier proyecto, el Mac no se suspende por inactividad (la pantalla sí se apaga). Deja de impedirlo unos segundos después de que ninguno trabaje; esperar tu permiso o respuesta no cuenta como trabajar. Si Forge se cierra o se cae, el Mac vuelve a suspenderse con normalidad."
+                )
+            } else {
+                tr!(
+                    "Mientras al menos un agente trabaja, en cualquier proyecto, el equipo no se suspende por inactividad (la pantalla sí se apaga). Deja de impedirlo unos segundos después de que ninguno trabaje; esperar tu permiso o respuesta no cuenta como trabajar. Si Forge se cierra o se cae, el equipo vuelve a suspenderse con normalidad."
+                )
+            },
+            |ui| {
+                let text = if mac {
+                    tr!("Mantener el Mac despierto mientras un agente trabaja")
+                } else {
+                    tr!("Mantener el equipo despierto mientras un agente trabaja")
+                };
+                ui.checkbox(&mut on, text);
+            },
+        );
+        if on != self.keep_awake_on {
+            self.keep_awake_on = on;
+            self.db(|s| s.set_setting("keep_awake", if on { "1" } else { "" }));
         }
     }
 

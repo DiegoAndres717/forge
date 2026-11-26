@@ -23,11 +23,13 @@ candle-nn = "0.11.0"
 candle-transformers = "0.11.0"
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
-# Windows: saber si un proceso sigue vivo (Guard espera respuestas de la app).
+# Windows: saber si un proceso sigue vivo (Guard espera respuestas de la app) y no dejar que
+# el equipo se suspenda mientras un agente trabaja.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Console",
+    "Win32_System_Power",
     "Win32_System_Threading",
 ] }
 

@@ -439,17 +439,42 @@ impl App {
             FontId::proportional(11.0),
             theme::TEXT_4,
         );
+        let mut right = rect.max.x - 12.0;
         if let Some(i) = self.active
             && let Some((spent, budget)) =
                 self.workspaces[i].guard.ai_spend.filter(|(s, _)| *s > 0.0)
         {
-            ui.painter().text(
-                egui::pos2(rect.max.x - 12.0, rect.center().y),
+            let r = ui.painter().text(
+                egui::pos2(right, rect.center().y),
                 egui::Align2::RIGHT_CENTER,
                 format!("IA este mes ${spent:.2} de ${budget:.2}").replace('.', ","),
                 FontId::proportional(11.0),
                 theme::TEXT_4,
             );
+            right = r.min.x - 16.0;
+        }
+        // Plan #348: discreto, a la derecha, mientras se impide la suspensión.
+        if self.keep_awake.held() {
+            let label = if cfg!(target_os = "macos") {
+                tr!("Mac despierto")
+            } else {
+                tr!("Equipo despierto")
+            };
+            let r = ui.painter().text(
+                egui::pos2(right, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                format!("{}  {label}", icon::COFFEE),
+                FontId::proportional(11.0),
+                theme::TEXT_3,
+            );
+            let label = label.to_string();
+            ui.interact(r, egui::Id::new("keep-awake"), Sense::hover())
+                .on_hover_text(tr!(
+                    "Un agente está trabajando: Forge impide la suspensión por inactividad hasta que ninguno trabaje (Ajustes, General)."
+                ))
+                .widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label.clone())
+                });
         }
     }
 
