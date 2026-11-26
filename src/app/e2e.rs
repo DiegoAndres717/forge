@@ -6380,3 +6380,98 @@ fn memory_panel_copies_the_quoted_mcp_command_and_saves_the_json() {
     );
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// Plan #348: «Mantener el Mac despierto mientras un agente trabaja» va apagado de serie, se
+/// elige en Ajustes > General y se recuerda.
+#[test]
+fn keep_awake_is_off_by_default_and_chosen_in_general_settings() {
+    let _serial = serial();
+    let h = app_with(Store::in_memory().unwrap(), Some(project("awake-off")));
+    assert!(!h.state().keep_awake_on, "apagado de serie");
+    let mut h = app(project("awake-setting"));
+    let ctx = h.ctx.clone();
+    super::settings::show_tab(&ctx, super::settings::SettingsTab::General);
+    h.state_mut().settings_open = true;
+    h.run_steps(4);
+    h.get_by_label_contains("despierto mientras un agente trabaja")
+        .click();
+    h.run_steps(3);
+    assert!(h.state().keep_awake_on);
+    let saved = h
+        .state()
+        .store
+        .as_ref()
+        .unwrap()
+        .setting("keep_awake")
+        .unwrap();
+    assert_eq!(saved.as_deref(), Some("1"), "se recuerda");
+    let store = Store::in_memory().unwrap();
+    store.set_setting("keep_awake", "1").unwrap();
+    let h = app_with(store, Some(project("awake-on")));
+    assert!(h.state().keep_awake_on);
+}
+
+/// Plan #348: con el ajuste activo, un agente trabajando mantiene el equipo despierto y la
+/// barra de estado lo dice; esperar permiso no cuenta como trabajar, y apagar el ajuste lo
+/// suelta (y quita el indicador). Sin el ajuste no se toma nunca.
+#[test]
+fn keep_awake_holds_while_an_agent_works_and_the_status_bar_says_so() {
+    let _serial = serial();
+    let dir = project("awake-working");
+    std::fs::write(
+        dir.join(".forge/agents.toml"),
+        "[[agents]]\nid = \"fake\"\nname = \"Claude Code\"\ncommand = \"sleep 60\"\n",
+    )
+    .unwrap();
+    let mut h = app(dir.clone());
+    let ctx = h.ctx.clone();
+    let area = Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(1000.0, 700.0));
+    h.state_mut()
+        .apply(&ctx, UiCmd::AgentClick("fake".into(), false), area);
+    h.run_steps(2);
+    let panel = ws(h.state()).agent_panels("fake")[0];
+    let session = forge_core::store::session_id_for_panel(std::process::id(), panel);
+    let ev = forge_core::activity::Event {
+        kind: "tool".into(),
+        tool: Some("Bash".into()),
+        target: Some("cargo test".into()),
+        origin: Some("Claude Code".into()),
+        ..Default::default()
+    };
+    h.state()
+        .store
+        .as_ref()
+        .unwrap()
+        .record_activity(
+            &dir,
+            &session,
+            &ev,
+            Some(&dir),
+            forge_core::store::now() - 5,
+        )
+        .unwrap();
+    h.state_mut().agent_rows.refresh();
+    h.run_steps(3);
+    assert!(h.state_mut().agents_working(), "el agente trabaja");
+    assert!(!h.state().keep_awake.held(), "sin el ajuste no se toma");
+    assert!(
+        h.query_by_label_contains("despierto").is_none(),
+        "ni se indica"
+    );
+    h.state_mut().keep_awake_on = true;
+    h.run_steps(3);
+    assert!(h.state().keep_awake.held(), "con el ajuste, se toma");
+    h.get_by_label_contains("despierto");
+    // Pide permiso: ya no trabaja (se suelta tras la pausa, que prueba forge-core).
+    h.state_mut().workspaces[0].panel_event(panel, "waiting");
+    h.state_mut().agent_rows.refresh();
+    h.run_steps(2);
+    assert!(
+        !h.state_mut().agents_working(),
+        "esperar permiso no es trabajar"
+    );
+    h.state_mut().keep_awake_on = false;
+    h.run_steps(3);
+    assert!(!h.state().keep_awake.held(), "apagar el ajuste lo suelta");
+    assert!(h.query_by_label_contains("despierto").is_none());
+}

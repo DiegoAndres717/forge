@@ -274,9 +274,10 @@ impl App {
         }
     }
 
-    pub(super) fn notify_tick(&mut self, ctx: &egui::Context) {
-        self.notification_clicked(ctx);
-        // Eventos de los agentes (hooks), cada medio segundo.
+    /// Eventos de los agentes (hooks), cada medio segundo. Corre desde `App::logic`, también
+    /// con la ventana escondida: «esperando permiso» tiene que llegar para soltar a tiempo lo
+    /// que mantiene el equipo despierto (plan #348).
+    pub(super) fn agent_events_tick(&mut self, ctx: &egui::Context) {
         if self
             .events_checked
             .is_none_or(|t| t.elapsed() > Duration::from_millis(500))
@@ -314,6 +315,10 @@ impl App {
             }
             ctx.request_repaint_after(Duration::from_millis(500));
         }
+    }
+
+    pub(super) fn notify_tick(&mut self, ctx: &egui::Context) {
+        self.notification_clicked(ctx);
         let focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if !self.notifications || self.alerts.quiet {
             return;

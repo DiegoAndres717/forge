@@ -19,6 +19,7 @@ pub mod hooks;
 pub mod i18n;
 mod i18n_en;
 pub mod ideas;
+pub mod keep_awake;
 pub mod launch;
 pub mod live;
 pub mod mcp;
